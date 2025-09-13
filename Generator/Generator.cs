@@ -1,12 +1,14 @@
 ﻿using CASCLib;
+using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
 
 namespace Minimaps.Generator;
 
-internal class Generator(ILogger logger, string product, string cascRegion)
+internal class Generator(CancellationToken ct, ILogger logger, string product, string cascRegion)
 {
 	private string _cachePath = "\\\\mercury\\Cache"; // TODO: Configure
+	private int _parallelism = 8; // TODO: Configure
 	private bool _useOnline = false;
 
 	internal async Task Generate()
@@ -14,7 +16,7 @@ internal class Generator(ILogger logger, string product, string cascRegion)
 		logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", product, cascRegion);
 
 		// TODO: Both CASC and DBCD are not great in their async usage, as a result blocking is all over the place.
-		// Probably just going to fix it myself? I at least want async chunk f
+		// Probably just going to fix it myself? I at least want async chunk fetching async for parallel pulling/processing BLPs.
 
 		var cascHandlerTask = GenerateHandler();
 		var tactKeysTask = LoadTACT();
@@ -26,16 +28,32 @@ internal class Generator(ILogger logger, string product, string cascRegion)
 		var dbcProvider = new CASCMapDBCProvider(cascHandler);
 		var dbdProvider = new GithubDBDProvider();
 		var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
-		var mapdb = dbcd.Load("Map");
+		var mapDB = dbcd.Load("Map");
 
-		logger?.LogInformation("Found {total} maps", mapdb.Values.Count);
+		logger.LogInformation("Found {total} maps", mapDB.Values.Count);
 
-		// TODO
+		// TODO:
+		// - Punch out WDT file ID for lookup
+		//   - Handle earlier versions - see mphd_flags.wdt_has_maid ≥(8.1.0.28294) client will load ADT using FileDataID instead of filename formatted with "%s\\%s_%d_%d.adt" https://wowdev.wiki/WDT
+
+		await Parallel.ForEachAsync(mapDB.ToDictionary(),
+			new ParallelOptions { MaxDegreeOfParallelism = _parallelism, CancellationToken = ct }, 
+			async (entry, ct) =>
+		{
+			try
+			{
+				await ProcessMapEntry(entry.Key, entry.Value);
+			}
+			catch (Exception ex)
+			{
+				logger.LogError(ex, "Error generating map {mapId}", entry.Key);
+			}
+		});
 	}
 
 	private async Task<CASCHandler> GenerateHandler()
 	{
-		CASCConfig.LoadFlags = LoadFlags.FileIndex; // todo: need more?
+		CASCConfig.LoadFlags = LoadFlags.FileIndex;
 		CASCLib.Logger.Init(); // Ideally feed to ILogger rather than the odd bespoke logger
 		CDNCache.CachePath = Path.Join(_cachePath, "CASC");
 
@@ -43,6 +61,8 @@ internal class Generator(ILogger logger, string product, string cascRegion)
 		handler.Root.SetFlags(LocaleFlags.enUS); // Without this, reading the map DBC fails, not sure yet of where it's utilized
 
 		logger.LogInformation("Initialized CASCHandler for build {build}", handler.Config.BuildName);
+
+		// Blocking main, todo: investigate async open
 
 		return handler;
 	}
@@ -89,17 +109,9 @@ internal class Generator(ILogger logger, string product, string cascRegion)
 		return Path.Combine(_cachePath, "TACTKeys.txt");
 	}
 
-	// From https://github.com/Marlamin/WoWTools.Minimaps/blob/master/WoWTools.MinimapExtract/CASCDBCProvider.cs, todo: what are the magic numbers? what is 1349477? is it always the map db?
-	private class CASCMapDBCProvider(CASCHandler casc) : IDBCProvider
+	private async Task ProcessMapEntry(int mapId, DBCDRow row)
 	{
-		public Stream StreamForTableName(string tableName, string build)
-		{
-			int fileDataID = tableName switch
-			{
-				"Map" => 1349477,
-				_ => throw new Exception("Don't know FileDataID for DBC " + tableName + ", add to switch please or implement listfile.csv reading. <3"), // todo: Listfile
-			};
-			return casc.OpenFile(fileDataID) ?? throw new Exception("Unable to open file with fileDataID " + fileDataID);
-		}
+		logger.LogInformation("Map {id}: {name}", mapId, row.Field<string>("Directory"));
+		await Task.Delay(10); // TODO
 	}
 }

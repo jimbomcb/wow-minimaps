@@ -8,6 +8,13 @@ internal class Program
 {
 	static async Task<int> Main(string[] args)
 	{
+		var cts = new CancellationTokenSource();
+		Console.CancelKeyPress += (sender, eventArgs) =>
+		{
+			eventArgs.Cancel = true;
+			cts.Cancel();
+		};
+
 		var productOpt = new Option<string>("--product")
 		{
 			Description = "CASC Product",
@@ -30,7 +37,7 @@ internal class Program
 			using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
 			ILogger logger = factory.CreateLogger("Generator");
 
-			await new Generator(logger, args.GetValue(productOpt)!, args.GetValue(cascRegionOpt)!).Generate();
+			await new Generator(cts.Token, logger, args.GetValue(productOpt)!, args.GetValue(cascRegionOpt)!).Generate();
 			return 0;
 		});
 		return await rootCommand.Parse(args).InvokeAsync();
