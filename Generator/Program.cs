@@ -1,9 +1,37 @@
-﻿namespace Generator
+﻿using Microsoft.Extensions.Logging;
+using System.CodeDom.Compiler;
+using System.CommandLine;
+
+namespace Minimaps.Generator;
+
+internal class Program
 {
-    internal class Program
-    {
-        static void Main(string[] args)
-        {
-        }
-    }
+	static async Task<int> Main(string[] args)
+	{
+		var productOpt = new Option<string>("--product")
+		{
+			Description = "CASC Product",
+			Required = true
+		};
+
+		var cascRegionOpt = new Option<string>("--casc-region")
+		{
+			Description = "CASC Region",
+			DefaultValueFactory = (_) => "us",
+			Required = true
+		};
+
+		RootCommand rootCommand = new("Minimaps.Generator");
+		rootCommand.Options.Add(productOpt);
+		rootCommand.Options.Add(cascRegionOpt);
+		rootCommand.SetAction(async args =>
+		{
+			using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+			ILogger logger = factory.CreateLogger("Generator");
+
+			await new Generator(logger, args.GetValue(productOpt)!, args.GetValue(cascRegionOpt)!).Generate();
+			return 0;
+		});
+		return await rootCommand.Parse(args).InvokeAsync();
+	}
 }
