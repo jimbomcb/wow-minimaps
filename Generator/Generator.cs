@@ -3,31 +3,31 @@ using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
 using System.IO.Enumeration;
-using static Minimaps.Generator.Generator;
 
 namespace Minimaps.Generator;
 
-internal class Generator(Config config, ILogger logger, CancellationToken cancellationToken)
+internal class Generator
 {
-	public class Config
-	{
-		public string Product { get; set; } = "wow";
-		public string CascRegion { get; set; } = "us";
-		public string CachePath { get; set; } = "\\\\mercury\\Cache"; // TODO: Configure
-		public int Parallelism { get; set; } = 8; // TODO: Configure
-		public bool UseOnline { get; set; } = false;
-		public string FilterId { get; set; } = "*";
-	}
+	private readonly GeneratorConfig _config;
+	private readonly ILogger _logger;
+	private readonly CancellationToken _cancellationToken;
 
-	internal async Task Generate()
+	public Generator(GeneratorConfig config, ILogger logger, CancellationToken cancellationToken)
 	{
+		_config = config;
+		_logger = logger;
+		_cancellationToken = cancellationToken;
+
 		if (string.IsNullOrEmpty(config.CachePath))
 			throw new ArgumentException("CachePath must be set");
 
 		if (string.IsNullOrEmpty(config.FilterId))
 			throw new ArgumentException("FilterId must be set");
+	}
 
-		logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", config.Product, config.CascRegion);
+	internal async Task Generate()
+	{
+		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", _config.Product, _config.CascRegion);
 
 		// TODO: Both CASC and DBCD are not great in their async usage, as a result blocking is all over the place.
 		// Probably just going to fix it myself? I at least want async chunk fetching async for parallel pulling/processing BLPs.
@@ -39,9 +39,7 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 		var cascHandler = await cascHandlerTask;
 
 		// Set up DBCD
-		var dbcProvider = new CASCMapDBCProvider(cascHandler);
-		var dbdProvider = new GithubDBDProvider();
-		var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+		var dbcd = new DBCD.DBCD(new CASCMapDBCProvider(cascHandler), new GithubDBDProvider());
 		var mapDB = dbcd.Load("Map");
 		if (mapDB.Count == 0)
 			throw new Exception("No maps found in Map DBC");
@@ -51,12 +49,12 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 		//   - Handle earlier versions - see mphd_flags.wdt_has_maid ≥(8.1.0.28294) client will load ADT using FileDataID instead of filename formatted with "%s\\%s_%d_%d.adt" https://wowdev.wiki/WDT
 		// TODO: - Report success/failure #
 
-		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(config.FilterId, x.Field<int>("ID").ToString()));
+		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString()));
 
-		logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
+		_logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
 
 		await Parallel.ForEachAsync(filteredRows,
-			new ParallelOptions { MaxDegreeOfParallelism = config.Parallelism, CancellationToken = cancellationToken }, 
+			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken }, 
 			async (entry, ct) =>
 			{
 				var mapId = entry.Field<int>("ID");
@@ -67,7 +65,7 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 				}
 				catch (Exception ex)
 				{
-					logger.LogError(ex, "Error generating map {mapId}", mapId);
+					_logger.LogError(ex, "Error generating map {mapId}", mapId);
 				}
 			});
 	}
@@ -75,13 +73,13 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 	private async Task<CASCHandler> GenerateHandler()
 	{
 		CASCConfig.LoadFlags = LoadFlags.FileIndex;
-		CASCLib.Logger.Init(); // Ideally feed to ILogger rather than the odd bespoke logger
-		CDNCache.CachePath = Path.Join(config.CachePath, "CASC");
+		CASCLib.Logger.Init(); // Ideally feed to ILogger rather than the odd bespoke _logger
+		CDNCache.CachePath = Path.Join(_config.CachePath, "CASC");
 
-		var handler = config.UseOnline ? CASCHandler.OpenOnlineStorage(config.Product, config.CascRegion) : CASCHandler.OpenLocalStorage("C:\\World of Warcraft", config.Product);
+		var handler = _config.UseOnline ? CASCHandler.OpenOnlineStorage(_config.Product, _config.CascRegion) : CASCHandler.OpenLocalStorage("C:\\World of Warcraft", _config.Product);
 		handler.Root.SetFlags(LocaleFlags.enUS); // Without this, reading the map DBC fails, not sure yet of where it's utilized
 
-		logger.LogInformation("Initialized CASCHandler for build {build}", handler.Config.BuildName);
+		_logger.LogInformation("Initialized CASCHandler for build {build}", handler.Config.BuildName);
 
 		// Blocking main, todo: investigate async open
 
@@ -93,23 +91,23 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 		using var httpClient = new HttpClient();
 
 		string? cachedETag = null;
-		if (File.Exists(Path.Combine(config.CachePath, "TACTKeys.txt.etag")))
+		if (File.Exists(Path.Combine(_config.CachePath, "TACTKeys.txt.etag")))
 		{
-			cachedETag = await File.ReadAllTextAsync(Path.Combine(config.CachePath, "TACTKeys.txt.etag"));
-			logger.LogTrace("Found cached TACTKeys ETag: {ETag}", cachedETag);
+			cachedETag = await File.ReadAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"));
+			_logger.LogTrace("Found cached TACTKeys ETag: {ETag}", cachedETag);
 			httpClient.DefaultRequestHeaders.TryAddWithoutValidation("If-None-Match", cachedETag);
 		}
 
 		var tactRequest = await httpClient.GetAsync("https://github.com/wowdev/TACTKeys/raw/master/WoW.txt");
 		if (tactRequest.StatusCode == System.Net.HttpStatusCode.NotModified)
 		{
-			logger?.LogInformation("TACTKeys not modified since last fetch, using cached version.");
-			return Path.Combine(config.CachePath, "TACTKeys.txt");
+			_logger?.LogInformation("TACTKeys not modified since last fetch, using cached version.");
+			return Path.Combine(_config.CachePath, "TACTKeys.txt");
 		}
 
 		tactRequest.EnsureSuccessStatusCode(); // If it's not NotModified, it should be a valid 200
 		var newETag = tactRequest.Headers.ETag?.Tag ?? throw new Exception("No ETag header in TACTKeys response");
-		logger.LogInformation("Fetched new TACTKeys (etag {tag})", newETag);
+		_logger.LogInformation("Fetched new TACTKeys (etag {tag})", newETag);
 
 		// The TACTKeys repo provides [Name][Space][Value] and CascLib is hard-coded to take ; separated, so bridge the gap...
 		// "The format is a space separated file with the 16-char key lookup (or name) and the 32-char key itself, both encoded as hex."
@@ -123,11 +121,11 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 		}
 
 		await Task.WhenAll(
-			File.WriteAllTextAsync(Path.Combine(config.CachePath, "TACTKeys.txt"), cleanTact),
-			File.WriteAllTextAsync(Path.Combine(config.CachePath, "TACTKeys.txt.etag"), newETag)
+			File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt"), cleanTact),
+			File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"), newETag)
 		);
 
-		return Path.Combine(config.CachePath, "TACTKeys.txt");
+		return Path.Combine(_config.CachePath, "TACTKeys.txt");
 	}
 
 	private async Task ProcessMapRow(int mapId, DBCDRow row)
@@ -139,11 +137,11 @@ internal class Generator(Config config, ILogger logger, CancellationToken cancel
 		var wdtFileId = row.Field<int?>("WdtFileDataID") ?? throw new Exception("No WdtFileDataID found in Map DB");
 		if (wdtFileId == 0)
 		{
-			logger.LogWarning("Map {id} has no WDT (WdtFileDataID=0)", name);
+			_logger.LogWarning("Map {id} has no WDT (WdtFileDataID=0)", name);
 			return;
 		}
 
-		logger.LogInformation("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
+		_logger.LogInformation("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
 
 	}
 

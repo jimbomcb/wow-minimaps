@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System.CodeDom.Compiler;
 using System.CommandLine;
 
 namespace Minimaps.Generator;
@@ -46,7 +45,7 @@ internal class Program
 			using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
 			ILogger logger = factory.CreateLogger("Generator");
 
-			var generator = new Generator(new Generator.Config
+			var generator = new Generator(new()
 			{
 				Product = args.GetValue(productOpt)!,
 				CascRegion = args.GetValue(cascRegionOpt)!,
