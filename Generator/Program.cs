@@ -11,6 +11,7 @@ internal class Program
 		var productOpt = new Option<string>("--product")
 		{
 			Description = "CASC Product",
+			DefaultValueFactory = (_) => "wowt",
 			Required = true
 		};
 
