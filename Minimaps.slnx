@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/External/">
+    <Project Path="External/CascLib/CascLib/CascLib.csproj" />
+    <Project Path="External/DBCD/DBCD.IO/DBCD.IO.csproj" />
+    <Project Path="External/DBCD/DBCD/DBCD.csproj" />
+  </Folder>
+  <Project Path="Generator/Generator.csproj" />
+</Solution>
