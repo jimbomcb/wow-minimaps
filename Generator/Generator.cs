@@ -61,7 +61,7 @@ internal class Generator
 
 				try
 				{
-					await ProcessMapRow(mapId, entry);
+					await ProcessMapRow(cascHandler, mapId, entry);
 				}
 				catch (Exception ex)
 				{
@@ -128,7 +128,7 @@ internal class Generator
 		return Path.Combine(_config.CachePath, "TACTKeys.txt");
 	}
 
-	private async Task ProcessMapRow(int mapId, DBCDRow row)
+	private async Task ProcessMapRow(CASCHandler cascHandler, int mapId, DBCDRow row)
 	{
 		var name = row.Field<string>("MapName_lang");
 		if (string.IsNullOrEmpty(name))
@@ -143,6 +143,15 @@ internal class Generator
 
 		_logger.LogInformation("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
 
+		// TODO: Check if content hash has changed against archived map/chunk for this specific build/product combo
+
+		using var fileStream = cascHandler.OpenFile(wdtFileId);
+
+		// TODO: Find the MAID chunk, parse out BLP data for changed/new chunks
+		// TODO: Topo map from WDL https://wowdev.wiki/WDL/v18
+
+		// It looks like TACTSharp has a decent BLTE parsing implementation so go that route rather than parsing casclib streams
 	}
+
 
 }
