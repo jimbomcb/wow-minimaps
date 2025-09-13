@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Generate EK": {
+      "commandName": "Project",
+      "commandLineArgs": "--filter-id 0"
+    }
+  }
+}

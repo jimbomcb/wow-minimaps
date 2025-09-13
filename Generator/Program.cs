@@ -22,6 +22,7 @@ internal class Program
 			Required = true
 		};
 
+
 		var cascRegionOpt = new Option<string>("--casc-region")
 		{
 			Description = "CASC Region",
@@ -29,15 +30,30 @@ internal class Program
 			Required = true
 		};
 
+		var filterId = new Option<string>("--filter-id")
+		{
+			Description = "Map ID filtering (* supported)",
+			DefaultValueFactory = (_) => "*",
+			Required = true
+		};
+
 		RootCommand rootCommand = new("Minimaps.Generator");
 		rootCommand.Options.Add(productOpt);
 		rootCommand.Options.Add(cascRegionOpt);
+		rootCommand.Options.Add(filterId);
 		rootCommand.SetAction(async args =>
 		{
 			using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
 			ILogger logger = factory.CreateLogger("Generator");
 
-			await new Generator(cts.Token, logger, args.GetValue(productOpt)!, args.GetValue(cascRegionOpt)!).Generate();
+			var generator = new Generator(new Generator.Config
+			{
+				Product = args.GetValue(productOpt)!,
+				CascRegion = args.GetValue(cascRegionOpt)!,
+				FilterId = args.GetValue(filterId)!,
+			}, logger, cts.Token);
+
+			await generator.Generate();
 			return 0;
 		});
 		return await rootCommand.Parse(args).InvokeAsync();
