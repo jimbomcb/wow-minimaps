@@ -3,6 +3,7 @@ using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
 using System.IO.Enumeration;
+using System.Threading.Channels;
 
 namespace Minimaps.Generator;
 
@@ -11,6 +12,8 @@ internal class Generator
 	private readonly GeneratorConfig _config;
 	private readonly ILogger _logger;
 	private readonly CancellationToken _cancellationToken;
+
+	public readonly record struct MinimapChunk(int mapId, int tileX, int tileY, uint fileId);
 
 	public Generator(GeneratorConfig config, ILogger logger, CancellationToken cancellationToken)
 	{
@@ -48,21 +51,43 @@ internal class Generator
 
 		_logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
 
-		await Parallel.ForEachAsync(filteredRows,
-			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken }, 
+		// Set up the producer/consumer for processing
+		var queueChannel = Channel.CreateUnbounded<MinimapChunk>();
+
+		var produceChunks = Parallel.ForEachAsync(filteredRows,
+			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
 			async (entry, ct) =>
 			{
 				var mapId = entry.Field<int>("ID");
 
 				try
 				{
-					await ProcessMapRow(cascHandler, mapId, entry);
+					await ProcessMapRow(queueChannel, cascHandler, mapId, entry);
 				}
 				catch (Exception ex)
 				{
 					_logger.LogError(ex, "Error generating map {mapId}", mapId);
 				}
+			})
+			.ContinueWith(x => {
+				queueChannel.Writer.Complete();
+				_logger.LogInformation("Map producer complete.");
 			});
+
+		// TODO: Consumer 
+		var consumeChunks = Task.Run(async () =>
+		{
+			await foreach(MinimapChunk chunk in queueChannel.Reader.ReadAllAsync())
+			{
+				_logger.LogInformation("Map {mapId} Tile {tileX},{tileY} FileDataID {fileId}", chunk.mapId, chunk.tileX, chunk.tileY, chunk.fileId);
+			}
+
+			_logger.LogInformation("Map consumer complete.");
+		});
+
+		await Task.WhenAll(produceChunks, consumeChunks);
+
+		_logger.LogInformation("Generation complete.");
 	}
 
 	private async Task<CASCHandler> GenerateHandler()
@@ -123,7 +148,7 @@ internal class Generator
 		return Path.Combine(_config.CachePath, "TACTKeys.txt");
 	}
 
-	private async Task ProcessMapRow(CASCHandler cascHandler, int mapId, DBCDRow dbRow)
+	private async Task ProcessMapRow(Channel<MinimapChunk> channel, CASCHandler cascHandler, int mapId, DBCDRow dbRow)
 	{
 		var name = dbRow.Field<string>("MapName_lang");
 		if (string.IsNullOrEmpty(name))
@@ -146,8 +171,6 @@ internal class Generator
 		// TODO: Find the MAID chunk, parse out BLP data for changed/new chunks
 		// TODO: Topo map from WDL https://wowdev.wiki/WDL/v18
 
-		var loadedTiles = new List<(int x, int y, uint file)>(64 * 64);
-
 		// Chunked structure of int32 token, int32 size, byte[size]
 		while (fileStream.Position < fileStream.Length)
 		{
@@ -159,6 +182,7 @@ internal class Generator
 			{
 				// Pull out BLPs and queue the async processing
 				// https://wowdev.wiki/WDT#MAID_chunk 7x uint32 offset for the minimap texture id
+				int loadedTiles = 0;
 
 				for (int row = 0; row < 64; row++)
 				{
@@ -168,30 +192,21 @@ internal class Generator
 						var chunkId = fileReader.ReadUInt32();
 						if (chunkId > 0)
 						{
-							loadedTiles.Add((col, row, chunkId));
+							await channel.Writer.WriteAsync(new MinimapChunk(mapId, col, row, chunkId), _cancellationToken);
+							loadedTiles++;
 						}
 					}
 				}
 
-				_logger.LogInformation("Map {id}: {name} has {count} minimap tiles", mapId, name, loadedTiles.Count);
+				_logger.LogInformation("Map {id}: {name} has {count} minimap tiles", mapId, name, loadedTiles);
+				return;
 			}
 			else
 			{
 				fileStream.Position += header.size;
 			}
 		}
-
-		if (loadedTiles.Count == 0)
-		{
-			_logger.LogWarning("Map {id}: {name} has no minimap tiles", mapId, name);
-			return;
-		}
-
-		// TODO: Process tile data, we need to get the hash, calculate if changed, process changed tiles and register 
-
 	}
-
-
 }
 
 public readonly record struct ChunkHeader(char[] ident, uint size);
