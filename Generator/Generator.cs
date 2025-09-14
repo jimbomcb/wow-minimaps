@@ -12,15 +12,15 @@ using TACTSharp;
 
 namespace Minimaps.Generator;
 
+public readonly record struct MapData(int ID, string Name, List<MinimapTile> Tiles);
+public readonly record struct MinimapTile(int X, int Y, uint fileId);
+
 internal class Generator
 {
 	private readonly GeneratorConfig _config;
 	private readonly ILogger _logger;
 	private readonly CancellationToken _cancellationToken;
 	private BuildInstance _buildInstance = null;
-
-	public readonly record struct MinimapData(int mapId, List<MinimapTile> tiles);
-	public readonly record struct MinimapTile(int tileX, int tileY, uint fileId);
 
 	public Generator(GeneratorConfig config, ILogger logger, CancellationToken cancellationToken)
 	{
@@ -54,7 +54,7 @@ internal class Generator
 		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString()));
 		_logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
 
-		var mapChannel = Channel.CreateBounded<MinimapData>(10);
+		var mapChannel = Channel.CreateBounded<MapData>(10);
 
 		var produceMapData = Parallel.ForEachAsync(filteredRows,
 			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
@@ -67,9 +67,16 @@ internal class Generator
 					var minimapTiles = await ProcessMapRow(mapId, entry);
 					await mapChannel.Writer.WriteAsync(minimapTiles, ct);
 				}
+				catch (MapGenerationException ex)
+				{
+					// TODO: We need better TACTSharp exception handling to figure out if this is a transient error, it's something that can't be loaded,
+					// never existed, existed but can't be downloaded etc...
+					_logger.LogWarning(ex, "Exception while generating map {ID} ({name}) is referencing WDT data that can't be found", ex.MapData.ID, ex.MapData.Name);
+				}
 				catch (Exception ex)
 				{
-					_logger.LogError(ex, "Error generating map {mapId}", mapId);
+					_logger.LogError(ex, "Unhandled exception generating map {ID}", mapId);
+					throw;
 				}
 			})
 			.ContinueWith(x =>
@@ -92,18 +99,18 @@ internal class Generator
 		_logger.LogInformation("Generation complete.");
 	}
 
-	private async Task<MinimapData> ProcessMapRow(int mapId, DBCDRow dbRow)
+	private async Task<MapData> ProcessMapRow(int mapId, DBCDRow dbRow)
 	{
-		var mapData = new MinimapData(mapId, new());
-
 		var name = dbRow.Field<string>("MapName_lang");
 		if (string.IsNullOrEmpty(name))
 			name = dbRow.Field<string>("Directory") ?? throw new Exception("No Directory found in Map DB");
 
+		var mapData = new MapData(mapId, name, new());
+
 		var wdtFileId = dbRow.Field<int?>("WdtFileDataID") ?? throw new Exception("No WdtFileDataID found in Map DB");
 		if (wdtFileId == 0)
 		{
-			_logger.LogWarning("Map {id} has no WDT (WdtFileDataID=0)", name);
+			_logger.LogWarning("Map {id} is referencing no WDTs (WdtFileDataID=0)", name);
 			return mapData;
 		}
 
@@ -112,16 +119,15 @@ internal class Generator
 		// TODO: How do we store and represent to the browser that that a maps WDT data is referenced
 		// TODO: Can we not more gracefully stream the WDT from TACTSharp rather than just loading the whole byte array..?
 
-
 		Stream fileStream;
 		try
 		{
 			var fileBytes = _buildInstance.OpenFileByFDID((uint)wdtFileId);
 			fileStream = new MemoryStream(fileBytes);
 		}
-		catch (Exception ex)
+		catch (Exception ex) // TACTHandler's questionable exception handling doesn't give us much to work with 
 		{
-			throw new MapGenerationException(mapId, $"Map {mapId} ({name}) is referencing missing WDT data (FileID:{wdtFileId})", ex);	
+			throw new MapGenerationException(mapData, $"Unable to load {wdtFileId} processing map {mapData.ID} ({mapData.Name})", ex);
 		}
 		
 		using var fileReader = new BinaryReader(fileStream);
@@ -149,12 +155,12 @@ internal class Generator
 						var chunkId = fileReader.ReadUInt32();
 						if (chunkId > 0)
 						{
-							mapData.tiles.Add(new(col, row, chunkId));
+							mapData.Tiles.Add(new(col, row, chunkId));
 						}
 					}
 				}
 
-				_logger.LogInformation("Map {id}: {name} has {count} minimap tiles", mapId, name, mapData.tiles.Count);
+				_logger.LogInformation("Map {id}: {name} has {count} minimap Tiles", mapId, name, mapData.Tiles.Count);
 				return mapData;
 			}
 			else
@@ -166,17 +172,17 @@ internal class Generator
 		throw new Exception("Unable to find MAID header in WDB");
 	}
 
-	private async Task ProcessMapData(MinimapData mapData, CancellationToken cancellationToken)
+	private async Task ProcessMapData(MapData mapData, CancellationToken cancellationToken)
 	{
 		ConcurrentDictionary<string, SemaphoreSlim> _writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();
 
-		await Parallel.ForEachAsync(mapData.tiles,
+		await Parallel.ForEachAsync(mapData.Tiles,
 			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
 			async (entry, ct) =>
 		{
 			try
 			{
-				await ProcessMapTile(_writeSemaphores, mapData.mapId, entry, _cancellationToken);
+				await ProcessMapTile(_writeSemaphores, mapData.ID, entry, _cancellationToken);
 			}
 			catch (Exception ex)
 			{

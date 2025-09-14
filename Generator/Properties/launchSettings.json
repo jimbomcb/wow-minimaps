@@ -4,6 +4,10 @@
       "commandName": "Project",
       "commandLineArgs": "--filter-id 0"
     },
+    "Generate 2451": {
+      "commandName": "Project",
+      "commandLineArgs": "--filter-id 24??"
+    },
     "Generate All": {
       "commandName": "Project",
       "commandLineArgs": ""
