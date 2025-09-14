@@ -241,7 +241,7 @@ internal class Generator
 	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, int mapId, MinimapTile tile, CancellationToken cancellationToken)
 	{
 		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
-		if (fileRootEntry.Count != 1) throw new Exception($"> 1 mipmap found on map id {mapId}"); // TODO: Classic Warsong Gulch has > 1 mipmap tiles? 
+		if (fileRootEntry.Count != 1) throw new Exception($"> 1 file entries found on map id {mapId}"); // TODO: Classic Warsong Gulch has > 1 file versions? 
 
 		var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
 
