@@ -262,7 +262,7 @@ internal class Generator
 			using MemoryStream mapStream = new MemoryStream(mapFileBytes);
 			using var blpFile = new BLPFile(mapStream);
 
-			if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
+			if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps? I have yet to find one and it doesn't make sense for them to be mipmapped
 				throw new Exception("TODO");
 
 			var mapBytes = blpFile.GetPixels(0, out int width, out int height);
