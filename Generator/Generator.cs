@@ -105,6 +105,7 @@ internal class Generator
 	private async Task<CASCHandler> GenerateHandler()
 	{
 		CASCConfig.LoadFlags = LoadFlags.FileIndex;
+		CASCConfig.ThrowOnFileNotFound = true;
 		CASCLib.Logger.Init(); // Ideally feed to ILogger rather than the odd bespoke _logger
 		CDNCache.CachePath = Path.Join(_config.CachePath, "CASC");
 
@@ -175,9 +176,20 @@ internal class Generator
 			return mapData;
 		}
 
-		_logger.LogTrace("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
-		using var fileStream = _cascHandler.OpenFile(wdtFileId);
-		using var fileReader = new BinaryReader(fileStream ?? throw new Exception("Failed to open WDT file " + wdtFileId));
+		_logger.LogInformation("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
+
+		// TODO: How do we store and represent to the browser that that a maps WDT data is referenced
+		Stream fileStream;
+		try
+		{
+			fileStream = _cascHandler.OpenFile(wdtFileId);
+		}
+		catch (FileNotFoundException ex)
+		{
+			throw new MapGenerationException(mapId, $"Map {mapId} ({name}) is referencing missing WDT data (FileID:{wdtFileId})", ex);	
+		}
+		
+		using var fileReader = new BinaryReader(fileStream);
 
 		// TODO: Check if content hash has changed against archived map/chunk for this specific build/product combo
 		// TODO: Find the MAID chunk, parse out BLP data for changed/new chunks
@@ -305,4 +317,3 @@ public static class BinaryReaderExt
 		return new ChunkHeader { ident = ident, size = size };
 	}
 }
-
