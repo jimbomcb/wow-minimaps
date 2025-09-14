@@ -9,6 +9,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.IO.Enumeration;
 using System.Threading.Channels;
+using TACTSharp;
 
 namespace Minimaps.Generator;
 
@@ -18,6 +19,7 @@ internal class Generator
 	private readonly ILogger _logger;
 	private readonly CancellationToken _cancellationToken;
 	private CASCHandler _cascHandler = null;
+	private BuildInstance _buildInstance = null;
 
 	public readonly record struct MinimapData(int mapId, List<MinimapTile> tiles);
 	public readonly record struct MinimapTile(int tileX, int tileY, uint fileId);
@@ -37,10 +39,12 @@ internal class Generator
 
 	internal async Task Generate()
 	{
-		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", _config.Product, _config.CascRegion);
+		//  TEMP TEMP: Swapping CASCLib with TACTSharp
+		_buildInstance = new BuildInstance();
+		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
+		_buildInstance.Load();
 
-		// TODO: Both CASC and DBCD are not great in their async usage, as a result blocking is all over the place.
-		// TACTSharp looks like the newest version, but is more focused on a file based store, when I just want to Stream-read and let the backend source it as appropriate..
+		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", _config.Product, _config.CascRegion);
 
 		var cascHandlerTask = GenerateHandler();
 		var tactKeysTask = LoadTACT();
@@ -81,7 +85,7 @@ internal class Generator
 				_logger.LogInformation("Map database processed.");
 			});
 
-		// TODO: Parallel consumption
+		// TODO: Parallel consumption, right now cascHandler is just going to block anyway
 		var consumeMapData = Task.Run(async () =>
 		{
 			await foreach (var mapData in mapChannel.Reader.ReadAllAsync(_cancellationToken))
@@ -218,10 +222,20 @@ internal class Generator
 		{
 			try
 			{
-				// TODO: Check hash
+				var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
+				if (fileRootEntry.Count != 1) throw new Exception("TODO"); // TODO: Can we have > 1?
 
-				using var fileStream = _cascHandler.OpenFile((int)tile.fileId); // Why does the database provide unsigned IDs while CascHandler takes signed?
-				using var blpFile = new BLPFile(fileStream);
+				var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
+
+				if (File.Exists(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp")))
+				{
+					_logger.LogInformation("Skipping existing hash {mapHash}", mapHash);
+					return;
+				}
+
+				var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
+				using MemoryStream mapStream = new MemoryStream(mapFileBytes);
+				using var blpFile = new BLPFile(mapStream);
 
 				if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
 					throw new Exception("TODO");
@@ -229,20 +243,24 @@ internal class Generator
 				var mapBytes = blpFile.GetPixels(0, out int width, out int height);
 				if (mapBytes == null) 
 					throw new Exception("Failed to decode BLP");
-
+				
 				using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
-
+				
 				// Initial size testing shows a png at 230kb
 				//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
 				//   webp lossless is 165kb
-				var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{tile.tileX}_{tile.tileY}.webp"), new WebpEncoder()
+				var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
 				{
 					UseAlphaCompression = false,
 					FileFormat = WebpFileFormatType.Lossless,
+					Method = WebpEncodingMethod.BestQuality,
+					EntropyPasses = 10,
 					Quality = 100
 				});
-				var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{tile.tileX}_{tile.tileY}.png"));
+				var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
 				await Task.WhenAll(saveWebp, savePng);
+				
+				_logger.LogInformation("Wrote tile {tileX}_{tileY}", tile.tileX, tile.tileY);
 			}
 			catch(Exception ex)
 			{
