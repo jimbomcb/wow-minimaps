@@ -7,3 +7,6 @@
 [submodule "External/TACTSharp"]
 	path = External/TACTSharp
 	url = https://github.com/wowdev/TACTSharp.git
+[submodule "External/BLPSharp"]
+	path = External/BLPSharp
+	url = https://github.com/wowdev/BLPSharp.git

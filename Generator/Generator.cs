@@ -146,6 +146,8 @@ internal class Generator
 		// TODO: Find the MAID chunk, parse out BLP data for changed/new chunks
 		// TODO: Topo map from WDL https://wowdev.wiki/WDL/v18
 
+		var loadedTiles = new List<(int x, int y, uint file)>(64 * 64);
+
 		// Chunked structure of int32 token, int32 size, byte[size]
 		while (fileStream.Position < fileStream.Length)
 		{
@@ -157,7 +159,6 @@ internal class Generator
 			{
 				// Pull out BLPs and queue the async processing
 				// https://wowdev.wiki/WDT#MAID_chunk 7x uint32 offset for the minimap texture id
-				var loadedTiles = new List<(int x, int y, uint file)>(64*64);
 
 				for (int row = 0; row < 64; row++)
 				{
@@ -179,6 +180,15 @@ internal class Generator
 				fileStream.Position += header.size;
 			}
 		}
+
+		if (loadedTiles.Count == 0)
+		{
+			_logger.LogWarning("Map {id}: {name} has no minimap tiles", mapId, name);
+			return;
+		}
+
+		// TODO: Process tile data, we need to get the hash, calculate if changed, process changed tiles and register 
+
 	}
 
 
