@@ -41,6 +41,9 @@ internal class Generator
 	{
 		//  TEMP TEMP: Swapping CASCLib with TACTSharp
 		_buildInstance = new BuildInstance();
+		_buildInstance.Settings.CacheDir = _config.CachePath;
+		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
+		_buildInstance.Settings.TryCDN = false;
 		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
 		_buildInstance.Load();
 
@@ -218,56 +221,53 @@ internal class Generator
 
 	private async Task ProcessMapData(MinimapData mapData, CancellationToken cancellationToken)
 	{
-		foreach(var tile in mapData.tiles)
+		await Parallel.ForEachAsync(mapData.tiles,
+			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
+			async (entry, ct) =>
 		{
-			try
-			{
-				var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
-				if (fileRootEntry.Count != 1) throw new Exception("TODO"); // TODO: Can we have > 1?
+			await ProcessMapTile(mapData.mapId, entry, _cancellationToken);
+		}); 
+	}
 
-				var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
+	private async Task ProcessMapTile(int mapId, MinimapTile tile, CancellationToken cancellationToken)
+	{
+		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
+		if (fileRootEntry.Count != 1) throw new Exception("TODO"); // TODO: Can we have > 1?
 
-				if (File.Exists(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp")))
-				{
-					_logger.LogInformation("Skipping existing hash {mapHash}", mapHash);
-					return;
-				}
+		var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
 
-				var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
-				using MemoryStream mapStream = new MemoryStream(mapFileBytes);
-				using var blpFile = new BLPFile(mapStream);
-
-				if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
-					throw new Exception("TODO");
-
-				var mapBytes = blpFile.GetPixels(0, out int width, out int height);
-				if (mapBytes == null) 
-					throw new Exception("Failed to decode BLP");
-				
-				using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
-				
-				// Initial size testing shows a png at 230kb
-				//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
-				//   webp lossless is 165kb
-				var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
-				{
-					UseAlphaCompression = false,
-					FileFormat = WebpFileFormatType.Lossless,
-					Method = WebpEncodingMethod.BestQuality,
-					EntropyPasses = 10,
-					Quality = 100
-				});
-				var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
-				await Task.WhenAll(saveWebp, savePng);
-				
-				_logger.LogInformation("Wrote tile {tileX}_{tileY}", tile.tileX, tile.tileY);
-			}
-			catch(Exception ex)
-			{
-				_logger.LogError(ex, "error");
-			}
-
+		if (File.Exists(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp")))
+		{
+			_logger.LogInformation("Skipping existing hash {mapHash}", mapHash);
+			return;
 		}
+
+		var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
+		using MemoryStream mapStream = new MemoryStream(mapFileBytes);
+		using var blpFile = new BLPFile(mapStream);
+
+		if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
+			throw new Exception("TODO");
+
+		var mapBytes = blpFile.GetPixels(0, out int width, out int height);
+		if (mapBytes == null)
+			throw new Exception("Failed to decode BLP");
+
+		using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
+
+		// Initial size testing shows a png at 230kb
+		//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
+		//   webp lossless is 165kb
+		var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
+		{
+			UseAlphaCompression = false,
+			FileFormat = WebpFileFormatType.Lossless,
+			Method = WebpEncodingMethod.BestQuality,
+			EntropyPasses = 10,
+			Quality = 100
+		});
+		var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
+		await Task.WhenAll(saveWebp, savePng);
 	}
 }
 
