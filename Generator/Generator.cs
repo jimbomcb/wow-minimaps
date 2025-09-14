@@ -30,7 +30,7 @@ internal class Generator
 		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", _config.Product, _config.CascRegion);
 
 		// TODO: Both CASC and DBCD are not great in their async usage, as a result blocking is all over the place.
-		// Probably just going to fix it myself? I at least want async chunk fetching async for parallel pulling/processing BLPs.
+		// TACTSharp looks like the newest version, but is more focused on a file based store, when I just want to Stream-read and let the backend source it as appropriate..
 
 		var cascHandlerTask = GenerateHandler();
 		var tactKeysTask = LoadTACT();
@@ -43,11 +43,6 @@ internal class Generator
 		var mapDB = dbcd.Load("Map");
 		if (mapDB.Count == 0)
 			throw new Exception("No maps found in Map DBC");
-
-		// TODO:
-		// - Punch out WDT file ID for lookup
-		//   - Handle earlier versions - see mphd_flags.wdt_has_maid ≥(8.1.0.28294) client will load ADT using FileDataID instead of filename formatted with "%s\\%s_%d_%d.adt" https://wowdev.wiki/WDT
-		// TODO: - Report success/failure #
 
 		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString()));
 
@@ -77,7 +72,7 @@ internal class Generator
 		CDNCache.CachePath = Path.Join(_config.CachePath, "CASC");
 
 		var handler = _config.UseOnline ? CASCHandler.OpenOnlineStorage(_config.Product, _config.CascRegion) : CASCHandler.OpenLocalStorage("C:\\World of Warcraft", _config.Product);
-		handler.Root.SetFlags(LocaleFlags.enUS); // Without this, reading the map DBC fails, not sure yet of where it's utilized
+		handler.Root.SetFlags(LocaleFlags.enUS);
 
 		_logger.LogInformation("Initialized CASCHandler for build {build}", handler.Config.BuildName);
 
@@ -146,12 +141,43 @@ internal class Generator
 		// TODO: Check if content hash has changed against archived map/chunk for this specific build/product combo
 
 		using var fileStream = cascHandler.OpenFile(wdtFileId);
+		using var fileReader = new BinaryReader(fileStream ?? throw new Exception("Failed to open WDT file " + wdtFileId));
 
 		// TODO: Find the MAID chunk, parse out BLP data for changed/new chunks
 		// TODO: Topo map from WDL https://wowdev.wiki/WDL/v18
 
-		// It looks like TACTSharp has a decent BLTE parsing implementation so go that route rather than parsing casclib streams
+		// Chunked structure of int32 token, int32 size, byte[size]
+		while (fileStream.Position < fileStream.Length)
+		{
+			var header = fileReader.ReadChunkHeader();
+			if (header.ident == null || header.ident.Length != 4)
+				throw new Exception("Invalid chunk ident");
+
+			if (header.ident[0] == 'M' && header.ident[1] == 'A' && header.ident[2] == 'I' && header.ident[3] == 'D')
+			{
+				// TODO: Pull out BLPs and queue the async processing
+			}
+			else
+			{
+				fileStream.Position += header.size;
+			}
+		}
 	}
 
 
 }
+
+public readonly record struct ChunkHeader(char[] ident, uint size);
+
+public static class BinaryReaderExt
+{
+	public static ChunkHeader ReadChunkHeader(this BinaryReader reader)
+	{
+		ArgumentNullException.ThrowIfNull(reader);
+		var ident = reader.ReadChars(4);
+		if (BitConverter.IsLittleEndian) Array.Reverse(ident);
+		var size = reader.ReadUInt32();
+		return new ChunkHeader { ident = ident, size = size };
+	}
+}
+

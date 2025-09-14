@@ -3,6 +3,7 @@
     <Project Path="External/CascLib/CascLib/CascLib.csproj" />
     <Project Path="External/DBCD/DBCD.IO/DBCD.IO.csproj" />
     <Project Path="External/DBCD/DBCD/DBCD.csproj" />
+    <Project Path="External/TACTSharp/TACTSharp/TACTSharp.csproj" />
   </Folder>
   <Project Path="Generator/Generator.csproj" />
 </Solution>
