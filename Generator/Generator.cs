@@ -43,7 +43,7 @@ internal class Generator
 		_buildInstance = new BuildInstance();
 		_buildInstance.Settings.CacheDir = _config.CachePath;
 		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
-		_buildInstance.Settings.TryCDN = false;
+		_buildInstance.Settings.TryCDN = true;
 		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
 		_buildInstance.Load();
 
@@ -221,53 +221,74 @@ internal class Generator
 
 	private async Task ProcessMapData(MinimapData mapData, CancellationToken cancellationToken)
 	{
+		ConcurrentDictionary<string, SemaphoreSlim> _writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();
+
 		await Parallel.ForEachAsync(mapData.tiles,
 			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
 			async (entry, ct) =>
 		{
-			await ProcessMapTile(mapData.mapId, entry, _cancellationToken);
+			try
+			{
+				await ProcessMapTile(_writeSemaphores, mapData.mapId, entry, _cancellationToken);
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, "Unhandled map tile processing exception");
+			}
 		}); 
 	}
 
-	private async Task ProcessMapTile(int mapId, MinimapTile tile, CancellationToken cancellationToken)
+	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, int mapId, MinimapTile tile, CancellationToken cancellationToken)
 	{
 		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
-		if (fileRootEntry.Count != 1) throw new Exception("TODO"); // TODO: Can we have > 1?
+		if (fileRootEntry.Count != 1) throw new Exception($"> 1 mipmap found on map id {mapId}"); // TODO: Classic Warsong Gulch has > 1 mipmap tiles? 
 
 		var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
 
-		if (File.Exists(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp")))
+		var fileSemaphore = writeSemaphores.GetOrAdd(mapHash, new SemaphoreSlim(1, 1));
+		await fileSemaphore.WaitAsync(cancellationToken);
+
+		try
 		{
-			_logger.LogInformation("Skipping existing hash {mapHash}", mapHash);
-			return;
+			cancellationToken.ThrowIfCancellationRequested();
+
+			if (File.Exists(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp")))
+			{
+				_logger.LogTrace("Skipping existing hash {mapHash}", mapHash);
+				return;
+			}
+
+			var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
+			using MemoryStream mapStream = new MemoryStream(mapFileBytes);
+			using var blpFile = new BLPFile(mapStream);
+
+			if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
+				throw new Exception("TODO");
+
+			var mapBytes = blpFile.GetPixels(0, out int width, out int height);
+			if (mapBytes == null)
+				throw new Exception("Failed to decode BLP");
+
+			using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
+
+			// Initial size testing shows a png at 230kb
+			//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
+			//   webp lossless is 165kb
+			var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
+			{
+				UseAlphaCompression = false,
+				FileFormat = WebpFileFormatType.Lossless,
+				Method = WebpEncodingMethod.BestQuality,
+				EntropyPasses = 10,
+				Quality = 100
+			});
+			var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
+			await Task.WhenAll(saveWebp, savePng);
 		}
-
-		var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
-		using MemoryStream mapStream = new MemoryStream(mapFileBytes);
-		using var blpFile = new BLPFile(mapStream);
-
-		if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps?
-			throw new Exception("TODO");
-
-		var mapBytes = blpFile.GetPixels(0, out int width, out int height);
-		if (mapBytes == null)
-			throw new Exception("Failed to decode BLP");
-
-		using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
-
-		// Initial size testing shows a png at 230kb
-		//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
-		//   webp lossless is 165kb
-		var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
+		finally
 		{
-			UseAlphaCompression = false,
-			FileFormat = WebpFileFormatType.Lossless,
-			Method = WebpEncodingMethod.BestQuality,
-			EntropyPasses = 10,
-			Quality = 100
-		});
-		var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
-		await Task.WhenAll(saveWebp, savePng);
+			fileSemaphore.Release();
+		}
 	}
 }
 

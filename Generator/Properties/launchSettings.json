@@ -2,7 +2,11 @@
   "profiles": {
     "Generate EK": {
       "commandName": "Project",
-      "commandLineArgs": "--filter-id 1"
+      "commandLineArgs": "--filter-id 0"
+    },
+    "Generate All": {
+      "commandName": "Project",
+      "commandLineArgs": ""
     }
   }
 }
