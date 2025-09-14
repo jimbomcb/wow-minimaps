@@ -10,7 +10,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\External\BLPSharp\BLPSharp\BLPSharp.csproj" />
-    <ProjectReference Include="..\External\CascLib\CascLib\CascLib.csproj" />
     <ProjectReference Include="..\External\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\External\TACTSharp\TACTSharp\TACTSharp.csproj" />
   </ItemGroup>

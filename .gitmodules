@@ -1,6 +1,3 @@
-[submodule "External/CascLib"]
-	path = External/CascLib
-	url = https://github.com/jimbomcb/CascLib.git
 [submodule "External/DBCD"]
 	path = External/DBCD
 	url = https://github.com/wowdev/DBCD.git
