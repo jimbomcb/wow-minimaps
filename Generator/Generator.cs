@@ -123,13 +123,13 @@ internal class Generator
 		return Path.Combine(_config.CachePath, "TACTKeys.txt");
 	}
 
-	private async Task ProcessMapRow(CASCHandler cascHandler, int mapId, DBCDRow row)
+	private async Task ProcessMapRow(CASCHandler cascHandler, int mapId, DBCDRow dbRow)
 	{
-		var name = row.Field<string>("MapName_lang");
+		var name = dbRow.Field<string>("MapName_lang");
 		if (string.IsNullOrEmpty(name))
-			name = row.Field<string>("Directory") ?? throw new Exception("No Directory found in Map DB");
+			name = dbRow.Field<string>("Directory") ?? throw new Exception("No Directory found in Map DB");
 
-		var wdtFileId = row.Field<int?>("WdtFileDataID") ?? throw new Exception("No WdtFileDataID found in Map DB");
+		var wdtFileId = dbRow.Field<int?>("WdtFileDataID") ?? throw new Exception("No WdtFileDataID found in Map DB");
 		if (wdtFileId == 0)
 		{
 			_logger.LogWarning("Map {id} has no WDT (WdtFileDataID=0)", name);
@@ -155,7 +155,24 @@ internal class Generator
 
 			if (header.ident[0] == 'M' && header.ident[1] == 'A' && header.ident[2] == 'I' && header.ident[3] == 'D')
 			{
-				// TODO: Pull out BLPs and queue the async processing
+				// Pull out BLPs and queue the async processing
+				// https://wowdev.wiki/WDT#MAID_chunk 7x uint32 offset for the minimap texture id
+				var loadedTiles = new List<(int x, int y, uint file)>(64*64);
+
+				for (int row = 0; row < 64; row++)
+				{
+					for (int col = 0; col < 64; col++)
+					{
+						fileReader.Skip(28);
+						var chunkId = fileReader.ReadUInt32();
+						if (chunkId > 0)
+						{
+							loadedTiles.Add((col, row, chunkId));
+						}
+					}
+				}
+
+				_logger.LogInformation("Map {id}: {name} has {count} minimap tiles", mapId, name, loadedTiles.Count);
 			}
 			else
 			{
