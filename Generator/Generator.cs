@@ -183,7 +183,11 @@ internal class Generator
 		}
 		catch (Exception ex) // TACTHandler's questionable exception handling doesn't give us much to work with 
 		{
-			throw new MapGenerationException(mapData, $"Unable to load {wdtFileId} processing map {mapData.ID} ({mapData.Name}): {ex.Message}", ex);
+			// TODO: TACTSharp is just using base exceptions with different messages
+			if (ex.Message == "File not found in root")
+				throw new MapGenerationException(mapData, $"Missing WDT file {wdtFileId} processing map {mapData.ID} ({mapData.Name}): {ex.Message}", ex);
+			else
+				throw;
 		}
 		
 		using var fileReader = new BinaryReader(fileStream);
