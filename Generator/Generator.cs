@@ -39,7 +39,7 @@ internal class Generator
 	{
 		_buildInstance = new BuildInstance();
 		_buildInstance.Settings.CacheDir = _config.CachePath;
-		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
+		//_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
 		_buildInstance.Settings.TryCDN = true;
 		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
 		_buildInstance.Load();
@@ -122,7 +122,9 @@ internal class Generator
 		Stream fileStream;
 		try
 		{
-			var fileBytes = _buildInstance.OpenFileByFDID((uint)wdtFileId);
+			// todo: BLTE line 116 is silently outputting empty files when a key is not found...
+			// - This happens when it encounters an encrypted BLTE and it doesn't have the decryption key, why does TACTSharp decide to silently fail in this case??
+			var fileBytes = _buildInstance.OpenFileByFDID((uint)wdtFileId); 
 			fileStream = new MemoryStream(fileBytes);
 		}
 		catch (Exception ex) // TACTHandler's questionable exception handling doesn't give us much to work with 
@@ -187,6 +189,7 @@ internal class Generator
 			catch (Exception ex)
 			{
 				_logger.LogError(ex, "Unhandled map tile processing exception");
+				throw;
 			}
 		}); 
 	}
