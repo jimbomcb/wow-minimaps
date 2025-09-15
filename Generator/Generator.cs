@@ -333,7 +333,7 @@ internal class Generator
 			);
 		}
 
-		// The TACTKeys repo provides [Name][Space][Value] and CascLib is hard-coded to take ; separated, so bridge the gap...
+		// The TACTKeys repo provides [Name][Space][Value] and states that there might be data added in the future. Pull out the specific expected bytes only.
 		// "The format is a space separated file with the 16-char key lookup (or name) and the 32-char key itself, both encoded as hex."
 		// "More fields might be added at the end of the line in the future(e.g.IDs), be sure to only read the necessary data per line."
 		var tactRows = tactContents.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
