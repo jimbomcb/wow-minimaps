@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using System.CommandLine;
+using System.Diagnostics;
 
 namespace Minimaps.Generator;
 
@@ -42,8 +43,14 @@ internal class Program
 		rootCommand.Options.Add(filterId);
 		rootCommand.SetAction(async args =>
 		{
-			using ILoggerFactory factory = LoggerFactory.Create(builder => builder.AddConsole());
+			using ILoggerFactory factory = LoggerFactory.Create(builder =>
+			{
+				builder.AddConsole();
+				//builder.SetMinimumLevel(LogLevel.Trace);
+			});
 			ILogger logger = factory.CreateLogger("Generator");
+
+			var timer = Stopwatch.StartNew();
 
 			var generator = new Generator(new()
 			{
@@ -51,8 +58,9 @@ internal class Program
 				CascRegion = args.GetValue(cascRegionOpt)!,
 				FilterId = args.GetValue(filterId)!,
 			}, logger, cts.Token);
-
 			await generator.Generate();
+
+			logger.LogInformation("Generator finished in {Elapsed}ms", timer.ElapsedMilliseconds);
 			return 0;
 		});
 		return await rootCommand.Parse(args).InvokeAsync();

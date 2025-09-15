@@ -17,6 +17,9 @@ public readonly record struct MinimapTile(int X, int Y, uint fileId);
 
 internal class Generator
 {
+	private HashSet<int> _tempKnownBadMaps = new(){
+	};
+
 	private readonly GeneratorConfig _config;
 	private readonly ILogger _logger;
 	private readonly CancellationToken _cancellationToken;
@@ -39,7 +42,7 @@ internal class Generator
 	{
 		_buildInstance = new BuildInstance();
 		_buildInstance.Settings.CacheDir = _config.CachePath;
-		//_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
+		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
 		_buildInstance.Settings.TryCDN = true;
 		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
 		_buildInstance.Load();
@@ -51,7 +54,10 @@ internal class Generator
 		if (mapDB.Count == 0)
 			throw new Exception("No maps found in Map DBC");
 
-		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString()));
+		var filteredRows = mapDB.Values
+			.Where(x => 
+				!_tempKnownBadMaps.Contains(x.Field<int>("ID")) && 
+				FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString())); // TODO: Update
 		_logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
 
 		var processFailed = new ConcurrentBag<(int MapId, Exception Exception)>();
@@ -75,12 +81,12 @@ internal class Generator
 				{
 					// TODO: We need better TACTSharp exception handling to figure out if this is a transient error, it's something that can't be loaded,
 					// never existed, existed but can't be downloaded etc...
-					_logger.LogWarning(ex, "Exception while generating map {ID} ({name}) is referencing WDT data that can't be found", ex.MapData.ID, ex.MapData.Name);
+					// _logger.LogWarning(ex, "Exception while generating map {ID} {name} is referencing WDT data that can't be found", ex.MapData.ID, ex.MapData.Name);
 					processFailed.Add((mapId, ex));
 				}
 				catch (Exception ex)
 				{
-					_logger.LogError(ex, "Unhandled exception generating map {ID}", mapId);
+					_logger.LogError(ex, "Unhandled exception generating map {ID} {Name}", mapId, entry.Field<string>("MapName_lang"));
 					throw; // fail the whole generation given this unexpected exception
 				}
 			});
@@ -93,7 +99,8 @@ internal class Generator
 
 		_logger.LogInformation("Processing {tileCount} tiles across {mapCount} maps...", allTiles.Count, mapDataList.Count);
 
-		var writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();		
+		var writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>(); // semaphore per file hash to avoid file write collisions, rare enough to be ok here
+		var failedTiles = new ConcurrentBag<(MapData Map, MinimapTile Tile, Exception Exception)>();
 		try
 		{
 			await Parallel.ForEachAsync(allTiles,
@@ -102,7 +109,13 @@ internal class Generator
 				{
 					try
 					{
-						await ProcessMapTile(writeSemaphores, item.Map.ID, item.Tile, ct);
+						await ProcessMapTile(writeSemaphores, item.Map, item.Tile, ct);
+					}
+					catch (MapGenerationException ex)
+					{
+						//_logger.LogWarning(ex, "Exception while generating map {ID} ({name}) tile {tileX},{tileY}: {msg}", 
+						//	ex.MapData.ID, ex.MapData.Name, item.Tile.X, item.Tile.Y, ex.Message);
+						failedTiles.Add((item.Map, item.Tile, ex));
 					}
 					catch (Exception ex)
 					{
@@ -129,6 +142,15 @@ internal class Generator
 				_logger.LogInformation(" - {id}: {ex}", mapId, exception.Message);
 			}
 		}
+
+		if (!failedTiles.IsEmpty)
+		{
+			_logger.LogInformation("Failed tiles:");
+			foreach (var (map, tile, exception) in failedTiles)
+			{
+				_logger.LogInformation(" - Map {mapId} ({mapName}) Tile {tileX},{tileY}: {ex}", map.ID, map.Name, tile.X, tile.Y, exception.Message);
+			}
+		}
 	}
 
 	private async Task<MapData> ProcessMapRow(int mapId, DBCDRow dbRow)
@@ -146,7 +168,7 @@ internal class Generator
 			return mapData;
 		}
 
-		_logger.LogInformation("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
+		_logger.LogTrace("Map {id}: {name} WDT:{wdt}", mapId, name, wdtFileId);
 
 		// TODO: How do we store and represent to the browser that that a maps WDT data is referenced
 		// TODO: Can we not more gracefully stream the WDT from TACTSharp rather than just loading the whole byte array..?
@@ -172,6 +194,7 @@ internal class Generator
 
 		// Chunked structure of int32 token, int32 size, byte[size]
 		var encounteredHeaders = new List<string>();
+		string encounteredVersion = "Unknown";
 		while (fileStream.Position < fileStream.Length)
 		{
 			var header = fileReader.ReadChunkHeader();
@@ -198,6 +221,11 @@ internal class Generator
 				_logger.LogInformation("Map {id}: {name} has {count} minimap Tiles", mapId, name, mapData.Tiles.Count);
 				return mapData;
 			}
+			else if (header.ident == "MVER")
+			{
+				var mverBytes = fileReader.ReadBytes((int)header.size);
+				encounteredVersion = $"{BitConverter.ToString(mverBytes)}";
+			}
 			else
 			{
 				encounteredHeaders.Add(header.ident);
@@ -205,18 +233,17 @@ internal class Generator
 			}
 		}
 
-		throw new Exception($"Unable to find MAID header in WDB. Encountered: {string.Join(", ", encounteredHeaders)}");
+		throw new MapGenerationException(mapData, $"WDT file {wdtFileId} for map {mapData.ID} ({mapData.Name}) did not contain an MAID chunk");
+
 	}
 
-	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, int mapId, MinimapTile tile, CancellationToken cancellationToken)
+	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, MapData map, MinimapTile tile, CancellationToken cancellationToken)
 	{
 		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
-		if (fileRootEntry.Count > 1)
-			throw new Exception($"> 1 file entries found on map id {mapId}");
+		if (fileRootEntry.Count > 1) // TODO: Classic Warsong Gulch has > 1 file versions? 
+			throw new Exception($"> 1 file entries found on map id {map.ID} {map.Name}?");
 		else if (fileRootEntry.Count == 0)
-			throw new Exception($"No root entry found for file ID {tile.fileId}");
-
-		// TODO: Classic Warsong Gulch has > 1 file versions? 
+			throw new MapGenerationException(map, $"No file found for map {map.ID} ({map.Name}) tile {tile.X},{tile.Y}");
 
 		var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
 
@@ -237,8 +264,10 @@ internal class Generator
 			using MemoryStream mapStream = new MemoryStream(mapFileBytes);
 			using var blpFile = new BLPFile(mapStream);
 
-			if (blpFile.MipMapCount > 1) // Are they ever generated with mipamps? I have yet to find one and it doesn't make sense for them to be mipmapped
-				throw new Exception("TODO");
+			// Are they ever generated with mipamps? I have yet to find one and it doesn't make sense for them to be mipmapped
+			// - It looks like a single map, 1501 Black Rook Hold DOES have mipmaps...
+			//if (blpFile.MipMapCount > 1)
+			//	throw new Exception("TODO");
 
 			var mapBytes = blpFile.GetPixels(0, out int width, out int height);
 			if (mapBytes == null)
