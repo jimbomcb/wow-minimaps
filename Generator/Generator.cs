@@ -40,6 +40,8 @@ internal class Generator
 
 	internal async Task Generate()
 	{
+		await LoadTACTKeys();
+
 		_buildInstance = new BuildInstance();
 		_buildInstance.Settings.CacheDir = _config.CachePath;
 		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
@@ -205,6 +207,8 @@ internal class Generator
 			if (header.ident == null || header.ident.Length != 4)
 				throw new Exception("Invalid chunk ident: " + header.ident ?? "null");
 
+			encounteredHeaders.Add(header.ident);
+
 			if (header.ident == "MAID")
 			{
 				// Pull out BLPs and queue the async processing
@@ -232,7 +236,6 @@ internal class Generator
 			}
 			else
 			{
-				encounteredHeaders.Add(header.ident);
 				fileStream.Position += header.size;
 			}
 		}
@@ -295,6 +298,55 @@ internal class Generator
 		{
 			fileSemaphore.Release();
 		}
+	}
+
+	private async Task LoadTACTKeys()
+	{
+		using var httpClient = new HttpClient();
+
+		string? cachedETag = null;
+		if (File.Exists(Path.Combine(_config.CachePath, "TACTKeys.txt.etag")) && File.Exists(Path.Combine(_config.CachePath, "TACTKeys.txt")))
+		{
+			cachedETag = await File.ReadAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"));
+			_logger.LogTrace("Found cached TACTKeys ETag: {ETag}", cachedETag);
+			httpClient.DefaultRequestHeaders.TryAddWithoutValidation("If-None-Match", cachedETag);
+		}
+
+		string? tactContents = null;
+		var tactRequest = await httpClient.GetAsync("https://github.com/wowdev/TACTKeys/raw/master/WoW.txt");
+		if (tactRequest.StatusCode == System.Net.HttpStatusCode.NotModified)
+		{
+			_logger?.LogInformation("TACTKeys not modified since last fetch, using cached version.");
+			tactContents = await File.ReadAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt"));
+		}
+		else
+		{
+			tactRequest.EnsureSuccessStatusCode(); // If it's not NotModified, it should be a valid 200
+			var newETag = tactRequest.Headers.ETag?.Tag ?? throw new Exception("No ETag header in TACTKeys response");
+			_logger.LogInformation("Fetched new TACTKeys (etag {tag})", newETag);
+
+			tactContents = await tactRequest.Content.ReadAsStringAsync();
+
+			await Task.WhenAll(
+				File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt"), tactContents),
+				File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"), newETag)
+			);
+		}
+
+		// The TACTKeys repo provides [Name][Space][Value] and CascLib is hard-coded to take ; separated, so bridge the gap...
+		// "The format is a space separated file with the 16-char key lookup (or name) and the 32-char key itself, both encoded as hex."
+		// "More fields might be added at the end of the line in the future(e.g.IDs), be sure to only read the necessary data per line."
+		var tactRows = tactContents.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+		foreach (var line in tactRows)
+		{
+			if (line.IndexOf(' ') != 16) throw new Exception("Unexpected TACTKeys line format: " + line);
+			var keyName =  line[..16];
+			var keyBytes = line[17..49];
+
+			KeyService.SetKey(Convert.ToUInt64(keyName, 16), Convert.FromHexString(keyBytes));
+		}
+
+		_logger.LogInformation("Loaded {total} TACTKeys", tactRows.Count);
 	}
 }
 
