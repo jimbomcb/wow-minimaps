@@ -7,7 +7,7 @@ using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.IO.Enumeration;
-using System.Threading.Channels;
+using System.Text;
 using TACTSharp;
 
 namespace Minimaps.Generator;
@@ -54,9 +54,12 @@ internal class Generator
 		var filteredRows = mapDB.Values.Where(x => FileSystemName.MatchesSimpleExpression(_config.FilterId, x.Field<int>("ID").ToString()));
 		_logger.LogInformation("Found {total} maps (filtered to {filtered})", mapDB.Values.Count, filteredRows.Count());
 
-		var mapChannel = Channel.CreateBounded<MapData>(10);
+		var processFailed = new ConcurrentBag<(int MapId, Exception Exception)>();
+		var processSuccess = 0;
 
-		var produceMapData = Parallel.ForEachAsync(filteredRows,
+		var mapDataList = new ConcurrentBag<MapData>();
+
+		await Parallel.ForEachAsync(filteredRows,
 			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
 			async (entry, ct) =>
 			{
@@ -64,39 +67,68 @@ internal class Generator
 
 				try
 				{
-					var minimapTiles = await ProcessMapRow(mapId, entry);
-					await mapChannel.Writer.WriteAsync(minimapTiles, ct);
+					var mapData = await ProcessMapRow(mapId, entry);
+					mapDataList.Add(mapData);
+					Interlocked.Increment(ref processSuccess);
 				}
 				catch (MapGenerationException ex)
 				{
 					// TODO: We need better TACTSharp exception handling to figure out if this is a transient error, it's something that can't be loaded,
 					// never existed, existed but can't be downloaded etc...
 					_logger.LogWarning(ex, "Exception while generating map {ID} ({name}) is referencing WDT data that can't be found", ex.MapData.ID, ex.MapData.Name);
+					processFailed.Add((mapId, ex));
 				}
 				catch (Exception ex)
 				{
 					_logger.LogError(ex, "Unhandled exception generating map {ID}", mapId);
-					throw;
+					throw; // fail the whole generation given this unexpected exception
 				}
-			})
-			.ContinueWith(x =>
-			{
-				mapChannel.Writer.Complete();
-				_logger.LogInformation("Map database processed.");
 			});
 
-		// TODO: Parallel consumption, right now cascHandler is just going to block anyway
-		var consumeMapData = Task.Run(async () =>
-		{
-			await foreach (var mapData in mapChannel.Reader.ReadAllAsync(_cancellationToken))
-			{
-				await ProcessMapData(mapData, _cancellationToken);
-			}
-		}, _cancellationToken);
+		_logger.LogInformation("Map database processed. Processing {count} maps for tiles...", mapDataList.Count);
 
-		await Task.WhenAll(produceMapData, consumeMapData);
+		var allTiles = mapDataList.SelectMany(map => 
+			map.Tiles.Select(tile => new { Map = map, Tile = tile })
+		).ToList();
+
+		_logger.LogInformation("Processing {tileCount} tiles across {mapCount} maps...", allTiles.Count, mapDataList.Count);
+
+		var writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();		
+		try
+		{
+			await Parallel.ForEachAsync(allTiles,
+				new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
+				async (item, ct) =>
+				{
+					try
+					{
+						await ProcessMapTile(writeSemaphores, item.Map.ID, item.Tile, ct);
+					}
+					catch (Exception ex)
+					{
+						throw new Exception($"Unhandled exception processing tile {item.Tile.X}/{item.Tile.Y} in map {item.Map.ID} {item.Map.Name}", ex);
+					}
+				});
+		}
+		finally
+		{
+			foreach (var semaphore in writeSemaphores.Values)
+			{
+				semaphore.Dispose();
+			}
+		}
 
 		_logger.LogInformation("Generation complete.");
+		_logger.LogInformation("Processed {success} maps successfully, {failed} failed", processSuccess, processFailed.Count);
+
+		if (!processFailed.IsEmpty)
+		{
+			_logger.LogInformation("Failed maps:");
+			foreach (var (mapId, exception) in processFailed)
+			{
+				_logger.LogInformation(" - {id}: {ex}", mapId, exception.Message);
+			}
+		}
 	}
 
 	private async Task<MapData> ProcessMapRow(int mapId, DBCDRow dbRow)
@@ -129,7 +161,7 @@ internal class Generator
 		}
 		catch (Exception ex) // TACTHandler's questionable exception handling doesn't give us much to work with 
 		{
-			throw new MapGenerationException(mapData, $"Unable to load {wdtFileId} processing map {mapData.ID} ({mapData.Name})", ex);
+			throw new MapGenerationException(mapData, $"Unable to load {wdtFileId} processing map {mapData.ID} ({mapData.Name}): {ex.Message}", ex);
 		}
 		
 		using var fileReader = new BinaryReader(fileStream);
@@ -139,13 +171,14 @@ internal class Generator
 		// TODO: Topo map from WDL https://wowdev.wiki/WDL/v18
 
 		// Chunked structure of int32 token, int32 size, byte[size]
+		var encounteredHeaders = new List<string>();
 		while (fileStream.Position < fileStream.Length)
 		{
 			var header = fileReader.ReadChunkHeader();
 			if (header.ident == null || header.ident.Length != 4)
-				throw new Exception("Invalid chunk ident");
+				throw new Exception("Invalid chunk ident: " + header.ident ?? "null");
 
-			if (header.ident[0] == 'M' && header.ident[1] == 'A' && header.ident[2] == 'I' && header.ident[3] == 'D')
+			if (header.ident == "MAID")
 			{
 				// Pull out BLPs and queue the async processing
 				// https://wowdev.wiki/WDT#MAID_chunk 7x uint32 offset for the minimap texture id
@@ -167,37 +200,23 @@ internal class Generator
 			}
 			else
 			{
+				encounteredHeaders.Add(header.ident);
 				fileStream.Position += header.size;
 			}
 		}
 
-		throw new Exception("Unable to find MAID header in WDB");
-	}
-
-	private async Task ProcessMapData(MapData mapData, CancellationToken cancellationToken)
-	{
-		ConcurrentDictionary<string, SemaphoreSlim> _writeSemaphores = new ConcurrentDictionary<string, SemaphoreSlim>();
-
-		await Parallel.ForEachAsync(mapData.Tiles,
-			new ParallelOptions { MaxDegreeOfParallelism = _config.Parallelism, CancellationToken = _cancellationToken },
-			async (entry, ct) =>
-		{
-			try
-			{
-				await ProcessMapTile(_writeSemaphores, mapData.ID, entry, _cancellationToken);
-			}
-			catch (Exception ex)
-			{
-				_logger.LogError(ex, "Unhandled map tile processing exception");
-				throw;
-			}
-		}); 
+		throw new Exception($"Unable to find MAID header in WDB. Encountered: {string.Join(", ", encounteredHeaders)}");
 	}
 
 	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, int mapId, MinimapTile tile, CancellationToken cancellationToken)
 	{
 		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
-		if (fileRootEntry.Count != 1) throw new Exception($"> 1 file entries found on map id {mapId}"); // TODO: Classic Warsong Gulch has > 1 file versions? 
+		if (fileRootEntry.Count > 1)
+			throw new Exception($"> 1 file entries found on map id {mapId}");
+		else if (fileRootEntry.Count == 0)
+			throw new Exception($"No root entry found for file ID {tile.fileId}");
+
+		// TODO: Classic Warsong Gulch has > 1 file versions? 
 
 		var mapHash = Convert.ToHexString(fileRootEntry.First().md5.AsSpan());
 
@@ -248,16 +267,16 @@ internal class Generator
 	}
 }
 
-public readonly record struct ChunkHeader(char[] ident, uint size);
+public readonly record struct ChunkHeader(string ident, uint size);
 
 public static class BinaryReaderExt
 {
 	public static ChunkHeader ReadChunkHeader(this BinaryReader reader)
 	{
 		ArgumentNullException.ThrowIfNull(reader);
-		var ident = reader.ReadChars(4);
-		if (BitConverter.IsLittleEndian) Array.Reverse(ident);
+		var ident = reader.ReadBytes(4);
+		Array.Reverse(ident);
 		var size = reader.ReadUInt32();
-		return new ChunkHeader { ident = ident, size = size };
+		return new ChunkHeader { ident = Encoding.UTF8.GetString(ident), size = size };
 	}
 }
