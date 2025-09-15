@@ -1,9 +1,9 @@
 [submodule "External/DBCD"]
 	path = External/DBCD
 	url = https://github.com/wowdev/DBCD.git
-[submodule "External/TACTSharp"]
-	path = External/TACTSharp
-	url = https://github.com/wowdev/TACTSharp.git
 [submodule "External/BLPSharp"]
 	path = External/BLPSharp
 	url = https://github.com/wowdev/BLPSharp.git
+[submodule "External/TACTSharp"]
+	path = External/TACTSharp
+	url = https://github.com/jimbomcb/TACTSharp.git
