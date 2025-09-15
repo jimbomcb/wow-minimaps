@@ -249,7 +249,7 @@ internal class Generator
 			// Initial size testing shows a png at 230kb
 			//   webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
 			//   webp lossless is 165kb
-			var saveWebp = image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
+			await image.SaveAsWebpAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.webp"), new WebpEncoder()
 			{
 				UseAlphaCompression = false,
 				FileFormat = WebpFileFormatType.Lossless,
@@ -257,8 +257,6 @@ internal class Generator
 				EntropyPasses = 10,
 				Quality = 100
 			});
-			var savePng = image.SaveAsPngAsync(Path.Combine(_config.CachePath, "temp", $"{mapHash}.png"));
-			await Task.WhenAll(saveWebp, savePng);
 		}
 		finally
 		{
