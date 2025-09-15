@@ -5,5 +5,10 @@
     <Project Path="External/DBCD/DBCD/DBCD.csproj" />
     <Project Path="External/TACTSharp/TACTSharp/TACTSharp.csproj" />
   </Folder>
+  <Folder Name="/RibbitClient/">
+    <File Path="RibbitClient/README.md" />
+    <Project Path="RibbitClient/RibbitClient.Tests/RibbitClient.Tests.csproj" Id="4738f5dc-045f-4082-8702-fb2621471414" />
+    <Project Path="RibbitClient/RibbitClient/RibbitClient.csproj" Id="741877f3-80e6-4781-b6e6-ec029645598a" />
+  </Folder>
   <Project Path="Generator/Generator.csproj" />
 </Solution>
