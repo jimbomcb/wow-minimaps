@@ -2,6 +2,7 @@
 using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
+using RibbitClient;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -40,17 +41,23 @@ internal class Generator
 
 	internal async Task Generate()
 	{
-		await LoadTACTKeys();
+		var versionServer = new RibbitClient.RibbitClient(RibbitRegion.US);
+		var loadKeyTask = LoadTACTKeys();
+
+		var productVersions = await versionServer.VersionsAsync(_config.Product);
+		var productEntry = productVersions.Data.Single(x => x.Region == _config.CascRegion);
+
+		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion} version={version}", 
+			_config.Product, _config.CascRegion, productEntry.VersionsName);
 
 		_buildInstance = new BuildInstance();
 		_buildInstance.Settings.CacheDir = _config.CachePath;
 		_buildInstance.Settings.BaseDir = "C:\\World of Warcraft";
 		_buildInstance.Settings.TryCDN = true;
-		_buildInstance.LoadConfigs("7099f18a0c858e807e0e156d052cea6d", "391397d3164e0d13b9752aee3a6a15f3");
+		_buildInstance.LoadConfigs(productEntry.BuildConfig, productEntry.CDNConfig);
 		_buildInstance.Load();
 
-		_logger.LogInformation("Generating minimap data... product={product}, region={cascRegion}", _config.Product, _config.CascRegion);
-
+		await loadKeyTask; // Ensure key loading is complete before potentially referencing encrypted map data
 		var dbcd = new DBCD.DBCD(new TACTMapDBCProvider(_buildInstance), new GithubDBDProvider());
 		var mapDB = dbcd.Load("Map");
 		if (mapDB.Count == 0)
@@ -292,7 +299,7 @@ internal class Generator
 				Method = WebpEncodingMethod.BestQuality,
 				EntropyPasses = 10,
 				Quality = 100
-			});
+			}, CancellationToken.None);
 		}
 		finally
 		{
