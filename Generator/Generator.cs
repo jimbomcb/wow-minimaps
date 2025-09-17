@@ -14,7 +14,7 @@ using TACTSharp;
 namespace Minimaps.Generator;
 
 public readonly record struct MapData(int ID, string Name, List<MinimapTile> Tiles);
-public readonly record struct MinimapTile(int X, int Y, uint fileId);
+public readonly record struct MinimapTile(int X, int Y, uint FileId);
 
 internal class Generator
 {
@@ -253,7 +253,7 @@ internal class Generator
 
 	private async Task ProcessMapTile(ConcurrentDictionary<string, SemaphoreSlim> writeSemaphores, MapData map, MinimapTile tile, CancellationToken cancellationToken)
 	{
-		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.fileId);
+		var fileRootEntry = _buildInstance.Root!.GetEntriesByFDID(tile.FileId);
 		if (fileRootEntry.Count > 1) // TODO: Classic Warsong Gulch has > 1 file versions? 
 			throw new Exception($"> 1 file entries found on map id {map.ID} {map.Name}?");
 		else if (fileRootEntry.Count == 0)
@@ -274,7 +274,7 @@ internal class Generator
 				return;
 			}
 
-			var mapFileBytes = _buildInstance.OpenFileByFDID(tile.fileId); // TODO: Stream handling?
+			var mapFileBytes = _buildInstance.OpenFileByFDID(tile.FileId); // TODO: Stream handling?
 			using MemoryStream mapStream = new MemoryStream(mapFileBytes);
 			using var blpFile = new BLPFile(mapStream);
 
