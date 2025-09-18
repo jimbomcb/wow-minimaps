@@ -1,6 +1,7 @@
 name: Ribbit Schema Test
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "30 1 * * 6" # Run EoD friday (so ~1am UTC Saturday) to check if the schema has been patched this week (and email me)
     
