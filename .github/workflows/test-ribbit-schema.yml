@@ -28,20 +28,12 @@ jobs:
       run: dotnet build Minimaps.Tests --no-restore
     
     - name: Test
-      run: dotnet test Minimaps.Tests --no-build --logger:"trx" --results-directory ./TestResults
-    
-    - name: Debug - List test result files
-      if: success() || failure()
-      run: |
-        echo "Looking for test result files:"
-        find . -name "*.trx" -type f
-        ls -la TestResults/ || echo "TestResults directory not found"
-        ls -la Minimaps.Tests/bin/Debug/net10.0/TestResults/ || echo "Default TestResults directory not found"
+      run: dotnet test Minimaps.Tests --no-build --report-trx --report-trx-filename test-results.trx --logger:"trx;LogFileName=test-results.trx" --results-directory ./TestResults
     
     - name: Test Report
       uses: dorny/test-reporter@v1
       if: success() || failure()
       with:
         name: Test Report
-        path: '**/*.trx'
+        path: 'TestResults/*.trx'
         reporter: dotnet-trx
