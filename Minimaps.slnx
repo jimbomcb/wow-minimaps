@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Aspire/">
+    <Project Path="Minimaps.Aspire.AppHost/Minimaps.Aspire.AppHost.csproj" Id="e666917e-32c3-4a8b-8776-9af75a32a756" />
+    <Project Path="Minimaps.Aspire.ServiceDefaults/Minimaps.Aspire.ServiceDefaults.csproj" Id="4feba0e0-bc18-43df-a2d9-c98930fee981" />
+  </Folder>
   <Folder Name="/External/">
     <Project Path="External/BLPSharp/BLPSharp/BLPSharp.csproj" />
     <Project Path="External/DBCD/DBCD.IO/DBCD.IO.csproj" />
@@ -8,8 +12,6 @@
   <Folder Name="/Solution Items/">
     <File Path="README.md" />
   </Folder>
-  <Project Path="Minimaps.Aspire.AppHost/Minimaps.Aspire.AppHost.csproj" Id="e666917e-32c3-4a8b-8776-9af75a32a756" />
-  <Project Path="Minimaps.Aspire.ServiceDefaults/Minimaps.Aspire.ServiceDefaults.csproj" Id="4feba0e0-bc18-43df-a2d9-c98930fee981" />
   <Project Path="Minimaps.CLI/Minimaps.CLI.csproj" />
   <Project Path="Minimaps.Database/Minimaps.Database.csproj" />
   <Project Path="Minimaps.Shared/Minimaps.Shared.csproj" Id="bc8d50b7-163e-4696-9111-292695ac8883" />
