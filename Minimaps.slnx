@@ -5,10 +5,14 @@
     <Project Path="External/DBCD/DBCD/DBCD.csproj" />
     <Project Path="External/TACTSharp/TACTSharp/TACTSharp.csproj" />
   </Folder>
-  <Folder Name="/RibbitClient/">
-    <File Path="RibbitClient/README.md" />
-    <Project Path="RibbitClient/RibbitClient.Tests/RibbitClient.Tests.csproj" Id="4738f5dc-045f-4082-8702-fb2621471414" />
-    <Project Path="RibbitClient/RibbitClient/RibbitClient.csproj" Id="741877f3-80e6-4781-b6e6-ec029645598a" />
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
   </Folder>
-  <Project Path="Generator/Generator.csproj" />
+  <Project Path="Minimaps.Aspire.AppHost/Minimaps.Aspire.AppHost.csproj" Id="e666917e-32c3-4a8b-8776-9af75a32a756" />
+  <Project Path="Minimaps.Aspire.ServiceDefaults/Minimaps.Aspire.ServiceDefaults.csproj" Id="4feba0e0-bc18-43df-a2d9-c98930fee981" />
+  <Project Path="Minimaps.CLI/Minimaps.CLI.csproj" />
+  <Project Path="Minimaps.Database/Minimaps.Database.csproj" />
+  <Project Path="Minimaps.Shared/Minimaps.Shared.csproj" Id="bc8d50b7-163e-4696-9111-292695ac8883" />
+  <Project Path="Minimaps.Web.API/Minimaps.Web.API.csproj" />
+  <Project Path="Minimaps.Web.Frontend/Minimaps.Web.Frontend.csproj" />
 </Solution>

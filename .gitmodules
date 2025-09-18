@@ -7,6 +7,3 @@
 [submodule "External/TACTSharp"]
 	path = External/TACTSharp
 	url = https://github.com/jimbomcb/TACTSharp.git
-[submodule "RibbitClient"]
-	path = RibbitClient
-	url = https://github.com/jimbomcb/ribbit-client.git
