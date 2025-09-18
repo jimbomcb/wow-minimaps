@@ -15,6 +15,7 @@
   <Project Path="Minimaps.CLI/Minimaps.CLI.csproj" />
   <Project Path="Minimaps.Database/Minimaps.Database.csproj" />
   <Project Path="Minimaps.Shared/Minimaps.Shared.csproj" Id="bc8d50b7-163e-4696-9111-292695ac8883" />
+  <Project Path="Minimaps.Tests/Minimaps.Tests.csproj" Id="cbb80899-ee4d-4581-8f82-a3bde8333b2c" />
   <Project Path="Minimaps.Web.API/Minimaps.Web.API.csproj" />
   <Project Path="Minimaps.Web.Frontend/Minimaps.Web.Frontend.csproj" />
 </Solution>

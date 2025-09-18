@@ -1,0 +1,40 @@
+name: Ribbit Schema Test
+
+on:
+  schedule:
+    - cron: "30 1 * * 6" # Run EoD friday (so ~1am UTC Saturday) to check if the schema has been patched this week (and email me)
+    
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore Minimaps.Tests
+    
+    - name: Build
+      run: dotnet build Minimaps.Tests --no-restore
+    
+    - name: Test
+      run: dotnet test Minimaps.Tests --no-build --logger:"trx;LogFileName=test-results.trx"
+
+    - name: Test Report
+      uses: dorny/test-reporter@v1
+      if: success() || failure()
+      with:
+        name: Ribbit Schema Test
+        path: '**/test-results.trx'
+
+        reporter: dotnet-trx
