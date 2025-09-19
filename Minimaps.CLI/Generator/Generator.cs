@@ -25,7 +25,7 @@ internal class Generator
     private readonly GeneratorConfig _config;
     private readonly ILogger _logger;
     private readonly CancellationToken _cancellationToken;
-    private BuildInstance _buildInstance = null;
+    private BuildInstance? _buildInstance = null;
 
     public Generator(GeneratorConfig config, ILogger logger, CancellationToken cancellationToken)
     {

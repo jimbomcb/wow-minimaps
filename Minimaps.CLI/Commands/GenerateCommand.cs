@@ -5,6 +5,9 @@ using System.Diagnostics;
 
 namespace Minimaps.CLI.Commands;
 
+/// <summary>
+/// Not really used for anything going forward, it was mainly just me figuring out how to read from CASC, query DB2 etc.
+/// </summary>
 public static class GenerateCommand
 {
     public static Command Create(IConfiguration configuration, ILoggerFactory loggerFactory, CancellationToken cancellationToken)

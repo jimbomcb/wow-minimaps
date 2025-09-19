@@ -11,6 +11,10 @@
     "Generate All": {
       "commandName": "Project",
       "commandLineArgs": ""
+    },
+    "Run Service Worker": {
+      "commandName": "Project",
+      "commandLineArgs": "service"
     }
   }
 }
