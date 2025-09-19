@@ -1,7 +1,7 @@
 using DBCD.Providers;
 using TACTSharp;
 
-namespace Minimaps.Generator;
+namespace Minimaps.CLI.Generator;
 
 internal class TACTMapDBCProvider(BuildInstance buildInstance) : IDBCProvider
 {

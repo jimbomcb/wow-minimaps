@@ -1,4 +1,4 @@
-﻿namespace Minimaps.Generator;
+﻿namespace Minimaps.CLI.Generator;
 
 internal class GeneratorConfig
 {

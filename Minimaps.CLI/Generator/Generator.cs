@@ -11,7 +11,7 @@ using System.IO.Enumeration;
 using System.Text;
 using TACTSharp;
 
-namespace Minimaps.Generator;
+namespace Minimaps.CLI.Generator;
 
 public readonly record struct MapData(int ID, string Name, List<MinimapTile> Tiles);
 public readonly record struct MinimapTile(int X, int Y, uint FileId);

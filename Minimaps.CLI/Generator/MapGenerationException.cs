@@ -1,4 +1,4 @@
-namespace Minimaps.Generator;
+namespace Minimaps.CLI.Generator;
 
 public class MapGenerationException : Exception
 {

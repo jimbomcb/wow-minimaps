@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Reflection;
 
-namespace Minimaps.Generator.Database;
+namespace Minimaps.CLI;
 
 public class DatabaseMigrationService(string connectionString, ILogger<DatabaseMigrationService>? logger = null)
 {
@@ -24,7 +24,7 @@ public class DatabaseMigrationService(string connectionString, ILogger<DatabaseM
             .ConfigureRunner(rb => rb
                 .AddPostgres()
                 .WithGlobalConnectionString(_connectionString)
-                .ScanIn(Assembly.GetAssembly(typeof(Minimaps.Database.Migrations.InitialSchema))).For.Migrations())
+                .ScanIn(Assembly.GetAssembly(typeof(Database.Migrations.InitialSchema))).For.Migrations())
             .AddLogging(lb => lb
                 .AddConsole()
                 .SetMinimumLevel(LogLevel.Information))

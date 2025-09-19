@@ -5,7 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Minimaps.Generator</RootNamespace>
+    <RootNamespace>Minimaps.CLI</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,10 +27,6 @@
 	  
     <PackageReference Include="FluentMigrator.Runner" Version="7.1.0" />
     <PackageReference Include="FluentMigrator.Runner.Postgres" Version="7.1.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Database\" />
   </ItemGroup>
 
 </Project>
