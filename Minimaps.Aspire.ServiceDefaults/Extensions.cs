@@ -36,10 +36,10 @@ namespace Microsoft.Extensions.Hosting
 			});
 
 			// Uncomment the following to restrict the allowed schemes for service discovery.
-			// builder.Services.Configure<ServiceDiscoveryOptions>(options =>
-			// {
-			//     options.AllowedSchemes = ["https"];
-			// });
+			builder.Services.Configure<ServiceDiscoveryOptions>(options =>
+			{
+			    options.AllowedSchemes = ["https"];
+			});
 
 			return builder;
 		}
