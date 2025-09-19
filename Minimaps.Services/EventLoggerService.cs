@@ -5,9 +5,9 @@ namespace Minimaps.Services;
 /// <summary>
 /// Hosted service that manages webhook event logging for all background services
 /// </summary>
-internal class ServiceEventLoggerService(ILogger<ServiceEventLoggerService> logger, WebhookEventLog eventLog) : BackgroundService
+internal class EventLoggerService(ILogger<EventLoggerService> logger, WebhookEventLog eventLog) : BackgroundService
 {
-    private readonly ILogger<ServiceEventLoggerService> _logger = logger;
+    private readonly ILogger<EventLoggerService> _logger = logger;
     private readonly WebhookEventLog _eventLog = eventLog;
     private readonly TimeSpan _flushInterval = TimeSpan.FromSeconds(2);
 

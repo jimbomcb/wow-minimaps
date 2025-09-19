@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Hosting;
-
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")

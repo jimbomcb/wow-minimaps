@@ -11,7 +11,7 @@ builder.Services.AddSingleton(serviceProvider =>
     return new WebhookEventLog(configuration.GetValue<string>("Services:EventWebhook"), logger);
 });
 
-builder.Services.AddHostedService<ServiceEventLoggerService>();
+builder.Services.AddHostedService<EventLoggerService>();
 builder.Services.AddHostedService<UpdateMonitorService>();
 
 var host = builder.Build();
