@@ -8,13 +8,8 @@ using System.Reflection;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.AddServiceDefaults();
-
-builder.Configuration
-    .AddEnvironmentVariables()
-    .AddJsonFile("appsettings.json")
-    .AddJsonFile("appsettings.Development.json", optional: true)
-    .AddUserSecrets(Assembly.GetExecutingAssembly());
 builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
+
 var host = builder.Build();
 
 using var cts = new CancellationTokenSource();
@@ -28,8 +23,7 @@ var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
 var rootCommand = new RootCommand("Minimaps.CLI")
 {
     GenerateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
-    MigrateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
-    ServiceCommand.Create(builder.Configuration, loggerFactory, cts.Token)
+    MigrateCommand.Create(builder.Configuration, loggerFactory, cts.Token)
 };
 
 return await rootCommand.Parse(args).InvokeAsync();

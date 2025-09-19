@@ -1,0 +1,18 @@
+{
+  "profiles": {
+    "Minimaps.Services": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    },
+    "Minimaps.Services (Production)": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Production"
+      }
+    }
+  }
+}

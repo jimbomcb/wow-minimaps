@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Minimaps.CLI</RootNamespace>
-    <UserSecretsId>9388d64f-88b0-455a-98d1-a29b7784e8e3</UserSecretsId>
+    <UserSecretsId></UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

@@ -21,13 +21,10 @@ public class WebhookEventLog(string? webhookUrl, ILogger? logger = null) : IDisp
     private volatile bool _disposed;
     private DateTime _rateLimitResetTime = DateTime.MinValue;
 
-    public void Post(string message, bool log = true)
+    public void Post(string message)
     {
         if (_disposed || !_enabled) 
             return;
-
-        if (log)
-            _logger?.LogInformation(message);
 
         lock (_queueLock)
         {

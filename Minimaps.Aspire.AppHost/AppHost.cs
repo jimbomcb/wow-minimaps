@@ -5,7 +5,7 @@ var postgres = builder.AddPostgres("postgres")
 
 var minimapsDb = postgres.AddDatabase("minimaps-database");
 
-// migrations after postgres/before app laod
+// migrations after postgres/before app load
 var migrationService = builder.AddProject<Projects.Minimaps_CLI>("migration")
     .WithReference(minimapsDb)
     .WithArgs("migrate")
@@ -19,8 +19,8 @@ var webapi = builder.AddProject<Projects.Minimaps_Web_API>("web-api")
 var frontend = builder.AddProject<Projects.Minimaps_Web_Frontend>("web-frontend")
 	.WaitFor(webapi);
 
-var serviceWorker = builder.AddProject<Projects.Minimaps_CLI>("service-worker")
-    .WithArgs("service")
+// background services
+var services = builder.AddProject<Projects.Minimaps_Services>("services")
     .WithReference(minimapsDb)
     .WaitFor(migrationService);
 
