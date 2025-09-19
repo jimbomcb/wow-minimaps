@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Hosting;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
@@ -22,6 +24,6 @@ var frontend = builder.AddProject<Projects.Minimaps_Web_Frontend>("web-frontend"
 // background services
 var services = builder.AddProject<Projects.Minimaps_Services>("services")
     .WithReference(minimapsDb)
-    .WaitFor(migrationService);
+    .WaitFor(webapi);
 
 builder.Build().Run();
