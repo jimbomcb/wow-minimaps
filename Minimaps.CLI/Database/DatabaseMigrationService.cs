@@ -10,7 +10,7 @@ public class DatabaseMigrationService(string connectionString, ILogger<DatabaseM
     private readonly string _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
     private readonly ILogger<DatabaseMigrationService>? _logger = logger;
 
-	public async Task MigrateAsync(CancellationToken cancellationToken = default)
+    public async Task MigrateAsync(CancellationToken cancellationToken = default)
     {
         await Task.Run(() => Migrate(), cancellationToken);
     }

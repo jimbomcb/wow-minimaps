@@ -10,6 +10,7 @@
     <Project Path="External/TACTSharp/TACTSharp/TACTSharp.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
     <File Path="README.md" />
   </Folder>
   <Project Path="Minimaps.CLI/Minimaps.CLI.csproj" />

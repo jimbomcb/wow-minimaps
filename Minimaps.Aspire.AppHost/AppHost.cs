@@ -9,7 +9,7 @@ var minimapsDb = postgres.AddDatabase("minimaps-database");
 var migrationService = builder.AddProject<Projects.Minimaps_CLI>("minimaps-cli")
     .WithReference(minimapsDb)
     .WithArgs("migrate")
-    .WaitFor(postgres);
+    .WaitFor(minimapsDb);
 
 // web services
 var webapi = builder.AddProject<Projects.Minimaps_Web_API>("minimaps-web-api")
