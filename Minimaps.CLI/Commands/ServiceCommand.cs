@@ -27,7 +27,7 @@ public static class ServiceCommand
             };
 
             eventLog.Post("Service started");
-            logger.LogInformation("Service started with {ServiceCount} services", services.Count);
+            logger.LogInformation("ServiceWorker configured with {ServiceCount} services: {ServiceNames}", services.Count, string.Join(',', services.Select(x => x.Name)));
 
             try
             {
