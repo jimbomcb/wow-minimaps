@@ -1,3 +1,4 @@
+using DBCD;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
 using RibbitClient;
@@ -25,7 +26,6 @@ internal class UpdateMonitorService :
 
     private readonly Configuration _serviceConfig = new();
     private readonly ILogger<UpdateMonitorService> _logger;
-    private BuildInstance? _tactClient = null;
     private readonly BackendClient _backendClient;
 
     public UpdateMonitorService(ILogger<UpdateMonitorService> logger, WebhookEventLog eventLog, IConfiguration configuration, BackendClient backendClient) : 
@@ -47,25 +47,8 @@ internal class UpdateMonitorService :
 
         // todo: check the summary sequence IDs of the individual products for filtering
 
-        _tactClient = new BuildInstance();
-        _tactClient.Settings.CacheDir = _serviceConfig.CachePath;
-        foreach (var additionalCdn in _serviceConfig.AdditionalCDNs)
-        {
-            _tactClient.Settings.AdditionalCDNs.Add(additionalCdn);
-            _logger.LogInformation("Added additional CDN: {cdn}", additionalCdn);
-        }
-        _tactClient.Settings.BaseDir = "C:\\World of Warcraft";
-        _tactClient.Settings.TryCDN = true;
-        //_tactClient.LoadConfigs(productEntry.BuildConfig, productEntry.CDNConfig);
-        //_tactClient.Load();
-
-        foreach (var entry in await loadKeyTask)
-        {
-            KeyService.SetKey(entry.KeyName, entry.KeyValue);
-        }
-
         // gather all the latest products & their versions
-        var products = new Dictionary<(string product, string version), ProductVersion>();
+        var products = new Dictionary<DiscoveredRequestDtoEntry, ProductVersion>();
         foreach (var product in _serviceConfig.Products)
         {
             try
@@ -73,7 +56,7 @@ internal class UpdateMonitorService :
                 var versionsResponse = await ribbitClient.VersionsAsync(product);
                 foreach (var version in versionsResponse.Data)
                 {
-                    var key = (product, version.VersionsName);
+                    var key = new DiscoveredRequestDtoEntry(product, version.VersionsName);
                     if (!products.ContainsKey(key))
                         products[key] = new(version.BuildConfig, version.CDNConfig, []);
 
@@ -94,9 +77,42 @@ internal class UpdateMonitorService :
 
         var newBuilds = await _backendClient.PostAsync<DiscoveredRequestDto>("publish/discovered", new DiscoveredRequestDto
         {
-            Entries = [.. products.Keys.Select(k => new DiscoveredRequestDtoEntry(k.product,k.version))]
+            Entries = [.. products.Keys.Select(k => new DiscoveredRequestDtoEntry(k.Product, k.Version))]
         });
 
         _logger.LogInformation("{NewBuilds} builds not yet published", newBuilds.Entries.Count);
+
+        // Load the bg loaded TACT keys before build accessing
+        foreach (var entry in await loadKeyTask)
+        {
+            KeyService.SetKey(entry.KeyName, entry.KeyValue);
+        }
+
+        foreach (var entry in newBuilds.Entries)
+        {
+            _logger.LogInformation("Processing build {Product} {Version}", entry.Product, entry.Version);
+            await ProcessBuild(entry, products[entry]);
+        }
+    }
+
+    private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version)
+    {
+        var tactClient = new BuildInstance();
+        tactClient.Settings.CacheDir = _serviceConfig.CachePath;
+        foreach (var additionalCdn in _serviceConfig.AdditionalCDNs)
+        {
+            tactClient.Settings.AdditionalCDNs.Add(additionalCdn);
+            _logger.LogInformation("Added additional CDN: {cdn}", additionalCdn);
+        }
+        tactClient.Settings.TryCDN = true;
+        tactClient.LoadConfigs(version.BuildConfig, version.CDNConfig);
+        tactClient.Load();
+
+        //var dbcd = new DBCD.DBCD(new TACTMapDBCProvider(_buildInstance), new GithubDBDProvider());
+        //var mapDB = dbcd.Load("Map");
+        //if (mapDB.Count == 0)
+        //    throw new Exception("No maps found in Map DBC");
+        //
+
     }
 }
