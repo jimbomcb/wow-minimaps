@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\External\TACTSharp\TACTSharp\TACTSharp.csproj" />
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>

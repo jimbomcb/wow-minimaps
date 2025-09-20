@@ -7,7 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.66" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Minimaps.Database\Minimaps.Database.csproj" />
+    <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>
 
 </Project>

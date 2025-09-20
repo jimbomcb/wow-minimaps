@@ -3,15 +3,18 @@
 #pragma warning disable IDE1006 // Naming Styles - this specifically matches the Postgres column names
 internal class Build
 {
+    /// <summary>
+    /// wow/wow_classic/wowt(ptr)/wow_classic_ptr/etc
+    /// </summary>
+    public string product { get; set; }
+    /// <summary>
+    /// version string "1.2.3.12345" [expansion].[major].[minor].[build]
+    /// </summary>
     public string version { get; set; }
     public int ver_expansion { get; set; }
     public int ver_major { get; set; }
     public int ver_minor { get; set; }
     public int ver_build { get; set; }
-    /// <summary>
-    /// wow/wow_classic/wowt(ptr)/wow_classic_ptr/etc
-    /// </summary>
-    public string product { get; set; }
     public bool processed { get; set; }
     public DateTime published { get; set; }
 }

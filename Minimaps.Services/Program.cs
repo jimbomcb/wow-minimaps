@@ -14,5 +14,16 @@ builder.Services.AddSingleton(serviceProvider =>
 builder.Services.AddHostedService<EventLoggerService>();
 builder.Services.AddHostedService<UpdateMonitorService>();
 
+var backendUrl = builder.Configuration.GetValue<string>("BackendUrl");
+if (string.IsNullOrEmpty(backendUrl))
+    throw new Exception("Backend URL is not configured, cannot start service");
+
+builder.Services.AddHttpClient<BackendClient>(client =>
+{
+    client.BaseAddress = new Uri(backendUrl);
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 var host = builder.Build();
 await host.RunAsync();

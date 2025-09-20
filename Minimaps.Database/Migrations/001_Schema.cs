@@ -7,15 +7,21 @@ public class InitialSchema : Migration
 {
     public override void Up()
     {
-        Create.Table("build")
-            .WithColumn("version").AsString(50).PrimaryKey()
+        Create.Table("builds")
+            .WithColumn("product").AsString(50)
+            .WithColumn("version").AsString(50)
             .WithColumn("ver_expansion").AsInt32().NotNullable()
             .WithColumn("ver_major").AsInt32().NotNullable()
             .WithColumn("ver_minor").AsInt32().NotNullable()
             .WithColumn("ver_build").AsInt32().NotNullable()
-            .WithColumn("product").AsString(50).NotNullable().WithDefaultValue("wow")
             .WithColumn("processed").AsBoolean().NotNullable().WithDefaultValue(false)
-            .WithColumn("published").AsDateTime().NotNullable().WithDefault(SystemMethods.CurrentDateTime);
+            .WithColumn("published").AsDateTime().NotNullable().WithDefault(SystemMethods.CurrentUTCDateTime);
+
+        Create.PrimaryKey("PK_builds")
+            .OnTable("builds")
+            .Columns("version", "product");
+
+#if false
 
         Create.Table("map")
             .WithColumn("id").AsInt32().PrimaryKey()
@@ -56,7 +62,7 @@ public class InitialSchema : Migration
 
         Create.ForeignKey("FK_build_minimap_build")
             .FromTable("build_minimap").ForeignColumn("build_version")
-            .ToTable("build").PrimaryColumn("version");
+            .ToTable("build").PrimaryColumns("version", "product");
 
         Create.ForeignKey("FK_build_minimap_map")
             .FromTable("build_minimap").ForeignColumn("map_id")
@@ -74,14 +80,15 @@ public class InitialSchema : Migration
         //Create.Index("IX_build_minimap_minimap_hash")
         //    .OnTable("build_minimap")
         //    .OnColumn("minimap_hash");
+#endif
     }
 
     public override void Down()
     {
-        Delete.Table("build_minimap");
-        Delete.Table("minimap");
-        Delete.Table("minimap_tile");
-        Delete.Table("map");
+        //Delete.Table("build_minimap");
+        //Delete.Table("minimap");
+        //Delete.Table("minimap_tile");
+        //Delete.Table("map");
         Delete.Table("build");
     }
 }

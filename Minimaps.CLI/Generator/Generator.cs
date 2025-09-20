@@ -2,6 +2,7 @@
 using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
+using Minimaps.Shared;
 using RibbitClient;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
@@ -43,7 +44,7 @@ internal class Generator
     internal async Task Generate()
     {
         var versionServer = new RibbitClient.RibbitClient(RibbitRegion.US);
-        var loadKeyTask = LoadTACTKeys();
+        var loadKeyTask = TACTKeys.LoadAsync(_config.CachePath, _logger);
 
         var productVersions = await versionServer.VersionsAsync(_config.Product);
         var productEntry = productVersions.Data.Single(x => x.Region == _config.CascRegion);
@@ -65,7 +66,12 @@ internal class Generator
         _buildInstance.LoadConfigs(productEntry.BuildConfig, productEntry.CDNConfig);
         _buildInstance.Load();
 
-        await loadKeyTask; // Ensure key loading is complete before potentially referencing encrypted map data
+        // Load TACT keys before we begin referencing TACT data
+        foreach(var entry in await loadKeyTask)
+        {
+            KeyService.SetKey(entry.KeyName, entry.KeyValue);
+        }
+
         var dbcd = new DBCD.DBCD(new TACTMapDBCProvider(_buildInstance), new GithubDBDProvider());
         var mapDB = dbcd.Load("Map");
         if (mapDB.Count == 0)
@@ -313,55 +319,6 @@ internal class Generator
         {
             fileSemaphore.Release();
         }
-    }
-
-    private async Task LoadTACTKeys()
-    {
-        using var httpClient = new HttpClient();
-
-        string? cachedETag = null;
-        if (File.Exists(Path.Combine(_config.CachePath, "TACTKeys.txt.etag")) && File.Exists(Path.Combine(_config.CachePath, "TACTKeys.txt")))
-        {
-            cachedETag = await File.ReadAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"));
-            _logger.LogTrace("Found cached TACTKeys ETag: {ETag}", cachedETag);
-            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("If-None-Match", cachedETag);
-        }
-
-        string? tactContents = null;
-        var tactRequest = await httpClient.GetAsync("https://github.com/wowdev/TACTKeys/raw/master/WoW.txt");
-        if (tactRequest.StatusCode == System.Net.HttpStatusCode.NotModified)
-        {
-            _logger?.LogInformation("TACTKeys not modified since last fetch, using cached version.");
-            tactContents = await File.ReadAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt"));
-        }
-        else
-        {
-            tactRequest.EnsureSuccessStatusCode(); // If it's not NotModified, it should be a valid 200
-            var newETag = tactRequest.Headers.ETag?.Tag ?? throw new Exception("No ETag header in TACTKeys response");
-            _logger.LogInformation("Fetched new TACTKeys (etag {tag})", newETag);
-
-            tactContents = await tactRequest.Content.ReadAsStringAsync();
-
-            await Task.WhenAll(
-                File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt"), tactContents),
-                File.WriteAllTextAsync(Path.Combine(_config.CachePath, "TACTKeys.txt.etag"), newETag)
-            );
-        }
-
-        // The TACTKeys repo provides [Name][Space][Value] and states that there might be data added in the future. Pull out the specific expected bytes only.
-        // "The format is a space separated file with the 16-char key lookup (or name) and the 32-char key itself, both encoded as hex."
-        // "More fields might be added at the end of the line in the future(e.g.IDs), be sure to only read the necessary data per line."
-        var tactRows = tactContents.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
-        foreach (var line in tactRows)
-        {
-            if (line.IndexOf(' ') != 16) throw new Exception("Unexpected TACTKeys line format: " + line);
-            var keyName = line[..16];
-            var keyBytes = line[17..49];
-
-            KeyService.SetKey(Convert.ToUInt64(keyName, 16), Convert.FromHexString(keyBytes));
-        }
-
-        _logger.LogInformation("Loaded {total} TACTKeys", tactRows.Count);
     }
 }
 

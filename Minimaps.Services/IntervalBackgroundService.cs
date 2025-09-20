@@ -27,6 +27,7 @@ internal abstract class IntervalBackgroundService(ILogger logger, TimeSpan inter
             }
             catch (OperationCanceledException)
             {
+                Logger.LogInformation("Cancel requested");
                 break; // Expected when cancellation is requested
             }
             catch (Exception ex)

@@ -1,7 +1,9 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
-    .WithPgAdmin(x=> x.WithHostPort(25432));
+    .WithPgAdmin(x=> {
+        x.WithHostPort(25432);
+    });
 
 var minimapsDb = postgres.AddDatabase("minimaps-database");
 
@@ -22,6 +24,7 @@ var frontend = builder.AddProject<Projects.Minimaps_Web_Frontend>("web-frontend"
 // background services
 var services = builder.AddProject<Projects.Minimaps_Services>("services")
     .WithReference(minimapsDb)
+    .WithReference(webapi)
     .WaitFor(webapi);
 
 builder.Build().Run();
