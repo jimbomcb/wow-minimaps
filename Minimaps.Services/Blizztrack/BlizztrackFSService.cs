@@ -10,10 +10,8 @@ namespace Minimaps.Services.Blizztrack;
 
 internal class BlizztrackFSService(IResourceLocator resourceLocator)
 {
-    internal async Task<Stream?> OpenStreamFDID(uint fdid, string product, string buildConfig, string CDNConfig, Locale localeFilter = Root.AllWoW, bool raw = false, CancellationToken cancellation = default)
+    internal async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
     {
-        var fs = await ResolveFileSystem(product, buildConfig, CDNConfig, cancellation);
-
         var descriptors = fs.OpenFDID(fdid, localeFilter);
         if (descriptors.Length == 0)
             throw new Exception($"FDID {fdid} not found in file system");
@@ -24,12 +22,14 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
             if (compressionSpec is null)
                 continue;
 
-            var dataStream = await resourceLocator.OpenStream(descriptor, cancellation);
-            if (dataStream != Stream.Null)
-                return raw ? dataStream : await BLTE.Execute(dataStream, compressionSpec, stoppingToken: cancellation);
+            var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
+            if (dataHandle.Exists)
+            {
+                return await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cancellation);
+            }
         }
 
-        throw new Exception($"Unable to find file with fileDataID {fdid} for table {fdid}");
+        throw new Exception($"Unable to find file with fileDataID {fdid}");
     }
 
     internal async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, CancellationToken cancellation)
@@ -39,7 +39,7 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
         return await ResolveFileSystem(product, new EncodingKey(buildBytes), new EncodingKey(serverBytes), cancellation) ?? throw new Exception("Failed to resolve file system");
     }
 
-    private async Task<IFileSystem> ResolveFileSystem(string productCode, EncodingKey buildConfiguration, EncodingKey serverConfiguration, CancellationToken stoppingToken) // temp public
+    private async Task<IFileSystem> ResolveFileSystem(string productCode, EncodingKey buildConfiguration, EncodingKey serverConfiguration, CancellationToken stoppingToken)
     {
         var buildTask = OpenConfig<BuildConfiguration>(productCode, buildConfiguration, stoppingToken);
         var serverTask = OpenConfig<ServerConfiguration>(productCode, serverConfiguration, stoppingToken);

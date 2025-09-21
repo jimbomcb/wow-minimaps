@@ -56,8 +56,14 @@ public class WDTReader : IDisposable
              // Skip this chunk
             _baseStream.Position += header.Size;
         }
-        
-        throw new InvalidDataException("WDT file did not contain an MAID chunk");
+
+        // see if we've been incorrectly passed compressed BLTE data, I've been doing this too often
+        _baseStream.Position = 0;
+        var magic = _reader.ReadBytes(4);
+        if (magic.Length == 4 && Encoding.ASCII.GetString(magic) == "BLTE")
+            throw new InvalidDataException("WDT file appears to be BLTE data, decompress before passing");
+
+        throw new InvalidDataException("WDT file did not contain a MAID chunk");
     }
 
     private ChunkHeader ReadChunkHeader()

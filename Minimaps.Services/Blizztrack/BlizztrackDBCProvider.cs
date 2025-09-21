@@ -17,15 +17,15 @@ internal class BlizztrackDBCProvider(IFileSystem filesystem, IResourceLocator re
 
         try
         {
-            foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS))
+            foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS)) // todo: maybe just makes more sense to move locale to the whole filesystem level
             {
                 var compressionSpec = filesystem.GetCompressionSpec(entry.EncodingKey);
                 if (compressionSpec is null)
                     continue;
 
-                var dataStream = resourceLocator.OpenStream(entry, CancellationToken.None).Result;
-                if (dataStream != Stream.Null)
-                    return BLTE.Execute(dataStream, compressionSpec).Result;
+                var dataHandle = resourceLocator.OpenHandle(entry, CancellationToken.None).Result;
+                if (dataHandle.Exists)
+                    return BLTE.Execute(dataHandle.ToStream(), compressionSpec).Result;
             }
         }
         catch (Exception ex)

@@ -1,4 +1,3 @@
-using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
 using DBCD;
 using DBCD.Providers;
@@ -7,6 +6,7 @@ using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
 using Newtonsoft.Json;
 using RibbitClient;
+using System.Collections.Concurrent;
 
 namespace Minimaps.Services;
 
@@ -86,7 +86,6 @@ internal class UpdateMonitorService :
         {
             Entries = [.. products.Keys.Select(k => new DiscoveredRequestDtoEntry(k.Product, k.Version))]
         }); // todo cancellation
-
         _logger.LogInformation("{NewBuilds} builds not yet published", newBuilds.Entries.Count);
 
         foreach (var entry in newBuilds.Entries)
@@ -107,7 +106,7 @@ internal class UpdateMonitorService :
         var output = new PublishDto();
 
         _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
-        foreach(var rowPair in mapDB.AsReadOnly())
+        foreach (var rowPair in mapDB.AsReadOnly())
         {
             var row = rowPair.Value;
 
@@ -118,19 +117,20 @@ internal class UpdateMonitorService :
             output.Maps.Add(row.ID, new(mapName, mapDir, mapJson));
         }
 
-        await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 1, CancellationToken = cancellation }, async (rowPair, token) =>
+        var observedTiles = new ConcurrentQueue<(int mapId, string hash, uint fileId, int tileX, int tileY)>();
+        await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
             var wdtFileID = row.Field<uint>("WdtFileDataID");
             if (wdtFileID == 0)
             {
-                _logger.LogDebug("Skipping map {MapId} ({MapDir}), no WDT", row.ID, row.Field<string>("Directory"));
                 return; // no WDT for this map, skip - TODO: Handle WMO based maps, recursively iterate the root object and store the per-WMO minimaps
             }
 
             try
             {
-                using var wdtStreamRaw = await _blizztrack.OpenStreamFDID(wdtFileID, build.Product, version.BuildConfig, version.CDNConfig, cancellation: token);
+                // Use the shared filesystem with the BlizztrackFSService method
+                using var wdtStreamRaw = await _blizztrack.OpenStreamFDID(wdtFileID, fs, cancellation: token);
                 if (wdtStreamRaw == null || wdtStreamRaw == Stream.Null)
                 {
                     _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir})", row.ID, row.Field<string>("Directory"));
@@ -139,22 +139,23 @@ internal class UpdateMonitorService :
 
                 using var wdtStream = new WDTReader(wdtStreamRaw);
                 var minimapTiles = wdtStream.ReadMinimapTiles();
-                
-                _logger.LogDebug("Map {MapId} ({MapDir}) has {TileCount} minimap tiles", 
-                    row.ID, row.Field<string>("Directory"), minimapTiles.Count);
-                
+
                 foreach (var tile in minimapTiles)
                 {
                     // get the content hash from the FDID, gather the deduped list of tiles
+                    var fileFDID = tile.FileId;
+                    var cKey = fs.GetFDIDContentKey(fileFDID);
+                    var hashString = Convert.ToHexStringLower(cKey.AsSpan());
 
+                    observedTiles.Enqueue(new(row.ID, hashString, fileFDID, tile.X, tile.Y));
                 }
+
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing minimap for map {MapId}", rowPair.Key);
             }
         });
-
 
         // - load WDB, parse out minimap tile FDIDs, aggregate tiles
         // - load, convert and compress the hash keyed tile list, push to backend
