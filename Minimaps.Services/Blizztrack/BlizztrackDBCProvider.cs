@@ -1,4 +1,5 @@
 ﻿using Blizztrack.Framework.TACT;
+using Blizztrack.Framework.TACT.Enums;
 using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
 using DBCD.Providers;
@@ -16,7 +17,7 @@ internal class BlizztrackDBCProvider(IFileSystem filesystem, IResourceLocator re
 
         try
         {
-            foreach (var entry in filesystem.OpenFDID(fileDataID))
+            foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS))
             {
                 var compressionSpec = filesystem.GetCompressionSpec(entry.EncodingKey);
                 if (compressionSpec is null)

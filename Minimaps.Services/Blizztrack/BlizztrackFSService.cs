@@ -1,5 +1,6 @@
 ﻿using Blizztrack.Framework.TACT;
 using Blizztrack.Framework.TACT.Configuration;
+using Blizztrack.Framework.TACT.Enums;
 using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
 using EncodingKeyView = Blizztrack.Framework.TACT.Views.EncodingKey;
@@ -9,11 +10,11 @@ namespace Minimaps.Services.Blizztrack;
 
 internal class BlizztrackFSService(IResourceLocator resourceLocator)
 {
-    internal async Task<Stream?> OpenStreamFDID(uint fdid, string product, string buildConfig, string CDNConfig, bool raw = false, CancellationToken cancellation = default)
+    internal async Task<Stream?> OpenStreamFDID(uint fdid, string product, string buildConfig, string CDNConfig, Locale localeFilter = Root.AllWoW, bool raw = false, CancellationToken cancellation = default)
     {
         var fs = await ResolveFileSystem(product, buildConfig, CDNConfig, cancellation);
 
-        var descriptors = fs.OpenFDID(fdid);
+        var descriptors = fs.OpenFDID(fdid, localeFilter);
         if (descriptors.Length == 0)
             throw new Exception($"FDID {fdid} not found in file system");
 
@@ -81,7 +82,6 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
         var compoundedIndex = new CompoundingIndex([.. await Task.WhenAll(indexTasks)]);
         var encoding = await encodingTask;
         var rootTask = ResolveRoot(productCode, encoding, compoundedIndex, fileIndex, buildConfiguration.Root, stoppingToken);
-        await Task.WhenAll(rootTask, installTask);
 
 #pragma warning disable BT002
         return new FileSystem<CompoundingIndex>(productCode, compoundedIndex, encoding, await rootTask, await installTask, fileIndex);
