@@ -1,4 +1,5 @@
 using Blizztrack.Framework.TACT.Resources;
+using DBCD;
 using DBCD.Providers;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
@@ -97,16 +98,24 @@ internal class UpdateMonitorService :
     {
         var fs = await _blizztrack.ResolveFileSystem(build.Product, version.BuildConfig, version.CDNConfig, cancellation);
         var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(fs, _resourceLocator), new GithubDBDProvider());
-        var mapDB = dbcd.Load("Map");
+        IDBCDStorage mapDB = dbcd.Load("Map");
         if (mapDB.Count == 0)
             throw new Exception("No maps found in Map DBC");
 
         _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
+        foreach(var rowPair in mapDB.AsReadOnly())
+        {
+            var row = rowPair.Value;
 
-        // TODO: Process each map entry's WDB
-        // - generate the map db rows, some baseline data we know exists across all game versions, plus raw JSONB of the WDB row for PGSQL
+            var mapName = row.Field<string>("MapName_lang");
+            var mapDir = row.Field<string>("Directory");
+            _logger.LogDebug("Map {ID}: {Name} @ {Dir}", row.ID, mapName, mapDir);
+        }
+
         // - load WDB, parse out minimap tile FDIDs, aggregate tiles
         // - load, convert and compress the hash keyed tile list, push to backend
         // - trigger backend data validation, ensure expected tiles exist and flag build as processed
+
+        _logger.LogInformation("Completed processing build {Product} {Version}", build.Product, build.Version);
     }
 }
