@@ -1,4 +1,6 @@
+using Blizztrack.Framework.TACT.Resources;
 using Minimaps.Services;
+using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -13,6 +15,9 @@ builder.Services.AddSingleton(serviceProvider =>
 
 builder.Services.AddHostedService<EventLoggerService>();
 builder.Services.AddHostedService<UpdateMonitorService>();
+
+builder.Services.AddSingleton<IResourceLocator, ResourceLocService>();
+builder.Services.AddSingleton<BlizztrackFSService>();
 
 var backendUrl = builder.Configuration.GetValue<string>("BackendUrl");
 if (string.IsNullOrEmpty(backendUrl))

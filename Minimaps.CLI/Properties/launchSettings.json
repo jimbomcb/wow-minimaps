@@ -2,15 +2,15 @@
   "profiles": {
     "Generate EK": {
       "commandName": "Project",
-      "commandLineArgs": "--filter-id 0"
+      "commandLineArgs": "generate --filter-id 0"
     },
     "Generate 2451": {
       "commandName": "Project",
-      "commandLineArgs": "--filter-id 2297"
+      "commandLineArgs": "generate --filter-id 2297"
     },
     "Generate All": {
       "commandName": "Project",
-      "commandLineArgs": ""
+      "commandLineArgs": "generate"
     },
     "Run Service Worker": {
       "commandName": "Project",

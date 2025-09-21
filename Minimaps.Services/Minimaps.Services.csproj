@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -18,8 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\External\Blizztrack\Blizztrack.Framework\Blizztrack.Framework.csproj" />
+    <ProjectReference Include="..\External\Blizztrack\Blizztrack.Framework.Extensions.AspNetCore\Blizztrack.Framework.Extensions.AspNetCore.csproj" />
     <ProjectReference Include="..\External\DBCD\DBCD\DBCD.csproj" />
-    <ProjectReference Include="..\External\TACTSharp\TACTSharp\TACTSharp.csproj" />
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>

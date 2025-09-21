@@ -1,6 +1,7 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
+    .WithDataVolume("minimap-postgres-persist")
     .WithPgAdmin(x=> {
         x.WithHostPort(25432);
     });

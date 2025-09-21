@@ -1,8 +1,9 @@
-using DBCD;
+using Blizztrack.Framework.TACT.Resources;
+using DBCD.Providers;
+using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
 using RibbitClient;
-using TACTSharp;
 
 namespace Minimaps.Services;
 
@@ -27,13 +28,18 @@ internal class UpdateMonitorService :
     private readonly Configuration _serviceConfig = new();
     private readonly ILogger<UpdateMonitorService> _logger;
     private readonly BackendClient _backendClient;
+    private readonly BlizztrackFSService _blizztrack;
+    private readonly IResourceLocator _resourceLocator;
 
-    public UpdateMonitorService(ILogger<UpdateMonitorService> logger, WebhookEventLog eventLog, IConfiguration configuration, BackendClient backendClient) : 
+    public UpdateMonitorService(ILogger<UpdateMonitorService> logger, WebhookEventLog eventLog, IConfiguration configuration,
+        BackendClient backendClient, BlizztrackFSService blizztrack, IResourceLocator resourceLocator) : 
         base(logger, TimeSpan.FromSeconds(30), eventLog)
     {
         _logger = logger;
         configuration.GetSection("Services:UpdateMonitor").Bind(_serviceConfig);
         _backendClient = backendClient;
+        _blizztrack = blizztrack;
+        _resourceLocator = resourceLocator;
     }
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
@@ -53,7 +59,7 @@ internal class UpdateMonitorService :
         {
             try
             {
-                var versionsResponse = await ribbitClient.VersionsAsync(product);
+                var versionsResponse = await ribbitClient.VersionsAsync(product); // todo cancellation
                 foreach (var version in versionsResponse.Data)
                 {
                     var key = new DiscoveredRequestDtoEntry(product, version.VersionsName);
@@ -78,41 +84,31 @@ internal class UpdateMonitorService :
         var newBuilds = await _backendClient.PostAsync<DiscoveredRequestDto>("publish/discovered", new DiscoveredRequestDto
         {
             Entries = [.. products.Keys.Select(k => new DiscoveredRequestDtoEntry(k.Product, k.Version))]
-        });
+        }); // todo cancellation
 
         _logger.LogInformation("{NewBuilds} builds not yet published", newBuilds.Entries.Count);
 
         // Load the bg loaded TACT keys before build accessing
         foreach (var entry in await loadKeyTask)
         {
-            KeyService.SetKey(entry.KeyName, entry.KeyValue);
+            //KeyService.SetKey(entry.KeyName, entry.KeyValue);
         }
 
         foreach (var entry in newBuilds.Entries)
         {
             _logger.LogInformation("Processing build {Product} {Version}", entry.Product, entry.Version);
-            await ProcessBuild(entry, products[entry]);
+            await ProcessBuild(entry, products[entry], cancellationToken);
         }
     }
 
-    private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version)
+    private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version, CancellationToken cancellation)
     {
-        var tactClient = new BuildInstance();
-        tactClient.Settings.CacheDir = _serviceConfig.CachePath;
-        foreach (var additionalCdn in _serviceConfig.AdditionalCDNs)
-        {
-            tactClient.Settings.AdditionalCDNs.Add(additionalCdn);
-            _logger.LogInformation("Added additional CDN: {cdn}", additionalCdn);
-        }
-        tactClient.Settings.TryCDN = true;
-        tactClient.LoadConfigs(version.BuildConfig, version.CDNConfig);
-        tactClient.Load();
+        var fs = await _blizztrack.ResolveFileSystem(build.Product, version.BuildConfig, version.CDNConfig, cancellation);
+        var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(fs, _resourceLocator), new GithubDBDProvider());
+        var mapDB = dbcd.Load("Map");
+        if (mapDB.Count == 0)
+            throw new Exception("No maps found in Map DBC");
 
-        //var dbcd = new DBCD.DBCD(new TACTMapDBCProvider(_buildInstance), new GithubDBDProvider());
-        //var mapDB = dbcd.Load("Map");
-        //if (mapDB.Count == 0)
-        //    throw new Exception("No maps found in Map DBC");
-        //
-
+        _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
     }
 }
