@@ -119,8 +119,17 @@ namespace Minimaps.Services.Blizztrack
         {
             return [
                 // todo parse from cdn endpoint
-                new("blzddist1-a.akamaihd.net", "tpr/wow", "tpr/configs/data"),
+                // Example CDN list:
+                // us|tpr/wow|blzddist1-a.akamaihd.net level3.blizzard.com us.cdn.blizzard.com|http://blzddist1-a.akamaihd.net/?maxhosts=5&fallback=1 http://level3.blizzard.com/?maxhosts=8
+                //   http://us.cdn.blizzard.com/?maxhosts=4&fallback=1 https://blzddist1-a.akamaihd.net/?maxhosts=4&fallback=1 https://level3.ssl.blizzard.com/?maxhosts=4&fallback=1
+                //   https://us.cdn.blizzard.com/?maxhosts=4&fallback=1|tpr/configs/data
+
+                // Each URL has max hosts, presumably max concurrent connections to that host, and a "fallback" presumably meaning anything without the fallback is prioriy for queries
+                //   (ie level3.blizzard.com is current preferred)
+                // TODO: see if other libraries at least try and follow that behaviour
+                
                 new("level3.blizzard.com", "tpr/wow", "tpr/configs/data"),
+                new("blzddist1-a.akamaihd.net", "tpr/wow", "tpr/configs/data"),
                 new("us.cdn.blizzard.com", "tpr/wow", "tpr/configs/data")
             ];
         }
