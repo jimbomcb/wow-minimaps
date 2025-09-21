@@ -8,9 +8,9 @@ using Index = Blizztrack.Framework.TACT.Implementation.Index;
 
 namespace Minimaps.Services.Blizztrack;
 
-internal class BlizztrackFSService(IResourceLocator resourceLocator)
+public class BlizztrackFSService(IResourceLocator resourceLocator)
 {
-    internal async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
+    public async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
     {
         var descriptors = fs.OpenFDID(fdid, localeFilter);
         if (descriptors.Length == 0)
@@ -32,7 +32,7 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
         throw new Exception($"Unable to find file with fileDataID {fdid}");
     }
 
-    internal async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, CancellationToken cancellation)
+    public async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, CancellationToken cancellation)
     {
         var buildBytes = Convert.FromHexString(buildConfig);
         var serverBytes = Convert.FromHexString(CDNConfig);

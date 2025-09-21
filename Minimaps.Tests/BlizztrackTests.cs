@@ -1,0 +1,153 @@
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Minimaps.Services.Blizztrack;
+using Blizztrack.Framework.TACT.Resources;
+using Blizztrack.Framework.TACT.Implementation;
+
+namespace Minimaps.Tests;
+
+public class BlizztrackTests
+{
+    [Fact]
+    public async Task TestBlizztrack_MapDB2()
+    {
+        var configValues = new Dictionary<string, string?>
+        {
+            ["Blizztrack:CachePath"] = "C:\\temp\\lfs",
+            ["Blizztrack:RateLimitPermits"] = "10",
+            ["Blizztrack:RateLimitWindowSeconds"] = "60",
+            ["Blizztrack:RateLimitSegments"] = "12",
+            ["Blizztrack:QueueLimit"] = "2147483647",
+            ["Blizztrack:ConcurrencyLimit"] = "3",
+            ["Blizztrack:ConcurrencyQueueLimit"] = "2147483647",
+            ["Blizztrack:MaxRetryAttempts"] = "3",
+            ["Blizztrack:RetryBaseDelaySeconds"] = "1.0",
+            ["Blizztrack:RetryMaxDelaySeconds"] = "30.0"
+        };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        services.AddHttpClient();
+
+        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<BlizztrackFSService>();
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        try
+        {
+            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
+            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
+
+            // todo: will break once the products cycle, need to grab a known active product from version server
+            const string product = "wow";
+            const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
+            const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+
+            const uint testFileId = 1349477; // Map DBC
+            foreach (var entry in fileSystem.OpenFDID(testFileId, Blizztrack.Framework.TACT.Enums.Locale.enUS))
+            {
+                var mapHandle = await resourceLocService.OpenHandle(entry, cts.Token);
+                Assert.True(mapHandle.Exists, "Map handle not found");
+
+                var compressionSpec = fileSystem.GetCompressionSpec(entry.EncodingKey);
+                if (compressionSpec is null)
+                    continue;
+
+                var dataHandle = await resourceLocService.OpenHandle(entry, cts.Token);
+                if (dataHandle.Exists)
+                {
+                    var processedBLTE = await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                    Assert.NotNull(processedBLTE);
+                    Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
+                    logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
+                }
+            }
+        }
+        finally
+        {
+            serviceProvider.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task TestBlizztrack_EncryptedMap()
+    {
+        var configValues = new Dictionary<string, string?>
+        {
+            ["Blizztrack:CachePath"] = "C:\\temp\\lfs",
+            ["Blizztrack:RateLimitPermits"] = "10",
+            ["Blizztrack:RateLimitWindowSeconds"] = "60",
+            ["Blizztrack:RateLimitSegments"] = "12",
+            ["Blizztrack:QueueLimit"] = "2147483647",
+            ["Blizztrack:ConcurrencyLimit"] = "3",
+            ["Blizztrack:ConcurrencyQueueLimit"] = "2147483647",
+            ["Blizztrack:MaxRetryAttempts"] = "3",
+            ["Blizztrack:RetryBaseDelaySeconds"] = "1.0",
+            ["Blizztrack:RetryMaxDelaySeconds"] = "30.0"
+        };
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        services.AddHttpClient();
+
+        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<BlizztrackFSService>();
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        try
+        {
+            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
+            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
+
+            // todo: will break once the products cycle, need to grab a known active product from version server
+            const string product = "wow";
+            const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
+            const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+
+            const uint testFileId = 3182457; // known-encrypted file: "b:{256K*=e:{F21C5CA430F434D1,8E085D49,z}}"
+            foreach (var entry in fileSystem.OpenFDID(testFileId, Blizztrack.Framework.TACT.Enums.Locale.enUS))
+            {
+                var mapHandle = await resourceLocService.OpenHandle(entry, cts.Token);
+                Assert.True(mapHandle.Exists, "Map handle not found");
+
+                var compressionSpec = fileSystem.GetCompressionSpec(entry.EncodingKey);
+                if (compressionSpec is null)
+                    continue;
+
+                var dataHandle = await resourceLocService.OpenHandle(entry, cts.Token);
+                if (dataHandle.Exists)
+                {
+                    var processedBLTE = await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                    Assert.NotNull(processedBLTE);
+                    Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
+                    logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
+                }
+            }
+        }
+        finally
+        {
+            serviceProvider.Dispose();
+        }
+    }
+}

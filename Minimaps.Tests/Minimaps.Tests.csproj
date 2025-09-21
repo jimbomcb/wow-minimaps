@@ -17,6 +17,7 @@
 
 	<ItemGroup>
 	  <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
+	  <ProjectReference Include="..\Minimaps.Services\Minimaps.Services.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>
