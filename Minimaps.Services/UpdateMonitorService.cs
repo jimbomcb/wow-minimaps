@@ -44,9 +44,7 @@ internal class UpdateMonitorService :
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
     {
-        var loadKeyTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
         var ribbitClient = new RibbitClient.RibbitClient(RibbitRegion.US);
-
         var tactSummary = await ribbitClient.SummaryAsync();
         var tactSequence = tactSummary.SequenceId; // todo: early-out if no change in sequence since last tick
         _logger.LogInformation("Processing summary seq #{SequenceId} with {ProductCount} products", tactSequence, tactSummary.Data.Count);
@@ -87,12 +85,6 @@ internal class UpdateMonitorService :
         }); // todo cancellation
 
         _logger.LogInformation("{NewBuilds} builds not yet published", newBuilds.Entries.Count);
-
-        // Load the bg loaded TACT keys before build accessing
-        foreach (var entry in await loadKeyTask)
-        {
-            //KeyService.SetKey(entry.KeyName, entry.KeyValue);
-        }
 
         foreach (var entry in newBuilds.Entries)
         {

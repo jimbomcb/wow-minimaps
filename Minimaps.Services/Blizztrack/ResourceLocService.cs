@@ -70,15 +70,31 @@ namespace Minimaps.Services.Blizztrack
         public override ResourceHandle CreateLocalHandle(ResourceDescriptor resourceDescriptor, byte[] fileData)
         {
             var localPath = Path.Combine(_config.CachePath, "res", resourceDescriptor.LocalPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+            var directory = Path.GetDirectoryName(localPath)!;
+            Directory.CreateDirectory(directory);
 
-            File.WriteAllBytes(localPath, fileData);
-            return new ResourceHandle(localPath);
-        }
+            // avoid writing partial files via temp + rename
+            var tempPath = Path.Combine(directory, $"{Path.GetFileName(localPath)}.tmp.{Guid.NewGuid():N}");
+            try
+            {
+                File.WriteAllBytes(tempPath, fileData);
+                File.Move(tempPath, localPath, overwrite: true);
+                return new(localPath);
+            }
+            catch (Exception)
+            {
+                try
+                {
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogWarning(cleanupEx, "Failed to clean up temporary file: {TempPath}", tempPath);
+                }
 
-        public override Task<ResourceHandle> OpenCompressedHandle(ResourceDescriptor compressedDescriptor, CancellationToken stoppingToken)
-        {
-            throw new NotImplementedException();
+                throw;
+            }
         }
 
         public override ResourceHandle OpenLocalHandle(ResourceDescriptor resourceDescriptor)
@@ -86,6 +102,11 @@ namespace Minimaps.Services.Blizztrack
             var localPath = Path.Combine(_config.CachePath, "res", resourceDescriptor.LocalPath);
             Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
             return new(localPath);
+        }
+
+        public override Task<ResourceHandle> OpenCompressedHandle(ResourceDescriptor compressedDescriptor, CancellationToken stoppingToken)
+        {
+            throw new NotImplementedException();
         }
 
         public override global::Blizztrack.Framework.TACT.ContentKey ResolveContentKey(in global::Blizztrack.Framework.TACT.Views.EncodingKey encodingKey)
