@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
 using Blizztrack.Framework.TACT.Resources;
 using Blizztrack.Framework.TACT.Implementation;
+using Minimaps.Shared;
 
 namespace Minimaps.Tests;
 
@@ -113,9 +114,17 @@ public class BlizztrackTests
 
         try
         {
+            // Load TACT keys before testing
+            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
+            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs", logger);
+            foreach (var key in tactKeys)
+            {
+                TACTKeyService.SetKey(key.KeyName, key.KeyValue);
+            }
+            logger.LogInformation("Loaded {KeyCount} TACT keys", tactKeys.Count);
+
             var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
             var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
-            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
 
             // todo: will break once the products cycle, need to grab a known active product from version server
             const string product = "wow";
@@ -142,6 +151,11 @@ public class BlizztrackTests
                     Assert.NotNull(processedBLTE);
                     Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
                     logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
+
+                    var reader = new WDTReader(processedBLTE);
+                    var minimapEntries = reader.ReadMinimapTiles();
+                    Assert.True(minimapEntries.Count > 0);
+
                 }
             }
         }
