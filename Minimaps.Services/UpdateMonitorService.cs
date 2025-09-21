@@ -103,33 +103,34 @@ internal class UpdateMonitorService :
         if (mapDB.Count == 0)
             throw new Exception("No maps found in Map DBC");
 
+        _logger.LogInformation("Loaded {Count} map entries", mapDB.Count);
         var output = new PublishDto();
 
-        _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
         foreach (var rowPair in mapDB.AsReadOnly())
         {
             var row = rowPair.Value;
-
             var mapName = row.Field<string>("MapName_lang");
             var mapDir = row.Field<string>("Directory");
-            var dynamicData = row.AsType<object>();
-            var mapJson = JsonConvert.SerializeObject(dynamicData);
+            var mapJson = JsonConvert.SerializeObject(row.AsType<object>());
             output.Maps.Add(row.ID, new(mapName, mapDir, mapJson));
         }
 
+        // there are async issues inside the AbstractResourceLocatorService writing to the same file across multiple threads
+        // temporarily just lock based on WDT id given the problem is multiple parallel maps referencing the single WDT
+        // but this is more a blizztrack issue than our issue...
+        ConcurrentDictionary<uint, SemaphoreSlim> tempLocks = new(); 
         var observedTiles = new ConcurrentQueue<(int mapId, string hash, uint fileId, int tileX, int tileY)>();
         await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
             var wdtFileID = row.Field<uint>("WdtFileDataID");
             if (wdtFileID == 0)
-            {
                 return; // no WDT for this map, skip - TODO: Handle WMO based maps, recursively iterate the root object and store the per-WMO minimaps
-            }
 
+            var fileLock = tempLocks.GetOrAdd(wdtFileID, _ => new SemaphoreSlim(1, 1));
+            await fileLock.WaitAsync(cancellation);
             try
             {
-                // Use the shared filesystem with the BlizztrackFSService method
                 using var wdtStreamRaw = await _blizztrack.OpenStreamFDID(wdtFileID, fs, cancellation: token);
                 if (wdtStreamRaw == null || wdtStreamRaw == Stream.Null)
                 {
@@ -149,11 +150,14 @@ internal class UpdateMonitorService :
 
                     observedTiles.Enqueue(new(row.ID, hashString, fileFDID, tile.X, tile.Y));
                 }
-
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing minimap for map {MapId}", rowPair.Key);
+            }
+            finally
+            {
+                fileLock.Release();
             }
         });
 

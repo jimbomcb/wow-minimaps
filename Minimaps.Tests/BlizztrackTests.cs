@@ -155,7 +155,6 @@ public class BlizztrackTests
                     var reader = new WDTReader(processedBLTE);
                     var minimapEntries = reader.ReadMinimapTiles();
                     Assert.True(minimapEntries.Count > 0);
-
                 }
             }
         }
