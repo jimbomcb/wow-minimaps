@@ -1,9 +1,11 @@
+using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
 using DBCD;
 using DBCD.Providers;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
+using Newtonsoft.Json;
 using RibbitClient;
 
 namespace Minimaps.Services;
@@ -102,6 +104,8 @@ internal class UpdateMonitorService :
         if (mapDB.Count == 0)
             throw new Exception("No maps found in Map DBC");
 
+        var output = new PublishDto();
+
         _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
         foreach(var rowPair in mapDB.AsReadOnly())
         {
@@ -109,8 +113,48 @@ internal class UpdateMonitorService :
 
             var mapName = row.Field<string>("MapName_lang");
             var mapDir = row.Field<string>("Directory");
-            _logger.LogDebug("Map {ID}: {Name} @ {Dir}", row.ID, mapName, mapDir);
+            var dynamicData = row.AsType<object>();
+            var mapJson = JsonConvert.SerializeObject(dynamicData);
+            output.Maps.Add(row.ID, new(mapName, mapDir, mapJson));
         }
+
+        await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 1, CancellationToken = cancellation }, async (rowPair, token) =>
+        {
+            var row = rowPair.Value;
+            var wdtFileID = row.Field<uint>("WdtFileDataID");
+            if (wdtFileID == 0)
+            {
+                _logger.LogDebug("Skipping map {MapId} ({MapDir}), no WDT", row.ID, row.Field<string>("Directory"));
+                return; // no WDT for this map, skip - TODO: Handle WMO based maps, recursively iterate the root object and store the per-WMO minimaps
+            }
+
+            try
+            {
+                using var wdtStreamRaw = await _blizztrack.OpenStreamFDID(wdtFileID, build.Product, version.BuildConfig, version.CDNConfig, cancellation: token);
+                if (wdtStreamRaw == null || wdtStreamRaw == Stream.Null)
+                {
+                    _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir})", row.ID, row.Field<string>("Directory"));
+                    return;
+                }
+
+                using var wdtStream = new WDTReader(wdtStreamRaw);
+                var minimapTiles = wdtStream.ReadMinimapTiles();
+                
+                _logger.LogDebug("Map {MapId} ({MapDir}) has {TileCount} minimap tiles", 
+                    row.ID, row.Field<string>("Directory"), minimapTiles.Count);
+                
+                foreach (var tile in minimapTiles)
+                {
+                    // get the content hash from the FDID, gather the deduped list of tiles
+
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing minimap for map {MapId}", rowPair.Key);
+            }
+        });
+
 
         // - load WDB, parse out minimap tile FDIDs, aggregate tiles
         // - load, convert and compress the hash keyed tile list, push to backend
