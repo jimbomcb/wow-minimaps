@@ -16,7 +16,7 @@ internal class BlizztrackDBCProvider(IFileSystem filesystem, IResourceLocator re
 
         try
         {
-            foreach(var entry in filesystem.OpenFDID(fileDataID))
+            foreach (var entry in filesystem.OpenFDID(fileDataID))
             {
                 var compressionSpec = filesystem.GetCompressionSpec(entry.EncodingKey);
                 if (compressionSpec is null)

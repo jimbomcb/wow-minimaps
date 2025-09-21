@@ -2,7 +2,6 @@
 using Blizztrack.Framework.TACT.Configuration;
 using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
-using System.Runtime.CompilerServices;
 using EncodingKeyView = Blizztrack.Framework.TACT.Views.EncodingKey;
 using Index = Blizztrack.Framework.TACT.Implementation.Index;
 
@@ -56,7 +55,7 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
         ServerConfiguration cdnConfiguration, IResourceLocator locator, CancellationToken stoppingToken = default)
     {
         if (cdnConfiguration.FileIndex.Size == 0)
-            throw new Exception("TODO");
+            throw new Exception("TODO"); // not yet encountered? is it ever possible?
 
         var encodingTask = resourceLocator.OpenCompressed<Encoding>(productCode,
             buildConfiguration.Encoding.Encoding.Key,
@@ -95,17 +94,17 @@ internal class BlizztrackFSService(IResourceLocator resourceLocator)
         var results = encoding.FindContentKey(root);
         if (results.Count == 0)
             return default;
-    
+
         foreach (EncodingKeyView encodingKey in results.Keys)
         {
             var archiveInfo = compoundedIndex.FindEncodingKey(in encodingKey);
             if (!archiveInfo && fileIndex is not null)
                 archiveInfo = fileIndex.FindEncodingKey(in encodingKey);
-    
+
             if (archiveInfo)
                 return await resourceLocator.OpenCompressed<Root>(productCode, archiveInfo.Archive, stoppingToken);
         }
-    
+
         return default;
     }
 }

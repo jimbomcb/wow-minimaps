@@ -18,7 +18,7 @@ internal class UpdateMonitorService :
     IntervalBackgroundService
 {
     private class Configuration
-    { 
+    {
         public string CachePath { get; set; } = "./cache";
         public List<string> Products { get; set; } = [];
         public List<string> AdditionalCDNs { get; set; } = [];
@@ -32,7 +32,7 @@ internal class UpdateMonitorService :
     private readonly IResourceLocator _resourceLocator;
 
     public UpdateMonitorService(ILogger<UpdateMonitorService> logger, WebhookEventLog eventLog, IConfiguration configuration,
-        BackendClient backendClient, BlizztrackFSService blizztrack, IResourceLocator resourceLocator) : 
+        BackendClient backendClient, BlizztrackFSService blizztrack, IResourceLocator resourceLocator) :
         base(logger, TimeSpan.FromSeconds(30), eventLog)
     {
         _logger = logger;
@@ -102,5 +102,11 @@ internal class UpdateMonitorService :
             throw new Exception("No maps found in Map DBC");
 
         _logger.LogInformation("Map DBC has {Count} entries", mapDB.Count);
+
+        // TODO: Process each map entry's WDB
+        // - generate the map db rows, some baseline data we know exists across all game versions, plus raw JSONB of the WDB row for PGSQL
+        // - load WDB, parse out minimap tile FDIDs, aggregate tiles
+        // - load, convert and compress the hash keyed tile list, push to backend
+        // - trigger backend data validation, ensure expected tiles exist and flag build as processed
     }
 }
