@@ -115,7 +115,7 @@ public class PublishController : Controller
 
         try
         {            
-            using var requestStream = Request.Body;
+            // read stream into memory for hash calculation (tiles should be <1MB each)
             await _tileStore.SaveAsync(tileHash, requestStream, contentTypeValues.Single()!);
 
             using var connection = _db.CreateConnection();
