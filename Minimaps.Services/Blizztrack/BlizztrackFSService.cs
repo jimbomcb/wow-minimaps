@@ -14,7 +14,7 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
     {
         var descriptors = fs.OpenFDID(fdid, localeFilter);
         if (descriptors.Length == 0)
-            throw new Exception($"FDID {fdid} not found in file system");
+            return null;
 
         foreach (var descriptor in descriptors)
         {
@@ -24,12 +24,11 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
 
             var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
             if (dataHandle.Exists)
-            {
                 return await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cancellation);
-            }
         }
 
-        throw new Exception($"Unable to find file with fileDataID {fdid}");
+        // todo: can we have descriptors to files that don't have a compression spec or accessible handle?
+        throw new Exception($"Unable to open any of {descriptors.Length} descriptors for {fdid}");
     }
 
     public async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, CancellationToken cancellation)
@@ -55,6 +54,8 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
     private async Task<IFileSystem> OpenFileSystem(string productCode, BuildConfiguration buildConfiguration,
         ServerConfiguration cdnConfiguration, IResourceLocator locator, CancellationToken stoppingToken = default)
     {
+        // Based on how the Blizztrack project's FileSystemController, stream in the Encoding, Install, Indicies etc.
+
         if (cdnConfiguration.FileIndex.Size == 0)
             throw new Exception("TODO"); // not yet encountered? is it ever possible?
 

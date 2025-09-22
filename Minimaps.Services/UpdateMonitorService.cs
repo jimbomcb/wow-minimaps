@@ -95,6 +95,8 @@ internal class UpdateMonitorService :
         }
     }
 
+    private readonly record struct TilePos(int MapId, int TileX, int TileY);
+    private readonly record struct TileHashData(uint TileFDID, ConcurrentBag<TilePos> Tiles);
     private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version, CancellationToken cancellation)
     {
         var fs = await _blizztrack.ResolveFileSystem(build.Product, version.BuildConfig, version.CDNConfig, cancellation);
@@ -118,8 +120,8 @@ internal class UpdateMonitorService :
         // there are async issues inside the AbstractResourceLocatorService writing to the same file across multiple threads
         // temporarily just lock based on WDT id given the problem is multiple parallel maps referencing the single WDT
         // but this is more a blizztrack issue than our issue...
-        ConcurrentDictionary<uint, SemaphoreSlim> tempLocks = new(); 
-        var observedTiles = new ConcurrentQueue<(int mapId, string hash, uint fileId, int tileX, int tileY)>();
+        var tempLocks = new ConcurrentDictionary<uint, SemaphoreSlim>();
+        var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
         await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
@@ -140,15 +142,24 @@ internal class UpdateMonitorService :
 
                 using var wdtStream = new WDTReader(wdtStreamRaw);
                 var minimapTiles = wdtStream.ReadMinimapTiles();
+                if (minimapTiles == null)
+                {
+                    // Some maps reference a WDT but don't have MAID chunks?
+                    // TODO: Are these stored elsewhere like older versions? Assuming not
+                    return;
+                }
 
                 foreach (var tile in minimapTiles)
                 {
-                    // get the content hash from the FDID, gather the deduped list of tiles
-                    var fileFDID = tile.FileId;
-                    var cKey = fs.GetFDIDContentKey(fileFDID);
-                    var hashString = Convert.ToHexStringLower(cKey.AsSpan());
-
-                    observedTiles.Enqueue(new(row.ID, hashString, fileFDID, tile.X, tile.Y));
+                    // get the content hash from the FDID, gather the deduped list of Tiles
+                    var ckey = fs.GetFDIDContentKey(tile.FileId);
+                    tileHashMap.AddOrUpdate(Convert.ToHexStringLower(ckey.AsSpan()),
+                        _ => new(tile.FileId, [new(row.ID, tile.X, tile.Y)]),
+                        (_, existing) =>
+                        {
+                            existing.Tiles.Add(new(row.ID, tile.X, tile.Y));
+                            return existing;
+                        });
                 }
             }
             catch (Exception ex)

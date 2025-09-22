@@ -6,6 +6,7 @@ public readonly record struct MinimapTileData(int X, int Y, uint FileId);
 
 public class WDTReader : IDisposable
 {
+    public readonly record struct ChunkHeader(string Ident, uint Size);
     private readonly Stream _baseStream;
     private readonly BinaryReader _reader;
     private bool _disposed;
@@ -16,7 +17,7 @@ public class WDTReader : IDisposable
         _reader = new BinaryReader(_baseStream);
     }
 
-    public List<MinimapTileData> ReadMinimapTiles()
+    public List<MinimapTileData>? ReadMinimapTiles()
     {
         // TODO: See how we can go about validating version, historical WDTs
 
@@ -57,13 +58,7 @@ public class WDTReader : IDisposable
             _baseStream.Position += header.Size;
         }
 
-        // see if we've been incorrectly passed compressed BLTE data, I've been doing this too often
-        _baseStream.Position = 0;
-        var magic = _reader.ReadBytes(4);
-        if (magic.Length == 4 && Encoding.ASCII.GetString(magic) == "BLTE")
-            throw new InvalidDataException("WDT file appears to be BLTE data, decompress before passing");
-
-        throw new InvalidDataException("WDT file did not contain a MAID chunk");
+        return null;
     }
 
     private ChunkHeader ReadChunkHeader()
@@ -87,4 +82,3 @@ public class WDTReader : IDisposable
     }
 }
 
-internal readonly record struct ChunkHeader(string Ident, uint Size);
