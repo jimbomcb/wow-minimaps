@@ -33,6 +33,7 @@ internal class UpdateMonitorService :
     private readonly BackendClient _backendClient;
     private readonly BlizztrackFSService _blizztrack;
     private readonly IResourceLocator _resourceLocator;
+    private readonly IDBDProvider _dbdProvider;
 
     public UpdateMonitorService(ILogger<UpdateMonitorService> logger, WebhookEventLog eventLog, IConfiguration configuration,
         BackendClient backendClient, BlizztrackFSService blizztrack, IResourceLocator resourceLocator) :
@@ -43,6 +44,7 @@ internal class UpdateMonitorService :
         _backendClient = backendClient;
         _blizztrack = blizztrack;
         _resourceLocator = resourceLocator;
+        _dbdProvider = new CachedGithubDBDProvider(_serviceConfig.CachePath, _logger);
     }
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
@@ -100,7 +102,7 @@ internal class UpdateMonitorService :
     private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version, CancellationToken cancellation)
     {
         var fs = await _blizztrack.ResolveFileSystem(build.Product, version.BuildConfig, version.CDNConfig, cancellation);
-        var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(fs, _resourceLocator), new GithubDBDProvider());
+        var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(fs, _resourceLocator), _dbdProvider);
         IDBCDStorage mapDB = dbcd.Load("Map");
         if (mapDB.Count == 0)
             throw new Exception("No maps found in Map DBC");
@@ -172,8 +174,10 @@ internal class UpdateMonitorService :
             }
         });
 
-        // - load WDB, parse out minimap tile FDIDs, aggregate tiles
-        // - load, convert and compress the hash keyed tile list, push to backend
+        // POST our list of tiles and PUT each missing tile
+        // Current builds are around: 5807 unique tiles across 1122 maps / 47538 tiles
+        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapDB.Count, tileHashMap.Sum(x=>x.Value.Tiles.Count));
+
         // - trigger backend data validation, ensure expected tiles exist and flag build as processed
 
         _logger.LogInformation("Completed processing build {Product} {Version}", build.Product, build.Version);
