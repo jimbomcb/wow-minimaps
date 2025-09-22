@@ -3,9 +3,16 @@
 public class LocalTileStore : ITileStore
 {
     private readonly string _basePath;
-
-    public LocalTileStore(string basePath)
+    private static readonly Dictionary<string, string> _contentTypeToExtension = new()
     {
+        { "image/webp", ".webp" },
+        { "image/png", ".png" },
+        { "image/jpeg", ".jpg" },
+    };
+
+    public LocalTileStore(IConfiguration configuration)
+    {
+        var basePath = configuration.GetValue<string>("LocalTileStore:Path");
         _basePath = basePath ?? throw new ArgumentNullException(nameof(basePath));
 
         if (!Directory.Exists(_basePath))
@@ -17,30 +24,46 @@ public class LocalTileStore : ITileStore
         if (hash == null || hash.Length != 32)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
-        var filePath = GetFilePath(hash);
-        return File.Exists(filePath);
+        var baseFilePath = GetBaseFilePath(hash);
+        foreach (var extension in _contentTypeToExtension.Values)
+        {
+            if (File.Exists(baseFilePath + extension))
+                return true;
+        }
+        
+        return false;
     }
 
-    public async Task<Stream> GetAsync(string hash)
+    public async Task<TileInfo> GetAsync(string hash)
     {
         if (hash == null || hash.Length != 32)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
-        var filePath = GetFilePath(hash);
+        var baseFilePath = GetBaseFilePath(hash);
+        
+        foreach (var kvp in _contentTypeToExtension)
+        {
+            var filePath = baseFilePath + kvp.Value;
+            if (File.Exists(filePath))
+            {
+                var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                return new TileInfo(stream, kvp.Key);
+            }
+        }
 
-        if (!File.Exists(filePath))
-            throw new FileNotFoundException($"Tile with hash '{hash}' not found");
-
-        return new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        throw new FileNotFoundException($"Tile with hash '{hash}' not found");
     }
 
-    public async Task SaveAsync(string hash, Stream stream)
+    public async Task SaveAsync(string hash, Stream stream, string contentType)
     {
         ArgumentNullException.ThrowIfNull(stream);
         if (hash == null || hash.Length != 32)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
+        
+        if (!_contentTypeToExtension.TryGetValue(contentType, out var extension))
+            throw new ArgumentException($"Unsupported content type: {contentType}", nameof(contentType));
 
-        var filePath = GetFilePath(hash);
+        var filePath = GetBaseFilePath(hash) + extension;
         var directory = Path.GetDirectoryName(filePath);
 
         if (!Directory.Exists(directory))
@@ -50,11 +73,11 @@ public class LocalTileStore : ITileStore
         await stream.CopyToAsync(fileStream);
     }
 
-    private string GetFilePath(string hash)
+    private string GetBaseFilePath(string hash)
     {
         if (hash == null || hash.Length != 32)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
-        // partition out based on the first 2 hash charactres.
+        // partition out based on the first 2 hash characters.
         return Path.Combine(_basePath, hash[..2], hash);
     }
 }

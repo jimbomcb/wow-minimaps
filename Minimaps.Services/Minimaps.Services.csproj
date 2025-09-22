@@ -18,12 +18,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\External\Blizztrack\Blizztrack.Framework\Blizztrack.Framework.csproj" />
     <ProjectReference Include="..\External\Blizztrack\Blizztrack.Framework.Extensions.AspNetCore\Blizztrack.Framework.Extensions.AspNetCore.csproj" />
+    <ProjectReference Include="..\External\BLPSharp\BLPSharp\BLPSharp.csproj" />
     <ProjectReference Include="..\External\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />

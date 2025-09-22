@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 
 namespace Minimaps.Services;
@@ -18,21 +19,21 @@ public class BackendClient
         };
     }
 
-    public async Task<T> GetAsync<T>(string endpoint)
+    public async Task<T> GetAsync<T>(string endpoint, CancellationToken cancellation = default)
     {
-        var response = await _httpClient.GetAsync(endpoint);
+        var response = await _httpClient.GetAsync(endpoint, cancellation);
         response.EnsureSuccessStatusCode();
 
         var json = await response.Content.ReadAsStringAsync();
         return JsonSerializer.Deserialize<T>(json, _jsonOptions);
     }
 
-    public async Task<T> PostAsync<T>(string endpoint, object data)
+    public async Task<T> PostAsync<T>(string endpoint, object data, CancellationToken cancellation = default)
     {
         var json = JsonSerializer.Serialize(data, _jsonOptions);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await _httpClient.PostAsync(endpoint, content);
+        var response = await _httpClient.PostAsync(endpoint, content, cancellation);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync();
@@ -40,4 +41,12 @@ public class BackendClient
         return JsonSerializer.Deserialize<T>(responseJson, _jsonOptions);
     }
 
+    public async Task PutAsync(string endpoint, Stream imageData, string contentType, CancellationToken cancellation = default)
+    {
+        using var content = new StreamContent(imageData);
+        content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+
+        var response = await _httpClient.PutAsync(endpoint, content, cancellation);
+        response.EnsureSuccessStatusCode();
+    }
 }

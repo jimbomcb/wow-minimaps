@@ -1,6 +1,6 @@
 ﻿namespace Minimaps.Database.Tables;
 
-#pragma warning disable IDE1006 // Naming Styles - this specifically matches the Postgres column names
+#pragma warning disable IDE1006, CS8618
 internal class Build
 {
     /// <summary>
@@ -29,17 +29,6 @@ internal class Map
     public string directory { get; set; }
     public string name { get; set; }
     //public int? parent { get; set; } // todo: can just be derived from coalesce(db2->CosmeticParentMapID, db2->ParentMapID) I think
-}
-
-/// <summary>
-/// Individual tile content - can be shared across multiple minimaps
-/// </summary>
-internal class MinimapTile
-{
-    public string hash { get; set; } // varchar(32) - MD5 of tile content
-    public DateTime first_seen { get; set; }
-    // Physical file: /tiles/{hash}.webp
-    // kinda redundant, but in the future we might want to reference tiles on a different file backend
 }
 
 /// <summary>
@@ -75,5 +64,5 @@ internal class BuildMinimap
     // Most builds will reuse existing minimap_hash values
 }
 
-#pragma warning restore IDE1006 // Naming Styles
+#pragma warning restore IDE1006, CS8618
 

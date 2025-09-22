@@ -1,4 +1,5 @@
 using Blizztrack.Framework.TACT.Resources;
+using BLPSharp;
 using DBCD;
 using DBCD.Providers;
 using Minimaps.Services.Blizztrack;
@@ -6,6 +7,9 @@ using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
 using Newtonsoft.Json;
 using RibbitClient;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Webp;
+using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 
 namespace Minimaps.Services;
@@ -127,7 +131,7 @@ internal class UpdateMonitorService :
         await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
-            var wdtFileID = row.Field<uint>("WdtFileDataID");
+            var wdtFileID = (uint)row.Field<int>("WdtFileDataID");
             if (wdtFileID == 0)
                 return; // no WDT for this map, skip - TODO: Handle WMO based maps, recursively iterate the root object and store the per-WMO minimaps
 
@@ -176,7 +180,58 @@ internal class UpdateMonitorService :
 
         // POST our list of tiles and PUT each missing tile
         // Current builds are around: 5807 unique tiles across 1122 maps / 47538 tiles
-        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapDB.Count, tileHashMap.Sum(x=>x.Value.Tiles.Count));
+        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapDB.Count, tileHashMap.Sum(x => x.Value.Tiles.Count));
+
+        var publishRequest = await _backendClient.PostAsync<TileListDto>("publish/tiles", new TileListDto
+        {
+            Tiles = [.. tileHashMap.Keys]
+        }, cancellation);
+
+        await Parallel.ForEachAsync(publishRequest.Tiles, new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (tileHash, token) =>
+        {
+            if (!tileHashMap.TryGetValue(tileHash, out var tileData))
+            {
+                _logger.LogWarning("Tile hash {TileHash} missing from local map", tileHash);
+                return;
+            }
+
+            try
+            {
+                using var tileStream = await _blizztrack.OpenStreamFDID(tileData.TileFDID, fs, cancellation: token);
+                if (tileStream == null || tileStream == Stream.Null)
+                {
+                    _logger.LogWarning("Failed to open tile {TileHash} FDID {TileFDID}", tileHash, tileData.TileFDID);
+                    return;
+                }
+
+                using var blpFile = new BLPFile(tileStream);
+                var mapBytes = blpFile.GetPixels(0, out int width, out int height) ?? throw new Exception($"Failed to decode BLP (len:{tileStream.Length})");
+
+                using var webpStream = new MemoryStream();
+
+                using (var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height))
+                {
+                    image.Save(webpStream, new WebpEncoder()
+                    {
+                        UseAlphaCompression = false,
+                        FileFormat = WebpFileFormatType.Lossless,
+                        Method = WebpEncodingMethod.BestQuality,
+                        EntropyPasses = 10,
+                        Quality = 100
+                    });
+                }
+
+                webpStream.Position = 0;
+
+                await _backendClient.PutAsync("publish/tile/" + tileHash, webpStream, "image/webp", token);
+
+                _logger.LogInformation("Uploaded tile {TileHash} FDID {TileFDID} used by {MapCount} tiles", tileHash, tileData.TileFDID, tileData.Tiles.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading tile {TileHash} FDID {TileFDID}", tileHash, tileData.TileFDID);
+            }
+        });
 
         // - trigger backend data validation, ensure expected tiles exist and flag build as processed
 

@@ -6,7 +6,7 @@ namespace Minimaps.Shared;
 public class CachedGithubDBDProvider : IDBDProvider
 {
     private const string _baseURL = "https://raw.githubusercontent.com/wowdev/WoWDBDefs/master/definitions/";
-    private readonly HttpClient _client = new ();
+    private readonly HttpClient _client = new();
     private readonly string _cachePath;
     private readonly ILogger? _logger;
     private readonly ConcurrentDictionary<string, DateTime> _lastETagCheck = new();
@@ -14,7 +14,7 @@ public class CachedGithubDBDProvider : IDBDProvider
 
     public CachedGithubDBDProvider(string cachePath, ILogger? logger = null)
     {
-        _cachePath = cachePath;
+        _cachePath = Path.Combine(cachePath, "dbd");
         _logger = logger;
         Directory.CreateDirectory(_cachePath);
         _client.BaseAddress = new(_baseURL);
@@ -24,9 +24,9 @@ public class CachedGithubDBDProvider : IDBDProvider
 
     private async Task<Stream> StreamForTableNameAsync(string tableName, string build = null)
     {
-        var cacheFile = Path.Combine(_cachePath, "dbd", $"{tableName}.dbd");
-        var etagFile = Path.Combine(_cachePath, "dbd", $"{tableName}.dbd.etag");
-        
+        var cacheFile = Path.Combine(_cachePath, $"{tableName}.dbd");
+        var etagFile = Path.Combine(_cachePath, $"{tableName}.dbd.etag");
+
         if (File.Exists(cacheFile) && _lastETagCheck.TryGetValue(tableName, out var lastCheck))
         {
             if (DateTime.Now - lastCheck < _etagCheckInterval)
@@ -61,11 +61,11 @@ public class CachedGithubDBDProvider : IDBDProvider
             var copyContentTask = Task.Run(async () =>
             {
                 using var cacheFileStream = File.Create(cacheFile);
-                await contentStream.CopyToAsync(cacheFileStream);       
+                await contentStream.CopyToAsync(cacheFileStream);
             });
             var writeETagTask = File.WriteAllTextAsync(etagFile, newETag);
             await Task.WhenAll(copyContentTask, writeETagTask);
-            
+
             return File.OpenRead(cacheFile);
         }
     }

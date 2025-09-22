@@ -21,6 +21,9 @@ public class InitialSchema : Migration
             .OnTable("builds")
             .Columns("version", "product");
 
+        Create.Table("minimap_tiles")
+            .WithColumn("hash").AsString(32).PrimaryKey();
+
 #if false
 
         Create.Table("map")
@@ -87,7 +90,7 @@ public class InitialSchema : Migration
     {
         //Delete.Table("build_minimap");
         //Delete.Table("minimap");
-        //Delete.Table("minimap_tile");
+        Delete.Table("minimap_tile");
         //Delete.Table("map");
         Delete.Table("build");
     }
