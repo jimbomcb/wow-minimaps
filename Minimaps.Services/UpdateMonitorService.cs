@@ -1,3 +1,4 @@
+using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
 using BLPSharp;
 using DBCD;
@@ -11,6 +12,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 
 namespace Minimaps.Services;
 
@@ -53,12 +55,19 @@ internal class UpdateMonitorService :
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
     {
+        // TODO: Think about how to best structure key provisioning given the long running service
+        var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
+
         var ribbitClient = new RibbitClient.RibbitClient(RibbitRegion.US);
         var tactSummary = await ribbitClient.SummaryAsync();
         var tactSequence = tactSummary.SequenceId; // todo: early-out if no change in sequence since last tick
         _logger.LogInformation("Processing summary seq #{SequenceId} with {ProductCount} products", tactSequence, tactSummary.Data.Count);
 
         // todo: check the summary sequence IDs of the individual products for filtering
+
+        // ensure keys are in memory
+        foreach(var entry in await tactKeysTask)
+            TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
         // gather all the latest products & their versions
         var products = new Dictionary<DiscoveredRequestDtoEntry, ProductVersion>();
@@ -197,7 +206,7 @@ internal class UpdateMonitorService :
 
             try
             {
-                using var tileStream = await _blizztrack.OpenStreamFDID(tileData.TileFDID, fs, cancellation: token);
+                using var tileStream = await _blizztrack.OpenStreamFDID(tileData.TileFDID, fs, validate: true, cancellation: token);
                 if (tileStream == null || tileStream == Stream.Null)
                 {
                     _logger.LogWarning("Failed to open tile {TileHash} FDID {TileFDID}", tileHash, tileData.TileFDID);
@@ -223,9 +232,17 @@ internal class UpdateMonitorService :
 
                 webpStream.Position = 0;
 
-                await _backendClient.PutAsync("publish/tile/" + tileHash, webpStream, "image/webp", token);
+                string webpHash;
+                using (var md5 = MD5.Create())
+                {
+                    var hashBytes = md5.ComputeHash(webpStream);
+                    webpHash = Convert.ToHexStringLower(hashBytes);
+                }
+                webpStream.Position = 0;
+                await _backendClient.PutAsync("publish/tile/" + tileHash, webpStream, "image/webp", webpHash, token);
 
-                _logger.LogInformation("Uploaded tile {TileHash} FDID {TileFDID} used by {MapCount} tiles", tileHash, tileData.TileFDID, tileData.Tiles.Count);
+                _logger.LogInformation("Uploaded tile {TileHash} (WebP hash: {WebpHash}) FDID {TileFDID} used by {MapCount} tiles", 
+                    tileHash, webpHash, tileData.TileFDID, tileData.Tiles.Count);
             }
             catch (Exception ex)
             {
