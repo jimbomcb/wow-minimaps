@@ -24,8 +24,8 @@ public class CachedGithubDBDProvider : IDBDProvider
 
     private async Task<Stream> StreamForTableNameAsync(string tableName, string build = null)
     {
-        var cacheFile = Path.Combine(_cachePath, $"{tableName}.dbd");
-        var etagFile = Path.Combine(_cachePath, $"{tableName}.dbd.etag");
+        var cacheFile = Path.Combine(_cachePath, "dbd", $"{tableName}.dbd");
+        var etagFile = Path.Combine(_cachePath, "dbd", $"{tableName}.dbd.etag");
         
         if (File.Exists(cacheFile) && _lastETagCheck.TryGetValue(tableName, out var lastCheck))
         {
