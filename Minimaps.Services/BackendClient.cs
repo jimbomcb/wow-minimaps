@@ -41,10 +41,13 @@ public class BackendClient
         return JsonSerializer.Deserialize<T>(responseJson, _jsonOptions);
     }
 
-    public async Task PutAsync(string endpoint, Stream imageData, string contentType, CancellationToken cancellation = default)
+    public async Task PutAsync(string endpoint, Stream imageData, string contentType, string? expectedHash = null, CancellationToken cancellation = default)
     {
         using var content = new StreamContent(imageData);
         content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        
+        if (!string.IsNullOrEmpty(expectedHash))
+            content.Headers.Add("X-Expected-Hash", expectedHash);
 
         var response = await _httpClient.PutAsync(endpoint, content, cancellation);
         response.EnsureSuccessStatusCode();

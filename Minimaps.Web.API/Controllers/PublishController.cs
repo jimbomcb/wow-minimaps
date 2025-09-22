@@ -2,6 +2,7 @@
 using Minimaps.Shared.BackendDto;
 using Dapper;
 using Minimaps.Web.API.TileStores;
+using System.Security.Cryptography;
 
 namespace Minimaps.Web.API.Controllers;
 
@@ -113,16 +114,51 @@ public class PublishController : Controller
             return BadRequest("Missing Content-Type header");
         }
 
+        if (!Request.Headers.TryGetValue("X-Expected-Hash", out var expectedHashValues))
+            return BadRequest("Missing X-Expected-Hash header");
+
+        var expectedHash = expectedHashValues.FirstOrDefault();
+        if (string.IsNullOrEmpty(expectedHash))
+            return BadRequest("Invalid X-Expected-Hash header value");
+
         try
-        {            
+        {
             // read stream into memory for hash calculation (tiles should be <1MB each)
-            await _tileStore.SaveAsync(tileHash, requestStream, contentTypeValues.Single()!);
+            // todo: max request body size
+            using var memoryStream = new MemoryStream();
+            await Request.Body.CopyToAsync(memoryStream);
+            
+            var streamData = memoryStream.ToArray();
+            if (streamData.Length > 1024 * 1024)
+            {
+                _logger.LogWarning("Tile {TileHash} exceeds 1MB size limit: {Size} bytes", tileHash, streamData.Length);
+                return BadRequest("Tile data exceeds size limit");
+            }
+
+            string calculateHash;
+            using (var md5 = MD5.Create())
+            {
+                var hashBytes = md5.ComputeHash(streamData);
+                calculateHash = Convert.ToHexStringLower(hashBytes);
+            }
+
+            if (!string.Equals(calculateHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError("Hash mismatch for tile {TileHash}: expected {ExpectedHash}, calculated {CalculatedHash}", 
+                    tileHash, expectedHash, calculateHash);
+                return BadRequest($"Hash mismatch: expected {expectedHash}, calculated {calculateHash}");
+            }
+
+            memoryStream.Position = 0;
+            await _tileStore.SaveAsync(tileHash, memoryStream, contentTypeValues.Single()!);
 
             using var connection = _db.CreateConnection();
             await connection.ExecuteAsync(
                 "INSERT INTO minimap_tiles (hash) VALUES (@Hash) ON CONFLICT (hash) DO NOTHING;", 
                 new { Hash = tileHash.ToUpper() });
 
+            _logger.LogInformation("Successfully stored tile {TileHash} (Hash: {CalculateHash}) with size {Size} bytes", 
+                tileHash, calculateHash, streamData.Length);
             return NoContent();
         }
         catch (Exception ex)
