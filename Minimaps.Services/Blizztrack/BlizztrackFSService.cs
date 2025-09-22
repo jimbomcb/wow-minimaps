@@ -10,7 +10,7 @@ namespace Minimaps.Services.Blizztrack;
 
 public class BlizztrackFSService(IResourceLocator resourceLocator)
 {
-    public async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
+    public async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, bool validate = false, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
     {
         var descriptors = fs.OpenFDID(fdid, localeFilter);
         if (descriptors.Length == 0)
@@ -22,9 +22,28 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
             if (compressionSpec is null)
                 continue;
 
-            var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
-            if (dataHandle.Exists)
-                return await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cancellation);
+            // TODO!! OpenHandle above, when used with data file descriptors, will end up streaming bad/incorrect data onto the disk
+            // To reproduce attempt to get 11.2.0.63305 fdid 3182843
+            // The stock Blizztrack never caches the data on disk and always streams the data contents from the web because it uses OpenStream
+            // We started using AbstractResourceLocatorService.OpenHandle which caches based on the handle, but this is WRONG for data files and 
+            // causing so many problems...
+            var dataStream = await resourceLocator.OpenStream(descriptor, cancellation);
+            //var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
+            if (dataStream != null)
+            {
+                var decoded = await BLTE.Execute(dataStream, compressionSpec, stoppingToken: cancellation);
+                if (validate)
+                {
+                    using var md5 = System.Security.Cryptography.MD5.Create();
+                    var computedHash = md5.ComputeHash(decoded);
+                    if (!computedHash.SequenceEqual(descriptor.ContentKey.AsSpan()))
+                        throw new Exception($"Data integrity error, requested fdid {fdid}, expected content hash {descriptor.ContentKey} but got {Convert.ToHexStringLower(computedHash)}");
+                    decoded.Position = 0;
+                }
+
+                return decoded;
+
+            }
         }
 
         // todo: can we have descriptors to files that don't have a compression spec or accessible handle?
