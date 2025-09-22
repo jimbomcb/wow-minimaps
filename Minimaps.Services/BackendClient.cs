@@ -45,7 +45,7 @@ public class BackendClient
     {
         using var content = new StreamContent(imageData);
         content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
-        
+
         if (!string.IsNullOrEmpty(expectedHash))
             content.Headers.Add("X-Expected-Hash", expectedHash);
 

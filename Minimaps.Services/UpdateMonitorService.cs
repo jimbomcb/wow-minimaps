@@ -66,7 +66,7 @@ internal class UpdateMonitorService :
         // todo: check the summary sequence IDs of the individual products for filtering
 
         // ensure keys are in memory
-        foreach(var entry in await tactKeysTask)
+        foreach (var entry in await tactKeysTask)
             TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
         // gather all the latest products & their versions
@@ -241,7 +241,7 @@ internal class UpdateMonitorService :
                 webpStream.Position = 0;
                 await _backendClient.PutAsync("publish/tile/" + tileHash, webpStream, "image/webp", webpHash, token);
 
-                _logger.LogInformation("Uploaded tile {TileHash} (WebP hash: {WebpHash}) FDID {TileFDID} used by {MapCount} tiles", 
+                _logger.LogInformation("Uploaded tile {TileHash} (WebP hash: {WebpHash}) FDID {TileFDID} used by {MapCount} tiles",
                     tileHash, webpHash, tileData.TileFDID, tileData.Tiles.Count);
             }
             catch (Exception ex)
