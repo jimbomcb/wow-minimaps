@@ -6,6 +6,7 @@ using Blizztrack.Framework.TACT.Resources;
 using Blizztrack.Framework.TACT.Implementation;
 using Minimaps.Shared;
 using BLPSharp;
+using System.Security.Cryptography;
 
 namespace Minimaps.Tests;
 
@@ -68,11 +69,7 @@ public class BlizztrackTests
                 var mapHandle = await resourceLocService.OpenHandle(entry, cts.Token);
                 Assert.True(mapHandle.Exists, "Map handle not found");
 
-                var compressionSpec = fileSystem.GetCompressionSpec(entry.EncodingKey);
-                if (compressionSpec is null)
-                    continue;
-
-                var processedBLTE = await BLTE.Execute(mapHandle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                var processedBLTE = BLTE.Parse(mapHandle);
                 Assert.NotNull(processedBLTE);
                 Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
                 logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
@@ -131,16 +128,13 @@ public class BlizztrackTests
                 var mapHandle = await resourceLocService.OpenHandle(entry, cts.Token);
                 Assert.True(mapHandle.Exists, "Map handle not found");
 
-                var compressionSpec = fileSystem.GetCompressionSpec(entry.EncodingKey);
-                if (compressionSpec is null)
-                    continue;
-
-                var processedBLTE = await BLTE.Execute(mapHandle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                var processedBLTE = BLTE.Parse(mapHandle);
                 Assert.NotNull(processedBLTE);
                 Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
                 logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
 
-                var reader = new WDTReader(processedBLTE);
+                using var tempStream = new MemoryStream(processedBLTE);
+                var reader = new WDTReader(tempStream);
                 var minimapEntries = reader.ReadMinimapTiles();
                 Assert.True(minimapEntries.Count > 0);
             }
@@ -198,18 +192,15 @@ public class BlizztrackTests
                 var handle = await resourceLocService.OpenHandle(entry, cts.Token);
                 Assert.True(handle.Exists, "handle not found");
 
-                var compressionSpec = fileSystem.GetCompressionSpec(entry.EncodingKey);
-                if (compressionSpec is null)
-                    continue;
-
-                var processedBLTE = await BLTE.Execute(handle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                var processedBLTE = BLTE.Parse(handle);
                 Assert.NotNull(processedBLTE);
                 Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
                 logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
 
                 try
                 {
-                    using var blpFile = new BLPFile(processedBLTE);
+                    using var tempStream = new MemoryStream(processedBLTE);
+                    using var blpFile = new BLPFile(tempStream);
                     var mapBytes = blpFile.GetPixels(0, out int width, out int height);
 
                     logger.LogInformation("Successfully decoded BLP: {Width}x{Height}, {PixelCount} pixels", width, height, width * height);
@@ -321,8 +312,7 @@ public class BlizztrackTests
 
                 using var decoded = await BLTE.Execute(stream, compressionSpec, stoppingToken: cts.Token);
                         
-                    using var md5 = System.Security.Cryptography.MD5.Create();
-                var computedHash = md5.ComputeHash(decoded);
+                var computedHash = MD5.HashData(decoded);
                 var computedHashString = Convert.ToHexStringLower(computedHash);
                         
                 if (computedHashString != expectedHash)
@@ -338,17 +328,10 @@ public class BlizztrackTests
             {
                 logger.LogInformation("Opening handle for FDID {FDID}...", fdid);
                 var handle = await resourceLocService.OpenHandle(descriptor, cts.Token);
-                Assert.NotNull(handle);
+                var decoded = BLTE.Parse(handle);
 
-                var compressionSpec = fileSystem.GetCompressionSpec(descriptor.EncodingKey);
-                Assert.NotNull(compressionSpec);
-
-                using var decoded = await BLTE.Execute(handle.ToStream(), compressionSpec, stoppingToken: cts.Token);
-
-                using var md5 = System.Security.Cryptography.MD5.Create();
-                var computedHash = md5.ComputeHash(decoded);
+                var computedHash = MD5.HashData(decoded);
                 var computedHashString = Convert.ToHexStringLower(computedHash);
-
                 if (computedHashString != expectedHash)
                 {
                     // hitting this corruption assert at the time of writing
