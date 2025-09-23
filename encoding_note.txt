@@ -1,0 +1,29 @@
+Comparing webp lossless/lossy:
+
+- png at 230kb
+- webp lossy q100 is 82kb, q95 is 62kb, q90 is 38kb, q80 is 21kb - Anything < 90 looks like mud, 95 seems nearly lossless
+- webp lossless is 165kb
+
+- No reason not to use webp given the savings, just a matter of lossy or lossless...
+
+Lossless: 
+- every quality from 50-99 had a consistent 203kb, while 100 brings it down to 139kb (at the cost of >10x the time, but it's worthwhile)
+- entropy passes had no impact
+
+Q60  in 694ms  size=203.4KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q70  in 608ms  size=203.4KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q80  in 412ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q90  in 270ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q92  in 232ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q93  in 231ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q94  in 221ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q95  in 226ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q96  in 222ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q97  in 252ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q98  in 222ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q99  in 243ms  size=203.5KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+Q100 in 2962ms size=139.7KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
+
+Encoding decision:
+- Using lossless for all tiles, the lossy tiles even at high qualities have too many artifacts for the size saved. 
+- Full 100 quality lossless adds a significant amount of CPU time to the processing stage(from 200ms at 99 quality to 3000ms at 100 quality), this is worthwhile for the data savings.
