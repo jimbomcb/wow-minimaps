@@ -220,26 +220,22 @@ public class BlizztrackTests
                 if (compressionSpec is null)
                     continue;
 
-                var dataHandle = await resourceLocService.OpenHandle(entry, cts.Token);
-                if (dataHandle.Exists)
+                var processedBLTE = await BLTE.Execute(handle.ToStream(), compressionSpec, stoppingToken: cts.Token);
+                Assert.NotNull(processedBLTE);
+                Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
+                logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
+
+                try
                 {
-                    var processedBLTE = await BLTE.Execute(dataHandle.ToStream(), compressionSpec, stoppingToken: cts.Token);
-                    Assert.NotNull(processedBLTE);
-                    Assert.True(processedBLTE.Length > 0, "Processed BLTE length is zero");
-                    logger.LogInformation("Processed BLTE length: {Length}", processedBLTE.Length);
+                    using var blpFile = new BLPFile(processedBLTE);
+                    var mapBytes = blpFile.GetPixels(0, out int width, out int height);
 
-                    try
-                    {
-                        using var blpFile = new BLPFile(processedBLTE);
-                        var mapBytes = blpFile.GetPixels(0, out int width, out int height);
-
-                        logger.LogInformation("Successfully decoded BLP: {Width}x{Height}, {PixelCount} pixels", width, height, width * height);
-                    }
-                    catch (Exception bex)
-                    {
-                        logger.LogError(bex, "Failed to decode BLP: {Message}", bex.Message);
-                        throw;
-                    }
+                    logger.LogInformation("Successfully decoded BLP: {Width}x{Height}, {PixelCount} pixels", width, height, width * height);
+                }
+                catch (Exception bex)
+                {
+                    logger.LogError(bex, "Failed to decode BLP: {Message}", bex.Message);
+                    throw;
                 }
             }
         }
