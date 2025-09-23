@@ -8,6 +8,7 @@ public class BackendClient
 {
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly SemaphoreSlim _concurrentLimit = new(8, 8);
 
     public BackendClient(HttpClient httpClient)
     {
@@ -21,35 +22,65 @@ public class BackendClient
 
     public async Task<T> GetAsync<T>(string endpoint, CancellationToken cancellation = default)
     {
-        var response = await _httpClient.GetAsync(endpoint, cancellation);
-        response.EnsureSuccessStatusCode();
+        await _concurrentLimit.WaitAsync(cancellation);
+        try
+        {
+            cancellation.ThrowIfCancellationRequested();
 
-        var json = await response.Content.ReadAsStringAsync();
-        return JsonSerializer.Deserialize<T>(json, _jsonOptions);
+            var response = await _httpClient.GetAsync(endpoint, cancellation);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<T>(json, _jsonOptions);
+        }
+        finally
+        {
+            _concurrentLimit.Release();
+        }
     }
 
     public async Task<T> PostAsync<T>(string endpoint, object data, CancellationToken cancellation = default)
     {
-        var json = JsonSerializer.Serialize(data, _jsonOptions);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        await _concurrentLimit.WaitAsync(cancellation);
+        try
+        {
+            cancellation.ThrowIfCancellationRequested();
 
-        var response = await _httpClient.PostAsync(endpoint, content, cancellation);
-        response.EnsureSuccessStatusCode();
+            var json = JsonSerializer.Serialize(data, _jsonOptions);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var responseJson = await response.Content.ReadAsStringAsync();
+            var response = await _httpClient.PostAsync(endpoint, content, cancellation);
+            response.EnsureSuccessStatusCode();
 
-        return JsonSerializer.Deserialize<T>(responseJson, _jsonOptions);
+            var responseJson = await response.Content.ReadAsStringAsync();
+
+            return JsonSerializer.Deserialize<T>(responseJson, _jsonOptions);
+        }
+        finally
+        {
+            _concurrentLimit.Release();
+        }
     }
 
     public async Task PutAsync(string endpoint, Stream imageData, string contentType, string? expectedHash = null, CancellationToken cancellation = default)
     {
-        using var content = new StreamContent(imageData);
-        content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        await _concurrentLimit.WaitAsync(cancellation);
+        try
+        {
+            cancellation.ThrowIfCancellationRequested();
 
-        if (!string.IsNullOrEmpty(expectedHash))
-            content.Headers.Add("X-Expected-Hash", expectedHash);
+            using var content = new StreamContent(imageData);
+            content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
 
-        var response = await _httpClient.PutAsync(endpoint, content, cancellation);
-        response.EnsureSuccessStatusCode();
+            if (!string.IsNullOrEmpty(expectedHash))
+                content.Headers.Add("X-Expected-Hash", expectedHash);
+
+            var response = await _httpClient.PutAsync(endpoint, content, cancellation);
+            response.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            _concurrentLimit.Release();
+        }
     }
 }
