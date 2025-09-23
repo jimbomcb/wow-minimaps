@@ -3,6 +3,7 @@ using Blizztrack.Framework.TACT.Resources;
 using BLPSharp;
 using DBCD;
 using DBCD.Providers;
+using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
@@ -36,6 +37,10 @@ internal class UpdateMonitorService :
         /// Mainly just to limit the time from a totally fresh launch to fully populated build in development iteration
         /// </summary>
         public HashSet<int> SpecificMaps { get; set; } = [];
+        /// <summary>
+        /// WebP compression level, given it's lossless this purely affects how much time we spend tying to optimize
+        /// </summary>
+        public int CompressionLevel { get; set; } = 100;
     }
     private readonly record struct ProductVersion(string BuildConfig, string CDNConfig, List<string> Regions);
 
@@ -142,8 +147,8 @@ internal class UpdateMonitorService :
         // but this is more a blizztrack issue than our issue...
         var tempLocks = new ConcurrentDictionary<uint, SemaphoreSlim>();
         var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
-        var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key));
-        await Parallel.ForEachAsync(mapList, new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
+        var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
+        await Parallel.ForEachAsync(mapList, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
             var wdtFileID = (uint)row.Field<int>("WdtFileDataID");
@@ -195,16 +200,16 @@ internal class UpdateMonitorService :
         });
 
         // POST our list of tiles and PUT each missing tile
-        // Current builds are around: 5807 unique tiles across 1122 maps / 47538 tiles
-        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapDB.Count, tileHashMap.Sum(x => x.Value.Tiles.Count));
-
+        // Current builds are around: 21348 unique tiles across 1122 maps / 39627 tiles
+        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapList.Count, tileHashMap.Sum(x => x.Value.Tiles.Count));
+        
         var publishRequest = await _backendClient.PostAsync<TileListDto>("publish/tiles", new TileListDto
         {
             Tiles = [.. tileHashMap.Keys]
         }, cancellation);
 
         // almost all of the time is spent crunching out the 100 quality lossless webp
-        await Parallel.ForEachAsync(publishRequest.Tiles, new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (tileHash, token) =>
+        await Parallel.ForEachAsync(publishRequest.Tiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = cancellation }, async (tileHash, token) =>
         {
             if (!tileHashMap.TryGetValue(tileHash, out var tileData))
             {
@@ -234,7 +239,7 @@ internal class UpdateMonitorService :
                         FileFormat = WebpFileFormatType.Lossless,
                         Method = WebpEncodingMethod.BestQuality,
                         EntropyPasses = 10,
-                        Quality = 100
+                        Quality = _serviceConfig.CompressionLevel
                     });
                 }
 
@@ -257,6 +262,7 @@ internal class UpdateMonitorService :
                 _logger.LogError(ex, "Error uploading tile {TileHash} FDID {TileFDID}", tileHash, tileData.TileFDID);
             }
         });
+
 
         // - trigger backend data validation, ensure expected tiles exist and flag build as processed
 

@@ -16,6 +16,10 @@
     <File Path=".editorconfig" />
     <File Path="README.md" />
   </Folder>
+  <Folder Name="/Solution Items/Workflows/">
+    <File Path=".github/workflows/test-ribbit-schema.yml" />
+    <File Path=".github/workflows/smoke-test.yml" />
+  </Folder>
   <Project Path="Minimaps.CLI/Minimaps.CLI.csproj" />
   <Project Path="Minimaps.Database/Minimaps.Database.csproj" />
   <Project Path="Minimaps.Services/Minimaps.Services.csproj" />

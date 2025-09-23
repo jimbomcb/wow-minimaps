@@ -1,6 +1,9 @@
 # Remove the line below if you want to inherit .editorconfig settings from higher directories
 root = true
 
+[*.yml]
+indent_size = 2
+
 # C# files
 [*.cs]
 
@@ -8,7 +11,7 @@ root = true
 
 # Indentation and spacing
 indent_size = 4
-indent_style = tab
+indent_style = space
 tab_width = 4
 
 # New line preferences
@@ -267,4 +270,3 @@ dotnet_style_prefer_compound_assignment = true:suggestion
 dotnet_style_prefer_simplified_interpolation = true:suggestion
 dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
 dotnet_style_namespace_match_folder = true:suggestion
-indent_style = space
