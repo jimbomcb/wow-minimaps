@@ -19,13 +19,15 @@ internal class BlizztrackDBCProvider(IFileSystem filesystem, IResourceLocator re
         {
             foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS)) // todo: maybe just makes more sense to move locale to the whole filesystem level
             {
-                var compressionSpec = filesystem.GetCompressionSpec(entry.EncodingKey);
-                if (compressionSpec is null)
-                    continue;
-
                 var dataHandle = resourceLocator.OpenHandle(entry, CancellationToken.None).Result;
                 if (dataHandle.Exists)
-                    return BLTE.Execute(dataHandle.ToStream(), compressionSpec).Result;
+                {
+                    var bytes = BLTE.Parse(dataHandle);
+                    if (bytes == default)
+                        throw new Exception("BLTE parsing error");
+
+                    return new MemoryStream(bytes);
+                }
             }
         }
         catch (Exception ex)

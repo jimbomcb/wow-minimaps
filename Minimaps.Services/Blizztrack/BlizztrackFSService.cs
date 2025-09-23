@@ -3,6 +3,7 @@ using Blizztrack.Framework.TACT.Configuration;
 using Blizztrack.Framework.TACT.Enums;
 using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
+using System.Security.Cryptography;
 using EncodingKeyView = Blizztrack.Framework.TACT.Views.EncodingKey;
 using Index = Blizztrack.Framework.TACT.Implementation.Index;
 
@@ -18,30 +19,21 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
 
         foreach (var descriptor in descriptors)
         {
-            var compressionSpec = fs.GetCompressionSpec(descriptor.EncodingKey);
-            if (compressionSpec is null)
-                continue;
-
-            // TODO!! OpenHandle above, when used with data file descriptors, will end up streaming bad/incorrect data onto the disk
-            // To reproduce attempt to get 11.2.0.63305 fdid 3182843
-            // The stock Blizztrack never caches the data on disk and always streams the data contents from the web because it uses OpenStream
-            // We started using AbstractResourceLocatorService.OpenHandle which caches based on the handle, but this is WRONG for data files and 
-            // causing so many problems...
-            var dataStream = await resourceLocator.OpenStream(descriptor, cancellation);
-            //var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
-            if (dataStream != null)
+            // for now just parsing into memory and serving as a memory stream...
+            //var dataStream = await resourceLocator.OpenStream(descriptor, cancellation);
+            var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
+            if (dataHandle.Exists)
             {
-                var decoded = await BLTE.Execute(dataStream, compressionSpec, stoppingToken: cancellation);
+                var decoded = BLTE.Parse(dataHandle);
                 if (validate)
                 {
-                    using var md5 = System.Security.Cryptography.MD5.Create();
-                    var computedHash = md5.ComputeHash(decoded);
+                    var computedHash = MD5.HashData(decoded);
                     if (!computedHash.SequenceEqual(descriptor.ContentKey.AsSpan()))
+
                         throw new Exception($"Data integrity error, requested fdid {fdid}, expected content hash {descriptor.ContentKey} but got {Convert.ToHexStringLower(computedHash)}");
-                    decoded.Position = 0;
                 }
 
-                return decoded;
+                return new MemoryStream(decoded);
 
             }
         }
