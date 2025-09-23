@@ -31,6 +31,11 @@ internal class UpdateMonitorService :
         public string CachePath { get; set; } = "./cache";
         public List<string> Products { get; set; } = [];
         public List<string> AdditionalCDNs { get; set; } = [];
+        /// <summary>
+        /// If not empty, only these specific map IDs will be processed for generation
+        /// Mainly just to limit the time from a totally fresh launch to fully populated build in development iteration
+        /// </summary>
+        public HashSet<int> SpecificMaps { get; set; } = [];
     }
     private readonly record struct ProductVersion(string BuildConfig, string CDNConfig, List<string> Regions);
 
@@ -137,7 +142,8 @@ internal class UpdateMonitorService :
         // but this is more a blizztrack issue than our issue...
         var tempLocks = new ConcurrentDictionary<uint, SemaphoreSlim>();
         var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
-        await Parallel.ForEachAsync(mapDB.AsReadOnly(), new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
+        var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key));
+        await Parallel.ForEachAsync(mapList, new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (rowPair, token) =>
         {
             var row = rowPair.Value;
             var wdtFileID = (uint)row.Field<int>("WdtFileDataID");
@@ -161,6 +167,7 @@ internal class UpdateMonitorService :
                 {
                     // Some maps reference a WDT but don't have MAID chunks?
                     // TODO: Are these stored elsewhere like older versions? Assuming not
+                    _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir}) - No ReadMinimapTiles result", row.ID, row.Field<string>("Directory"));
                     return;
                 }
 
@@ -196,6 +203,7 @@ internal class UpdateMonitorService :
             Tiles = [.. tileHashMap.Keys]
         }, cancellation);
 
+        // almost all of the time is spent crunching out the 100 quality lossless webp
         await Parallel.ForEachAsync(publishRequest.Tiles, new ParallelOptions { MaxDegreeOfParallelism = 16, CancellationToken = cancellation }, async (tileHash, token) =>
         {
             if (!tileHashMap.TryGetValue(tileHash, out var tileData))
