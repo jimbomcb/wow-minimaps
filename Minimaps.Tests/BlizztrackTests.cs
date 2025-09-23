@@ -104,7 +104,7 @@ public class BlizztrackTests
         {
             // Load TACT keys before testing
             var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
-            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test_encmap", logger);
+            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test", logger);
             foreach (var key in tactKeys)
             {
                 TACTKeyService.SetKey(key.KeyName, key.KeyValue);
@@ -168,7 +168,7 @@ public class BlizztrackTests
         {
             // Load TACT keys before testing
             var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
-            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test_encblp", logger);
+            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test", logger);
             foreach (var key in tactKeys)
             {
                 TACTKeyService.SetKey(key.KeyName, key.KeyValue);
