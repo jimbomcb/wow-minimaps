@@ -23,6 +23,12 @@ jobs:
       with:
         dotnet-version: '10.0.x'
         dotnet-quality: 'preview'
+      env:
+        DOTNET_INSTALL_DIR: /home/runner/.dotnet
+        DOTNET_ROOT: /home/runner/.dotnet
+
+    - name: .NET PATH
+      run: echo "/home/runner/.dotnet" >> $GITHUB_PATH
     
     - name: Restore dependencies
       run: dotnet restore Minimaps.Tests
