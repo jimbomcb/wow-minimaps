@@ -28,7 +28,10 @@ internal class Map
     public string db2 { get; set; }
     public string directory { get; set; }
     public string name { get; set; }
-    //public int? parent { get; set; } // todo: can just be derived from coalesce(db2->CosmeticParentMapID, db2->ParentMapID) I think
+    /// <summary>
+    /// generated from coalesce(db2->CosmeticParentMapID, db2->ParentMapID, null)
+    /// </summary>
+    public int? parent { get; set; }
 }
 
 /// <summary>

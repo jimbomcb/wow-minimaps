@@ -24,6 +24,13 @@ public class InitialSchema : Migration
         Create.Table("minimap_tiles")
             .WithColumn("hash").AsString(32).PrimaryKey();
 
+        Create.Table("map")
+            .WithColumn("id").AsInt32().PrimaryKey()
+            .WithColumn("db2").AsCustom("jsonb").Nullable()
+            .WithColumn("directory").AsString(100).Nullable()
+            .WithColumn("name").AsString(100).Nullable()
+            .WithColumn("parent").AsInt32().Nullable();
+
 #if false
 
         Create.Table("map")
