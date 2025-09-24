@@ -25,6 +25,11 @@ jobs:
       env:
         DOTNET_INSTALL_DIR: /home/runner/.dotnet
         DOTNET_ROOT: /home/runner/.dotnet
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libicu-dev libc6-dev libssl-dev zlib1g-dev
 
     - name: .NET PATH
       run: echo "/home/runner/.dotnet" >> $GITHUB_PATH
