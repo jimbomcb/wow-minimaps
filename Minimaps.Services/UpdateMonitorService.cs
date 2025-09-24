@@ -231,6 +231,10 @@ internal class UpdateMonitorService :
 
                 using var webpStream = new MemoryStream();
 
+                // I've tested this against NetVips, but was not able to find any meaningful speedup 
+                // probably because they're both spending nearly all the time inside libwebp just crunching out the lossless image?
+                // For our use case we're just cranking it up to get the absolute smallest file size possible, I'd rather spend 3000+ms
+                // during one-time generation to shave off a few KB that will be served many thousands of times.
                 using (var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height))
                 {
                     image.Save(webpStream, new WebpEncoder()
@@ -244,13 +248,8 @@ internal class UpdateMonitorService :
                 }
 
                 webpStream.Position = 0;
+                string webpHash = Convert.ToHexStringLower(MD5.HashData(webpStream));
 
-                string webpHash;
-                using (var md5 = MD5.Create())
-                {
-                    var hashBytes = md5.ComputeHash(webpStream);
-                    webpHash = Convert.ToHexStringLower(hashBytes);
-                }
                 webpStream.Position = 0;
                 await _backendClient.PutAsync("publish/tile/" + tileHash, webpStream, "image/webp", webpHash, token);
 
