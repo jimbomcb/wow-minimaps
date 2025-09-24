@@ -27,3 +27,26 @@ Q100 in 2962ms size=139.7KB  (Map 2297 Icecrown Citadel (8.3) Tile 25,21)
 Encoding decision:
 - Using lossless for all tiles, the lossy tiles even at high qualities have too many artifacts for the size saved. 
 - Full 100 quality lossless adds a significant amount of CPU time to the processing stage(from 200ms at 99 quality to 3000ms at 100 quality), this is worthwhile for the data savings.
+
+
+Regarding ImageSharp vs NetVips:
+
+I'm consistently finding that ImageSharp is, for the following settings, faster than NetVips:
+
+```using var image = SixLabors.ImageSharp.Image.LoadPixelData<Bgra32>(mapBytes, width, height);
+await image.SaveAsWebpAsync(webpStream, new WebpEncoder() { FileFormat = WebpFileFormatType.Lossless, Method = WebpEncodingMethod.Level6, Quality = 100 });```
+
+```using var image = NetVips.Image.NewFromMemory(mapBytes, width, height, 4, Enums.BandFormat.Uchar);
+var rgbaImage = image[2].Bandjoin(image[1], image[0], image[3]); // BGRA to RGBA
+rgbaImage.WebpsaveStream(webpStream, lossless: true, effort: 6, q: 100);```
+
+```Tile 27c2f 512 ImageSharp: 3937ms (201240 bytes), NetVips: 3928ms (201672 bytes)
+Tile 98c95 512 ImageSharp: 3731ms (181964 bytes), NetVips: 4097ms (182170 bytes)
+Tile afeed 512 ImageSharp: 3741ms (212042 bytes), NetVips: 3955ms (212006 bytes)
+Tile c89c1 512 ImageSharp: 2518ms (134190 bytes), NetVips: 2734ms (131082 bytes)
+Tile d8a62 512 ImageSharp: 3433ms (219308 bytes), NetVips: 4050ms (219382 bytes)
+Tile 36c08 512 ImageSharp: 283ms  (1834 bytes),   NetVips: 822ms  (1990 bytes)
+Tile 3c41c 512 ImageSharp: 3118ms (112628 bytes), NetVips: 3515ms (110366 bytes)
+Tile 18692 512 ImageSharp: 3825ms (203064 bytes), NetVips: 4284ms (203212 bytes)
+Tile b2e06 512 ImageSharp: 2536ms (113132 bytes), NetVips: 2804ms (112914 bytes)
+Tile 44963 512 ImageSharp: 736ms  (52772 bytes),  NetVips: 1493ms (51768 bytes)```
