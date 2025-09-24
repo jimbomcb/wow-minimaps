@@ -15,7 +15,7 @@ public class Program
         builder.Services.AddSingleton<ITileStore, LocalTileStore>();
         builder.Services.Configure<KestrelServerOptions>(options =>
         {
-            options.Limits.MaxRequestBufferSize = 1 * 1024 * 1024; // 1MB
+            options.Limits.MaxRequestBodySize = 1 * 1024 * 1024; // 1MB
         });
 
         var app = builder.Build();
