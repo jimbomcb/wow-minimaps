@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Minimaps.Web.API.TileStores;
 
 namespace Minimaps.Web.API;
@@ -12,6 +13,10 @@ public class Program
         builder.Services.AddControllers();
         builder.Services.AddSingleton<DapperContext>();
         builder.Services.AddSingleton<ITileStore, LocalTileStore>();
+        builder.Services.Configure<KestrelServerOptions>(options =>
+        {
+            options.Limits.MaxRequestBufferSize = 1 * 1024 * 1024; // 1MB
+        });
 
         var app = builder.Build();
         app.MapDefaultEndpoints();

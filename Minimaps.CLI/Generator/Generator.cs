@@ -17,6 +17,11 @@ namespace Minimaps.CLI.Generator;
 public readonly record struct MapData(int ID, string Name, List<MinimapTile> Tiles);
 public readonly record struct MinimapTile(int X, int Y, uint FileId);
 
+/// <summary>
+/// This is the initial generator I wrote when I was learning how this might even work, and since then
+/// I've taken different approaches to most of what you see in here.
+/// This is just here for reference currently.
+/// </summary>
 internal class Generator
 {
     private HashSet<int> _tempKnownBadMaps = new()

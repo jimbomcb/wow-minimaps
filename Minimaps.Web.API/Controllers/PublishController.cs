@@ -124,7 +124,6 @@ public class PublishController : Controller
         try
         {
             // read stream into memory for hash calculation (tiles should be <1MB each)
-            // todo: max request body size
             using var memoryStream = new MemoryStream();
             await Request.Body.CopyToAsync(memoryStream);
             
@@ -135,18 +134,12 @@ public class PublishController : Controller
                 return BadRequest("Tile data exceeds size limit");
             }
 
-            string calculateHash;
-            using (var md5 = MD5.Create())
-            {
-                var hashBytes = md5.ComputeHash(streamData);
-                calculateHash = Convert.ToHexStringLower(hashBytes);
-            }
-
-            if (!string.Equals(calculateHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+            string calculatedHash = Convert.ToHexStringLower(MD5.HashData(streamData));
+            if (!string.Equals(calculatedHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogError("Hash mismatch for tile {TileHash}: expected {ExpectedHash}, calculated {CalculatedHash}", 
-                    tileHash, expectedHash, calculateHash);
-                return BadRequest($"Hash mismatch: expected {expectedHash}, calculated {calculateHash}");
+                    tileHash, expectedHash, calculatedHash);
+                return BadRequest($"Hash mismatch: expected {expectedHash}, calculated {calculatedHash}");
             }
 
             memoryStream.Position = 0;
@@ -158,7 +151,7 @@ public class PublishController : Controller
                 new { Hash = tileHash.ToUpper() });
 
             _logger.LogInformation("Successfully stored tile {TileHash} (Hash: {CalculateHash}) with size {Size} bytes", 
-                tileHash, calculateHash, streamData.Length);
+                tileHash, calculatedHash, streamData.Length);
             return NoContent();
         }
         catch (Exception ex)

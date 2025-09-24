@@ -19,8 +19,6 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
 
         foreach (var descriptor in descriptors)
         {
-            // for now just parsing into memory and serving as a memory stream...
-            //var dataStream = await resourceLocator.OpenStream(descriptor, cancellation);
             var dataHandle = await resourceLocator.OpenHandle(descriptor, cancellation);
             if (dataHandle.Exists)
             {
@@ -29,12 +27,10 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
                 {
                     var computedHash = MD5.HashData(decoded);
                     if (!computedHash.SequenceEqual(descriptor.ContentKey.AsSpan()))
-
                         throw new Exception($"Data integrity error, requested fdid {fdid}, expected content hash {descriptor.ContentKey} but got {Convert.ToHexStringLower(computedHash)}");
                 }
 
                 return new MemoryStream(decoded);
-
             }
         }
 
