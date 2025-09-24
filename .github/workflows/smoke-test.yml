@@ -1,4 +1,4 @@
-name: Ribbit Schema Test
+name: Smoke Test
 
 on:
   workflow_dispatch:
@@ -26,11 +26,6 @@ jobs:
         DOTNET_INSTALL_DIR: /home/runner/.dotnet
         DOTNET_ROOT: /home/runner/.dotnet
         
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libicu-dev libc6-dev libssl-dev zlib1g-dev
-
     - name: .NET PATH
       run: echo "/home/runner/.dotnet" >> $GITHUB_PATH
         
@@ -47,7 +42,7 @@ jobs:
       uses: dorny/test-reporter@v1
       if: success() || failure()
       with:
-        name: Ribbit Schema Test
+        name: Smoke Test
         path: '**/test-results.trx'
 
         reporter: dotnet-trx
