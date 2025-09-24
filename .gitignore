@@ -482,4 +482,5 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
-/Generator/cache/tpr/wow
+
+/Temp/
