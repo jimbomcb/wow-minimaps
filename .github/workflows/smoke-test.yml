@@ -12,6 +12,8 @@ permissions:
 jobs:
   test:
     runs-on: self-hosted
+    container:
+      image: ubuntu:22.04
     steps:
     - uses: actions/checkout@v4
       with:
@@ -26,10 +28,10 @@ jobs:
         DOTNET_INSTALL_DIR: /home/runner/.dotnet
         DOTNET_ROOT: /home/runner/.dotnet
         
-    - name: Install native dependencies (Alpine)
+    - name: Install dependencies
       run: |
-        apk update
-        apk add zlib-dev icu-dev
+        sudo apt-get update
+        sudo apt-get install -y libicu-dev libc6-dev libssl-dev zlib1g-dev
 
     - name: .NET PATH
       run: echo "/home/runner/.dotnet" >> $GITHUB_PATH
