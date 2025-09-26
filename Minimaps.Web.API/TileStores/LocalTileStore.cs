@@ -30,7 +30,7 @@ public class LocalTileStore : ITileStore
             if (File.Exists(baseFilePath + extension))
                 return true;
         }
-        
+
         return false;
     }
 
@@ -40,12 +40,13 @@ public class LocalTileStore : ITileStore
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
         var baseFilePath = GetBaseFilePath(hash);
-        
+
         foreach (var kvp in _contentTypeToExtension)
         {
             var filePath = baseFilePath + kvp.Value;
             if (File.Exists(filePath))
             {
+                // todo: decide on stream lifetime handling
                 var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
                 return new TileInfo(stream, kvp.Key);
             }
@@ -59,7 +60,7 @@ public class LocalTileStore : ITileStore
         ArgumentNullException.ThrowIfNull(stream);
         if (hash == null || hash.Length != 32)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
-        
+
         if (!_contentTypeToExtension.TryGetValue(contentType, out var extension))
             throw new ArgumentException($"Unsupported content type: {contentType}", nameof(contentType));
 

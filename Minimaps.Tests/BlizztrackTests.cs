@@ -1,11 +1,11 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Blizztrack.Framework.TACT.Implementation;
+using Blizztrack.Framework.TACT.Resources;
+using BLPSharp;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
-using Blizztrack.Framework.TACT.Resources;
-using Blizztrack.Framework.TACT.Implementation;
 using Minimaps.Shared;
-using BLPSharp;
 using System.Security.Cryptography;
 
 namespace Minimaps.Tests;
@@ -16,7 +16,8 @@ public class BlizztrackTests
     {
         Directory.CreateDirectory(testCachePath);
 
-        return new(){
+        return new()
+        {
             ["Blizztrack:CachePath"] = testCachePath,
             ["Blizztrack:RateLimitPermits"] = "600",
             ["Blizztrack:RateLimitWindowSeconds"] = "60",
@@ -222,7 +223,7 @@ public class BlizztrackTests
     public async Task TestArchiveOffsetCachingProblem()
     {
         var testCachePath = "C:\\temp\\lfs_test_real";
-        
+
         try
         {
             var cleanupDir = Path.Combine(testCachePath, "res", "data");
@@ -232,7 +233,7 @@ public class BlizztrackTests
         catch (Exception ex)
         {
         }
-        
+
         var configValues = GetTestConfigValues(testCachePath);
 
         var configuration = new ConfigurationBuilder()
@@ -264,8 +265,8 @@ public class BlizztrackTests
 
             // sample of fdids and their expected hashes, some of these files exist within the same archvie and raise the problem
             uint[] problematicFdids = { 204244, 204461, 204672, 204711 };
-            string[] expectedHashes = { 
-                "26b259bf9aaabb823ab15715ad6b2ab0", 
+            string[] expectedHashes = {
+                "26b259bf9aaabb823ab15715ad6b2ab0",
                 "b6cbd64b0b5bbbcd67b644895fc09c65",
                 "a2512439524e169654401034ecea98e0",
                 "6e0c6024f4860b02a550fb9f72deaa46"
@@ -277,7 +278,7 @@ public class BlizztrackTests
                 var fdid = problematicFdids[i];
                 var expectedHash = expectedHashes[i];
                 var descriptors = fileSystem.OpenFDID(fdid, Blizztrack.Framework.TACT.Enums.Locale.enUS);
-                
+
                 if (descriptors.Length == 0)
                 {
                     logger.LogWarning("No descriptors found for FDID {FDID}", fdid);
@@ -286,9 +287,9 @@ public class BlizztrackTests
 
                 var descriptor = descriptors[0];
                 var localPath = Path.Combine(testCachePath, "res", descriptor.LocalPath);
-                
-                descriptorInfos.Add((fdid, expectedHash, descriptor, localPath));                
-                logger.LogInformation("FDID {FDID}: LocalPath={LocalPath}, Offset={Offset}, Length={Length}, ExpectedHash={Hash}", 
+
+                descriptorInfos.Add((fdid, expectedHash, descriptor, localPath));
+                logger.LogInformation("FDID {FDID}: LocalPath={LocalPath}, Offset={Offset}, Length={Length}, ExpectedHash={Hash}",
                     fdid, descriptor.LocalPath, descriptor.Offset, descriptor.Length, expectedHash);
 
                 // if the actual expecte ckey doesn't match the ckey above then the testing files have been changed...
@@ -311,10 +312,10 @@ public class BlizztrackTests
                 Assert.NotNull(compressionSpec);
 
                 using var decoded = await BLTE.Execute(stream, compressionSpec, stoppingToken: cts.Token);
-                        
+
                 var computedHash = MD5.HashData(decoded);
                 var computedHashString = Convert.ToHexStringLower(computedHash);
-                        
+
                 if (computedHashString != expectedHash)
                 {
                     // shouldn't happen unless the underlying files change, which is not the actual problem being tested here

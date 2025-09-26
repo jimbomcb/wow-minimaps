@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Net.Http.Json;
+﻿using Microsoft.Extensions.Logging;
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
-using Microsoft.Extensions.Logging;
 
 namespace Minimaps.Shared;
 
@@ -23,7 +21,7 @@ public class WebhookEventLog(string? webhookUrl, ILogger? logger = null) : IDisp
 
     public void Post(string message)
     {
-        if (_disposed || !_enabled) 
+        if (_disposed || !_enabled)
             return;
 
         lock (_queueLock)
@@ -37,7 +35,7 @@ public class WebhookEventLog(string? webhookUrl, ILogger? logger = null) : IDisp
     /// </summary>
     public async Task SendQueuedAsync()
     {
-        if (_disposed || !_enabled) 
+        if (_disposed || !_enabled)
             return;
 
         // check rate limit before processing
@@ -73,7 +71,7 @@ public class WebhookEventLog(string? webhookUrl, ILogger? logger = null) : IDisp
                 {
                     await SendWebhook(currentBatch.ToString());
                     currentBatch.Clear();
-                    
+
                     if (DateTime.UtcNow < _rateLimitResetTime)
                         break;
                 }
@@ -135,13 +133,13 @@ public class WebhookEventLog(string? webhookUrl, ILogger? logger = null) : IDisp
     {
         if (_disposed) return;
         _disposed = true;
-        
+
         lock (_queueLock)
         {
             if (_messageQueue.Count > 0)
                 _logger?.LogError("Disposing WebhookEventLog with {Count} unsent messages", _messageQueue.Count);
         }
-        
+
         _httpClient?.Dispose();
     }
 }

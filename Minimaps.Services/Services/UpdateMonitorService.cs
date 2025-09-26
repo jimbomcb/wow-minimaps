@@ -3,7 +3,6 @@ using Blizztrack.Framework.TACT.Resources;
 using BLPSharp;
 using DBCD;
 using DBCD.Providers;
-using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
@@ -41,8 +40,8 @@ internal class UpdateMonitorService :
         /// WebP compression level, given it's lossless this purely affects how much time we spend tying to optimize
         /// </summary>
         public int CompressionLevel { get; set; } = 100;
+        public bool SingleThread { get; set; } = false;
     }
-    private readonly record struct ProductVersion(string BuildConfig, string CDNConfig, List<string> Regions);
 
     private readonly Configuration _serviceConfig = new();
     private readonly ILogger<UpdateMonitorService> _logger;
@@ -65,7 +64,6 @@ internal class UpdateMonitorService :
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
     {
-        // TODO: Think about how to best structure key provisioning given the long running service
         var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
 
         var ribbitClient = new RibbitClient.RibbitClient(RibbitRegion.US);
@@ -73,14 +71,15 @@ internal class UpdateMonitorService :
         var tactSequence = tactSummary.SequenceId; // todo: early-out if no change in sequence since last tick
         _logger.LogInformation("Processing summary seq #{SequenceId} with {ProductCount} products", tactSequence, tactSummary.Data.Count);
 
-        // todo: check the summary sequence IDs of the individual products for filtering
+        // TODO: Check the summary sequence IDs of the individual products for filtering
+        // TODO: Think about how to best structure key provisioning given the long running service
 
         // ensure keys are in memory
-        foreach (var entry in await tactKeysTask)
-            TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
+        //foreach (var entry in await tactKeysTask)
+        //    TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
         // gather all the latest products & their versions
-        var products = new Dictionary<DiscoveredRequestDtoEntry, ProductVersion>();
+        var discovered = new List<DiscoveredBuildDto>();
         foreach (var product in _serviceConfig.Products)
         {
             try
@@ -88,43 +87,74 @@ internal class UpdateMonitorService :
                 var versionsResponse = await ribbitClient.VersionsAsync(product); // todo cancellation
                 foreach (var version in versionsResponse.Data)
                 {
-                    var key = new DiscoveredRequestDtoEntry(product, version.VersionsName);
-                    if (!products.ContainsKey(key))
-                        products[key] = new(version.BuildConfig, version.CDNConfig, []);
-
-                    products[key].Regions.Add(version.Region);
+                    discovered.Add(new()
+                    {
+                        Product = product,
+                        Version = BuildVersion.Parse(version.VersionsName),
+                        BuildConfig = version.BuildConfig,
+                        CDNConfig = version.CDNConfig,
+                        ProductConfig = version.ProductConfig,
+                        Regions = [version.Region]
+                    });
                 }
             }
             catch (ProductNotFoundException ex)
             {
                 _logger.LogWarning("Product {Product} not found: {Message}", product, ex.Message);
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error processing versions for {Product}", product);
-            }
         }
 
-        _logger.LogInformation("Discovered {Versions} versions across {Products} products", products.Count, _serviceConfig.Products.Count);
+        _logger.LogInformation("Discovered {Versions} versions across {Products} products", discovered.DistinctBy(x => x.Version).Count(), _serviceConfig.Products.Count);
 
-        var newBuilds = await _backendClient.PostAsync<DiscoveredRequestDto>("publish/discovered", new DiscoveredRequestDto
-        {
-            Entries = [.. products.Keys.Select(k => new DiscoveredRequestDtoEntry(k.Product, k.Version))]
-        }); // todo cancellation
+        // group discovered builds by product+version, aggregate regions
+        var groupedBuilds = discovered
+            .GroupBy(x => (x.Product, x.Version))
+            .Select(group =>
+            {
+                // some sanity checking around the version server data, as far as I can tell a single version will always share the same data across regions, if not then I need to partition out
+                // the build_products table
+                var builds = group.ToList();
+                var distinctBuildConfigs = builds.Select(x => x.BuildConfig).Distinct();
+                var distinctProductConfigs = builds.Select(x => x.ProductConfig).Distinct();
+                var distinctCdnConfigs = builds.Select(x => x.CDNConfig).Distinct();
+                if (distinctBuildConfigs.Count() > 1)
+                    throw new InvalidOperationException($"Multiple build configs for {group.Key.Product} v{group.Key.Version}: {string.Join(", ", distinctBuildConfigs)}");
+                if (distinctProductConfigs.Count() > 1)
+                    throw new InvalidOperationException($"Multiple product configs for {group.Key.Product} v{group.Key.Version}: {string.Join(", ", distinctProductConfigs)}");
+                if (distinctCdnConfigs.Count() > 1)
+                    throw new InvalidOperationException($"Multiple CDN configs for {group.Key.Product} v{group.Key.Version}: {string.Join(", ", distinctCdnConfigs)}");
+
+                // Because all builds are expected to share build/product/cdn config across product/version combination we take the first
+                var firstBuild = builds[0];
+                return new DiscoveredBuildDto
+                {
+                    Product = firstBuild.Product,
+                    Version = firstBuild.Version,
+                    BuildConfig = firstBuild.BuildConfig,
+                    CDNConfig = firstBuild.CDNConfig,
+                    ProductConfig = firstBuild.ProductConfig,
+                    Regions = [.. builds.SelectMany(x => x.Regions).Distinct()]
+                };
+            });
+
+        // let the backend filter the list of builds we're going to proceed with
+        var newBuilds = await _backendClient.PostAsync<DiscoveredRequestDto>("publish/discovered", new DiscoveredRequestDto([.. groupedBuilds.ToList()])); // todo cancellation
         _logger.LogInformation("{NewBuilds} builds not yet published", newBuilds.Entries.Count);
-
         foreach (var entry in newBuilds.Entries)
         {
             _logger.LogInformation("Processing build {Product} {Version}", entry.Product, entry.Version);
-            await ProcessBuild(entry, products[entry], cancellationToken);
+            await ProcessBuild(entry, cancellationToken);
         }
     }
 
     private readonly record struct TilePos(int MapId, int TileX, int TileY);
     private readonly record struct TileHashData(uint TileFDID, ConcurrentBag<TilePos> Tiles);
-    private async Task ProcessBuild(DiscoveredRequestDtoEntry build, ProductVersion version, CancellationToken cancellation)
+    private async Task ProcessBuild(DiscoveredBuildDto build, CancellationToken cancellation)
     {
-        var fs = await _blizztrack.ResolveFileSystem(build.Product, version.BuildConfig, version.CDNConfig, cancellation);
+        // TODO: Parse anything from product config?
+        // TODO: CDN loading for CN builds
+
+        var fs = await _blizztrack.ResolveFileSystem(build.Product, build.BuildConfig, build.CDNConfig, cancellation);
         var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(fs, _resourceLocator), _dbdProvider);
         IDBCDStorage mapDB = dbcd.Load("Map");
         if (mapDB.Count == 0)
@@ -139,30 +169,34 @@ internal class UpdateMonitorService :
             var mapName = row.Field<string>("MapName_lang");
             var mapDir = row.Field<string>("Directory");
             var mapJson = JsonConvert.SerializeObject(row.AsType<object>());
+
             output.Maps.Add(row.ID, new(mapName, mapDir, mapJson));
         }
 
-        // there are async issues inside the AbstractResourceLocatorService writing to the same file across multiple threads
-        // temporarily just lock based on WDT id given the problem is multiple parallel maps referencing the single WDT
-        // but this is more a blizztrack issue than our issue...
-        var tempLocks = new ConcurrentDictionary<uint, SemaphoreSlim>();
+        //var mapRowHash = new ConcurrentDictionary<int, string>();
+        var encryptedMaps = new ConcurrentDictionary<int, string>();
         var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
-        await Parallel.ForEachAsync(mapList, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = cancellation }, async (rowPair, token) =>
+        await Parallel.ForEachAsync(mapList,
+            new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
+            async (rowPair, token) =>
         {
             var row = rowPair.Value;
+            //mapRowHash.TryAdd(rowPair.Key, DBCRowHash.Generate(mapDB.LayoutHash, row));
+
             var wdtFileID = (uint)row.Field<int>("WdtFileDataID");
             if (wdtFileID == 0)
+            {
+                _logger.LogWarning("Map {MapId}({MapDir}) has no WDT", row.ID, row.Field<string>("Directory"));
                 return; // no WDT for this map, skip - TODO: Handle WMO based maps, recursively iterate the root object and store the per-WMO minimaps
+            }
 
-            var fileLock = tempLocks.GetOrAdd(wdtFileID, _ => new SemaphoreSlim(1, 1));
-            await fileLock.WaitAsync(cancellation);
             try
             {
                 using var wdtStreamRaw = await _blizztrack.OpenStreamFDID(wdtFileID, fs, cancellation: token);
                 if (wdtStreamRaw == null || wdtStreamRaw == Stream.Null)
                 {
-                    _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir})", row.ID, row.Field<string>("Directory"));
+                    _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir}), FDID {fdid} not found", row.ID, row.Field<string>("Directory"), wdtFileID);
                     return;
                 }
 
@@ -189,27 +223,31 @@ internal class UpdateMonitorService :
                         });
                 }
             }
+            catch (DecryptionKeyMissingException ex)
+            {
+                _logger.LogWarning("Failed processing map {MapId} ({MapDir}) FDID {FDID}, encrypted with unknown key '{Key}'", row.ID, row.Field<string>("Directory"), wdtFileID, ex.ExpectedKeyString);
+                encryptedMaps.AddOrUpdate(row.ID, ex.ExpectedKeyString, (_, _) => ex.ExpectedKeyString);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing minimap for map {MapId}", rowPair.Key);
-            }
-            finally
-            {
-                fileLock.Release();
             }
         });
 
         // POST our list of tiles and PUT each missing tile
         // Current builds are around: 21348 unique tiles across 1122 maps / 39627 tiles
-        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles", tileHashMap.Count, mapList.Count, tileHashMap.Sum(x => x.Value.Tiles.Count));
-        
+        _logger.LogInformation("Discovered {HashCount} unique tiles across {MapCount} maps / {TileCount} tiles ({EncCount} encrypted maps)",
+            tileHashMap.Count, mapList.Count, tileHashMap.Sum(x => x.Value.Tiles.Count), encryptedMaps.Count);
+
         var publishRequest = await _backendClient.PostAsync<TileListDto>("publish/tiles", new TileListDto
         {
             Tiles = [.. tileHashMap.Keys]
         }, cancellation);
 
         // almost all of the time is spent crunching out the 100 quality lossless webp
-        await Parallel.ForEachAsync(publishRequest.Tiles, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = cancellation }, async (tileHash, token) =>
+        await Parallel.ForEachAsync(publishRequest.Tiles,
+            new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
+            async (tileHash, token) =>
         {
             if (!tileHashMap.TryGetValue(tileHash, out var tileData))
             {
@@ -262,8 +300,8 @@ internal class UpdateMonitorService :
             }
         });
 
+        // - trigger backend data validation, ensure expected tiles exist
 
-        // - trigger backend data validation, ensure expected tiles exist and flag build as processed
 
         _logger.LogInformation("Completed processing build {Product} {Version}", build.Product, build.Version);
     }

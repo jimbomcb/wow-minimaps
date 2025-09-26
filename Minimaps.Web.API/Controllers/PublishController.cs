@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Dapper;
+using Microsoft.AspNetCore.Mvc;
+using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
-using Dapper;
 using Minimaps.Web.API.TileStores;
+using Npgsql;
 using System.Security.Cryptography;
 
 namespace Minimaps.Web.API.Controllers;
@@ -11,68 +13,83 @@ namespace Minimaps.Web.API.Controllers;
 public class PublishController : Controller
 {
     private readonly ILogger<PublishController> _logger;
-    private readonly DapperContext _db;
+    private readonly NpgsqlDataSource _data;
     private readonly ITileStore _tileStore;
 
-    public PublishController(ILogger<PublishController> logger, DapperContext db, ITileStore tileStore)
+    public PublishController(ILogger<PublishController> logger, NpgsqlDataSource data, ITileStore tileStore)
     {
         _logger = logger;
-        _db = db;
+        _data = data;
         _tileStore = tileStore;
     }
 
     [HttpPost]
-    public async Task<IActionResult> Discovered([FromBody]DiscoveredRequestDto discoveredVersions)
+    public async Task<IActionResult> Discovered([FromBody] DiscoveredRequestDto discoveredVersions)
     {
         if (discoveredVersions.Entries.Count == 0)
             return Json(new DiscoveredRequestDto([]));
 
-        var response = new List<DiscoveredRequestDtoEntry>();
-        
-        using var connection = _db.CreateConnection();
-        
-        foreach (var entry in discoveredVersions.Entries)
+        var response = new List<DiscoveredBuildDto>();
+
+        try
         {
-            var buildState = await connection.ExecuteScalarAsync<bool?>("SELECT processed FROM builds WHERE version = @Version AND product = @Product;", new
+            await using var conn = await _data.OpenConnectionAsync();
+            await using var transaction = await conn.BeginTransactionAsync();
+
+            // Find which builds are locked and don't need processing
+            var lockedBuilds = (await conn.QueryAsync<BuildVersion>(
+                "SELECT id FROM builds WHERE id = ANY(@Ids) AND locked = TRUE;",
+                new { Ids = discoveredVersions.Entries.Select(x => x.Version).Distinct().ToList() },
+                transaction)).ToHashSet();
+
+            var unlockedEntries = discoveredVersions.Entries.Where(x => !lockedBuilds.Contains(x.Version)).ToList();
+
+            foreach (var entry in unlockedEntries.Select(x => x.Version).Distinct())
             {
-                entry.Version,
-                entry.Product
-            });
-
-            // exists and processed
-            if (buildState.HasValue && buildState.Value)
-                continue;
-
-            if (buildState == null)
-            {
-                // new build
-                var versionParts = entry.Version.Split('.');
-                if (versionParts.Length != 4)
-                {
-                    _logger.LogWarning("Invalid version format for {Product} {Version}, expected a.b.c.d", entry.Product, entry.Version);
-                    continue;
-                }
-
-                await connection.ExecuteAsync("INSERT INTO builds (product, version, ver_expansion, ver_major, ver_minor, ver_build) " +
-                    "VALUES (@Product, @Version, @Ver1, @Ver2, @Ver3, @Ver4);", new
-                    {
-                        entry.Product,
-                        entry.Version,
-                        Ver1 = int.Parse(versionParts[0]),
-                        Ver2 = int.Parse(versionParts[1]),  
-                        Ver3 = int.Parse(versionParts[2]),
-                        Ver4 = int.Parse(versionParts[3])
-                    });
+                await conn.ExecuteAsync(
+                    "INSERT INTO builds (id, version) VALUES (@Id, @VersionStr) ON CONFLICT (id) DO NOTHING;",
+                    new { Id = entry, VersionStr = (string)entry },
+                    transaction);
             }
 
-            response.Add(entry);
+            foreach (var entry in unlockedEntries)
+            {
+                await conn.ExecuteAsync(@"
+                    INSERT INTO build_products (build_id, product, released, config_build, config_cdn, config_product, config_regions)
+                    VALUES (@Id, @Product, @Released, @ConfigBuild, @ConfigCdn, @ConfigProduct, @ConfigRegions)
+                    ON CONFLICT (build_id, product) 
+                    DO UPDATE SET 
+                        config_regions = array(SELECT DISTINCT unnest(build_products.config_regions || EXCLUDED.config_regions))",
+                    new
+                    {
+                        Id = entry.Version,
+                        Product = entry.Product,
+                        Released = DateTime.UtcNow,
+                        ConfigBuild = entry.BuildConfig,
+                        ConfigCdn = entry.CDNConfig,
+                        ConfigProduct = entry.ProductConfig,
+                        ConfigRegions = entry.Regions.ToArray()
+                    }, transaction);
+
+                response.Add(entry);
+            }
+
+            await transaction.CommitAsync();
+
+            _logger.LogInformation("Successfully processed {BuildCount} unique builds and {ProductCount} build products",
+                unlockedEntries.Select(x => x.Version).Distinct().Count(), unlockedEntries.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process discovered builds");
+            return StatusCode(500, "Failed to process discovered builds");
         }
 
         return Json(new DiscoveredRequestDto(response));
     }
 
     [HttpPost]
-    public async Task<IActionResult> Tiles([FromBody]TileListDto tiles)
+    public async Task<IActionResult> Tiles([FromBody] TileListDto tiles)
     {
         if (tiles.Tiles.Count == 0)
             return Json(new TileListDto([]));
@@ -81,16 +98,17 @@ public class PublishController : Controller
 
         // in batches check which of the tiles dn't exist in the map database
         const int batchSize = 5000;
-        using var connection = _db.CreateConnection();
+        await using var connection = await _data.OpenConnectionAsync();
         for (int i = 0; i < tiles.Tiles.Count; i += batchSize)
         {
-            var batch = tiles.Tiles.Skip(i).Take(batchSize).ToList();
+            var batch = tiles.Tiles.Skip(i).Take(batchSize);
+
             var existing = await connection.QueryAsync<string>("SELECT hash FROM minimap_tiles WHERE hash = ANY(@Hashes);", new
             {
-                Hashes = batch.Select(x=>x.ToUpper()).ToList()
+                Hashes = batch.Select(x => x.ToUpper()).ToList()
             });
             var tileSet = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        
+
             response.AddRange(batch.Where(t => !tileSet.Contains(t)));
         }
 
@@ -106,13 +124,12 @@ public class PublishController : Controller
         return Json(new TileListDto(response));
     }
 
+    [RequestSizeLimit(1024 * 1024)] // 1MB limit
     [HttpPut("{tileHash}")]
     public async Task<IActionResult> Tile(string tileHash)
     {
         if (!Request.Headers.TryGetValue("Content-Type", out var contentTypeValues) || contentTypeValues.Single() == null)
-        {
             return BadRequest("Missing Content-Type header");
-        }
 
         if (!Request.Headers.TryGetValue("X-Expected-Hash", out var expectedHashValues))
             return BadRequest("Missing X-Expected-Hash header");
@@ -123,21 +140,15 @@ public class PublishController : Controller
 
         try
         {
-            // read stream into memory for hash calculation (tiles should be <1MB each)
+            // read stream into memory for hash calculation (body enforced to <1MB)
             using var memoryStream = new MemoryStream();
             await Request.Body.CopyToAsync(memoryStream);
-            
-            var streamData = memoryStream.ToArray();
-            if (streamData.Length > 1024 * 1024)
-            {
-                _logger.LogWarning("Tile {TileHash} exceeds 1MB size limit: {Size} bytes", tileHash, streamData.Length);
-                return BadRequest("Tile data exceeds size limit");
-            }
 
-            string calculatedHash = Convert.ToHexStringLower(MD5.HashData(streamData));
+            memoryStream.Position = 0;
+            string calculatedHash = Convert.ToHexString(MD5.HashData(memoryStream));
             if (!string.Equals(calculatedHash, expectedHash, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogError("Hash mismatch for tile {TileHash}: expected {ExpectedHash}, calculated {CalculatedHash}", 
+                _logger.LogError("Hash mismatch for tile {TileHash}: expected {ExpectedHash}, calculated {CalculatedHash}",
                     tileHash, expectedHash, calculatedHash);
                 return BadRequest($"Hash mismatch: expected {expectedHash}, calculated {calculatedHash}");
             }
@@ -145,13 +156,15 @@ public class PublishController : Controller
             memoryStream.Position = 0;
             await _tileStore.SaveAsync(tileHash, memoryStream, contentTypeValues.Single()!);
 
-            using var connection = _db.CreateConnection();
-            await connection.ExecuteAsync(
-                "INSERT INTO minimap_tiles (hash) VALUES (@Hash) ON CONFLICT (hash) DO NOTHING;", 
-                new { Hash = tileHash.ToUpper() });
+            var command = _data.CreateCommand("INSERT INTO minimap_tiles (hash) VALUES (@Hash) ON CONFLICT (hash) DO NOTHING;");
+            command.Parameters.AddWithValue("Hash", tileHash.ToUpper());
 
-            _logger.LogInformation("Successfully stored tile {TileHash} (Hash: {CalculateHash}) with size {Size} bytes", 
-                tileHash, calculatedHash, streamData.Length);
+            if (await command.ExecuteNonQueryAsync() != 1)
+                _logger.LogDebug("Tile {TileHash} already exists in database", tileHash);
+            else
+                _logger.LogInformation("Successfully stored tile {TileHash} (Hash: {CalculateHash}) with size {Size} bytes",
+                    tileHash, calculatedHash, memoryStream.Length);
+
             return NoContent();
         }
         catch (Exception ex)

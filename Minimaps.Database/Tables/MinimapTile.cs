@@ -8,6 +8,9 @@
 /// </summary>
 internal class MinimapTile
 {
+    /// <summary>
+    /// The "ContentKey" MD5 checksum of the minimap's original BLP file, in uppercase hex (enforced via CHECK)
+    /// </summary>
     public required string hash { get; set; }
 }
 

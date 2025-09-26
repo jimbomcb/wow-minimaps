@@ -7,8 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.35" />
     <PackageReference Include="FluentMigrator" Version="7.1.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9" />
     <PackageReference Include="Npgsql" Version="9.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>
 
 </Project>

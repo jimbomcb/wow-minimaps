@@ -13,10 +13,10 @@ public class BackendClient
     public BackendClient(HttpClient httpClient)
     {
         _httpClient = httpClient;
-        _jsonOptions = new JsonSerializerOptions
+        _jsonOptions = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            PropertyNameCaseInsensitive = true
+            PropertyNameCaseInsensitive = true,
         };
     }
 
@@ -53,8 +53,8 @@ public class BackendClient
             response.EnsureSuccessStatusCode();
 
             var responseJson = await response.Content.ReadAsStringAsync();
-
-            return JsonSerializer.Deserialize<T>(responseJson, _jsonOptions);
+            var outputObj = JsonSerializer.Deserialize<T>(responseJson, _jsonOptions) ?? throw new Exception("Fauled to parse JSON");
+            return outputObj;
         }
         finally
         {

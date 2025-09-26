@@ -32,10 +32,10 @@ public class TileController : ControllerBase
             }
 
             var tileInfo = await _tileStore.GetAsync(tileHash);
-            
+
             Response.Headers.CacheControl = "public, max-age=31536000, immutable";
             Response.Headers.ETag = $"\"{tileHash}\"";
-            
+
             return File(tileInfo.Stream, tileInfo.ContentType);
         }
         catch (FileNotFoundException)

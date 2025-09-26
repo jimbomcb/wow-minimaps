@@ -43,18 +43,18 @@ public class WDTReader : IDisposable
                         // Skip the first 28 bytes (7 * 4 bytes - 1 for texture ID)
                         _baseStream.Position += 28;
                         var textureId = _reader.ReadUInt32();
-                        
+
                         if (textureId > 0)
                         {
                             tiles.Add(new(col, row, textureId));
                         }
                     }
                 }
-                
+
                 return tiles;
             }
 
-             // Skip this chunk
+            // Skip this chunk
             _baseStream.Position += header.Size;
         }
 
@@ -67,7 +67,7 @@ public class WDTReader : IDisposable
         Array.Reverse(identBytes); // Reverse for correct endianness
         var size = _reader.ReadUInt32();
         var ident = Encoding.UTF8.GetString(identBytes);
-        
+
         return new ChunkHeader(ident, size);
     }
 
