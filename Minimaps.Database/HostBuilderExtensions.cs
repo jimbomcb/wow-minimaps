@@ -12,7 +12,7 @@ public static class HostBuilderExtensions
         builder.AddNpgsqlDataSource("minimaps-database", configureDataSourceBuilder: x =>
         {
             x.UseNodaTime();
-            x.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory()); // BuildVersion type handling
+            x.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory());
             x.MapEnum<ScanState>();
         });
         return builder;

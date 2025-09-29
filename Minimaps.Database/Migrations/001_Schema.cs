@@ -82,11 +82,11 @@ public class InitialSchema : Migration
             .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
         // Ensure we don't end up with the same region multiple times (done via trigger as check constraint can't do subquery)
         Execute.Sql(@"CREATE OR REPLACE FUNCTION ensure_unique_regions() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN " +
-                "IF array_length(NEW.config_regions, 1) != (SELECT count(DISTINCT elem) FROM unnest(NEW.config_regions) AS elem) THEN "+
-                    "RAISE EXCEPTION 'build_product contains duplicate region, must be unique'; "+
-                "END IF; "+
-                "RETURN NEW; "+
-            "END; $$;"+
+                "IF array_length(NEW.config_regions, 1) != (SELECT count(DISTINCT elem) FROM unnest(NEW.config_regions) AS elem) THEN " +
+                    "RAISE EXCEPTION 'build_product contains duplicate region, must be unique'; " +
+                "END IF; " +
+                "RETURN NEW; " +
+            "END; $$;" +
             "CREATE TRIGGER trigger_unique_regions BEFORE INSERT OR UPDATE ON build_products FOR EACH ROW EXECUTE FUNCTION ensure_unique_regions();");
 
         Create.PrimaryKey("PK_build_products")
@@ -159,8 +159,8 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
 
         // Build-Map relationship table
         Create.Table("build_maps")
-            .WithColumn("build_id").AsInt64().NotNullable()
-            .WithColumn("map_id").AsInt32().NotNullable();
+            .WithColumn("build_id").AsInt64()
+            .WithColumn("map_id").AsInt32();
 
         Create.PrimaryKey("PK_build_maps")
             .OnTable("build_maps")
@@ -198,6 +198,31 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
         Create.Table("settings")
             .WithColumn("key").AsString().PrimaryKey()
             .WithColumn("value").AsString().Nullable();
+
+        Create.Table("minimap_compositions")
+            .WithColumn("hash").AsString(32).PrimaryKey()
+            .WithColumn("composition").AsCustom("JSONB");
+
+        Create.Table("build_minimaps")
+            .WithColumn("build_id").AsInt64()
+            .WithColumn("map_id").AsInt32()
+            .WithColumn("composition_hash").AsString(32);
+
+        Create.PrimaryKey("PK_build_minimap")
+            .OnTable("build_minimaps")
+            .Columns("build_id", "map_id");
+
+        Create.ForeignKey("FK_build_minimap_composition")
+            .FromTable("build_minimaps").ForeignColumn("composition_hash")
+            .ToTable("minimap_compositions").PrimaryColumn("hash");
+
+        Create.ForeignKey("FK_build_minimap_map")
+            .FromTable("build_minimaps").ForeignColumn("map_id")
+            .ToTable("maps").PrimaryColumn("id");
+
+        Create.ForeignKey("FK_build_minimap_build")
+            .FromTable("build_minimaps").ForeignColumn("build_id")
+            .ToTable("builds").PrimaryColumn("id");
     }
 
     public override void Down()

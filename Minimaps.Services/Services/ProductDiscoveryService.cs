@@ -18,6 +18,10 @@ internal class ProductDiscoveryService : IntervalBackgroundService
         /// List of products that we'll check the versions of, supports the ? and * wildcards 
         /// </summary>
         public List<string> Products { get; set; } = [];
+        /// <summary>
+        /// Exclude specific products from scanning (exact match)
+        /// </summary>
+        public Dictionary<string, string> ProductExclude { get; set; } = [];
     }
 
     private readonly Configuration _serviceConfig = new();
@@ -82,7 +86,8 @@ internal class ProductDiscoveryService : IntervalBackgroundService
         {
             // we're given the raw list of per-region products like the TACT version server typically provides,
             // group up the regions for each unique build_product entry
-            var products = foundVersions.GroupBy(
+            var excludedProducts = _serviceConfig.ProductExclude.Keys.ToHashSet();
+            var products = foundVersions.Where(x => !excludedProducts.Contains(x.Product)).GroupBy(
                 k => (Version: BuildVersion.Parse(k.Version.VersionsName), k.Product, k.Version.BuildConfig, k.Version.CDNConfig, k.Version.ProductConfig),
                 v => v.Version.Region)
                 .ToList();

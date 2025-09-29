@@ -28,7 +28,7 @@ public readonly struct BuildVersion : IComparable<BuildVersion>, IEquatable<Buil
     public static explicit operator string(BuildVersion version) => version.ToString();
     public static explicit operator BuildVersion(long value) => new(value);
 
-    public BuildVersion(long value) 
+    public BuildVersion(long value)
     {
         if (value < 0)
             throw new ArgumentOutOfRangeException(nameof(value), "BuildVersion encoded value must be non-negative");

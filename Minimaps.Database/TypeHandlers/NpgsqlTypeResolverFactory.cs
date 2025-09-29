@@ -1,4 +1,5 @@
 ﻿using Minimaps.Shared;
+using Minimaps.Shared.Types;
 using Npgsql.Internal;
 using Npgsql.Internal.Postgres;
 
@@ -16,13 +17,13 @@ public class NpgsqlTypeResolverFactory : PgTypeInfoResolverFactory
         public PgTypeInfo? GetTypeInfo(Type? type, DataTypeName? dataTypeName, PgSerializerOptions options)
         {
             if (type == typeof(BuildVersion))
-            {
-                return new PgTypeInfo(
-                      options,
-                      new NpgsqlBuildVersionConverter(),
-                      new(DataTypeName.FromDisplayName("int8"))
-                  );
-            }
+                return new(options, new NpgsqlBuildVersionConverter(), new(DataTypeName.FromDisplayName("int8")));
+
+            // Minimap compositions get serialized as JSONB objects of {"0,5": "hash", "12,34": "hash"}
+            if (type == typeof(MinimapComposition))
+                //return new(options, new NpgsqlMinimapCompositionConverter(), new(DataTypeName.FromDisplayName("jsonb")));
+                throw new NotImplementedException("Please don't pass compositions directly to Npgsql, serialize to string");
+
 
             return null;
         }
@@ -44,37 +45,6 @@ public class NpgsqlTypeResolverFactory : PgTypeInfoResolverFactory
 
             return null;
         }
-    }
-}
-
-public class NpgsqlBuildVersionConverter : PgStreamingConverter<BuildVersion>
-{
-    public override BuildVersion Read(PgReader reader)
-    {
-        var longValue = reader.ReadInt64();
-        return (BuildVersion)longValue;
-    }
-
-    public override ValueTask<BuildVersion> ReadAsync(PgReader reader, CancellationToken cancellationToken = default)
-    {
-        var longValue = reader.ReadInt64();
-        return new ValueTask<BuildVersion>((BuildVersion)longValue);
-    }
-
-    public override void Write(PgWriter writer, BuildVersion value)
-    {
-        writer.WriteInt64((long)value);
-    }
-
-    public override ValueTask WriteAsync(PgWriter writer, BuildVersion value, CancellationToken cancellationToken = default)
-    {
-        writer.WriteInt64((long)value);
-        return ValueTask.CompletedTask;
-    }
-
-    public override Size GetSize(SizeContext context, BuildVersion value, ref object? writeState)
-    {
-        return Size.Create(8); // bigint 8 bytes
     }
 }
 

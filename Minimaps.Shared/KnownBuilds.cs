@@ -10,7 +10,7 @@ public static class KnownBuilds
     // - Find WdtFileId introduction
     // - WWF weather json surfaced to the browser at all?
 
-    public static readonly BuildVersion LastDBC = new(7, 0, 3, 21287); 
+    public static readonly BuildVersion LastDBC = new(7, 0, 3, 21287);
     public static readonly BuildVersion SwitchMPQToCASC = new(6, 0, 1, 18125);
 
     /// <summary>

@@ -5,7 +5,7 @@ using DBCD.Providers;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.TileStores;
-using Newtonsoft.Json;
+using Minimaps.Shared.Types;
 using NodaTime;
 using Npgsql;
 using SixLabors.ImageSharp.Formats.Webp;
@@ -13,6 +13,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Minimaps.Services;
 
@@ -31,10 +32,6 @@ internal class ScanMapsService :
     private class Configuration
     {
         public string CachePath { get; set; } = "./cache";
-        /// <summary>
-        /// Limit scanning to specific products (exact match)
-        /// </summary>
-        public List<string> ProductFilter { get; set; } = [];
 
         public List<string> AdditionalCDNs { get; set; } = [];
         /// <summary>
@@ -53,7 +50,7 @@ internal class ScanMapsService :
         public bool CatchScanExceptions { get; set; } = true;
     }
 
-    private readonly record struct TilePos(int MapId, int TileX, int TileY);
+    private readonly record struct TilePos(int MapId, TileCoord Coord);
     private readonly record struct TileHashData(uint TileFDID, ConcurrentBag<TilePos> Tiles);
     private static string GetExpectedWdtPath(string directory, string tail = ".wdt") => string.Format("world/maps/{0}/{0}{1}", directory, tail);
 
@@ -147,7 +144,7 @@ internal class ScanMapsService :
             timer.Stop();
 
             _logger.LogWarning(ex, "Caught BuildProcessException: {Msg}", ex.Message);
-        
+
             await using var failCmd = new NpgsqlCommand("UPDATE build_scans SET state = @NewState, exception = @Exception, " +
                 "last_scanned = timezone('utc', now()), scan_time = @ScanTime, scanned_product = @Product, config_build = @CfgBuild, config_cdn = @CfgCdn, " +
                 "config_product = @CfgProduct WHERE build_id = @BuildId;", conn, transaction);
@@ -164,9 +161,9 @@ internal class ScanMapsService :
         catch (Exception ex) when (_serviceConfig.CatchScanExceptions)
         {
             timer.Stop();
-        
+
             _logger.LogError(ex, "Caught unhandled exception");
-        
+
             await using var failCmd = new NpgsqlCommand("UPDATE build_scans SET state = @NewState, exception = @Exception, " +
                 "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE build_id = @BuildId;", conn, transaction);
             failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
@@ -279,7 +276,9 @@ internal class ScanMapsService :
                 var row = rowPair.Value;
                 var mapName = row.Field<string>("MapName_lang");
                 var mapDir = row.Field<string>("Directory");
-                var mapJson = JsonConvert.SerializeObject(row.AsType<object>());
+                // I know... I'm doing this as I can't get System.Text.Json to work yet from the anonymous object that the DBC library provides
+                // so I'm taking the simple route for now. Limited to only here.
+                var mapJson = Newtonsoft.Json.JsonConvert.SerializeObject(row.AsType<object>());
 
                 // upsert the map entry, merge maps
                 var command = mapBatch.CreateBatchCommand();
@@ -311,6 +310,8 @@ internal class ScanMapsService :
 
         var encryptedMaps = new ConcurrentDictionary<int, string>();
         var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
+        var compositions = new Dictionary<int, MinimapComposition>(); // Build the tile composition of each map
+
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
         await Parallel.ForEachAsync(mapList,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -355,18 +356,31 @@ internal class ScanMapsService :
                     }
 
                     // TODO: WMO based minimaps have 0 tiles I think, need some way to represent on backend
+                    var compositionEntry = new Dictionary<TileCoord, string>();
 
                     foreach (var tile in minimapTiles)
                     {
                         // get the content hash from the FDID, gather the deduped list of Tiles
                         var ckey = filesystem.GetFDIDContentKey(tile.FileId);
-                        tileHashMap.AddOrUpdate(Convert.ToHexStringLower(ckey.AsSpan()),
-                            _ => new(tile.FileId, [new(row.ID, tile.X, tile.Y)]),
+                        if (ckey.Length == 0)
+                            throw new Exception("Tile had no content key, essential for our system");
+
+                        var tileCkey = Convert.ToHexStringLower(ckey.AsSpan());
+
+                        tileHashMap.AddOrUpdate(tileCkey,
+                            _ => new(tile.FileId, [new(row.ID, new(tile.X, tile.Y))]),
                             (_, existing) =>
                             {
-                                existing.Tiles.Add(new(row.ID, tile.X, tile.Y));
+                                existing.Tiles.Add(new(row.ID, new(tile.X, tile.Y)));
                                 return existing;
                             });
+
+                        compositionEntry.Add(new(tile.X, tile.Y), tileCkey);
+                    }
+
+                    lock (compositions)
+                    {
+                        compositions.Add(row.ID, new(compositionEntry));
                     }
                 }
                 catch (DecryptionKeyMissingException ex)
@@ -385,13 +399,13 @@ internal class ScanMapsService :
             tileHashMap.Count, mapList.Count, tileHashMap.Sum(x => x.Value.Tiles.Count), encryptedMaps.Count);
 
         // Send out the list of tiles we've seen, get the list of tiles we have and push the tiles we're missing
-        var tileDelta = new HashSet<string>(tileHashMap.Keys, StringComparer.OrdinalIgnoreCase);        
+        var tileDelta = new HashSet<string>(tileHashMap.Keys, StringComparer.OrdinalIgnoreCase);
         using (var existingTilesCmd = new NpgsqlCommand("SELECT hash FROM minimap_tiles WHERE hash = ANY($1)", conn))
         {
-            existingTilesCmd.Parameters.AddWithValue(tileHashMap.Keys.Select(x=>x.Trim().ToUpperInvariant()).ToArray());
+            existingTilesCmd.Parameters.AddWithValue(tileHashMap.Keys.Select(x => x.Trim().ToUpperInvariant()).ToArray());
 
             await using var reader = await existingTilesCmd.ExecuteReaderAsync();
-            while(await reader.ReadAsync())
+            while (await reader.ReadAsync())
                 tileDelta.Remove(reader.GetString(0));
         }
 
@@ -399,20 +413,33 @@ internal class ScanMapsService :
         // TODO: early out on 0, respect encrypted map list
 
         // Exceptions during processing will signal a failed processing and scan enters exception state pending intervention
+
+        async Task PushBatch(IEnumerable<string> tilesToInsert)
+        {
+            using var batch = new NpgsqlBatch(conn);
+            foreach (var hash in tilesToInsert)
+            {
+                batch.BatchCommands.Add(new NpgsqlBatchCommand("INSERT INTO minimap_tiles (hash) VALUES ($1) ON CONFLICT (hash) DO NOTHING")
+                {
+                    Parameters = { new NpgsqlParameter() { Value = hash.ToUpperInvariant() } }
+                });
+            }
+            await batch.ExecuteNonQueryAsync(cancellation);
+            _logger.LogDebug("Inserted batch of {Count} tiles", tilesToInsert.Count());
+        }
+
         var tileErrors = new Dictionary<string, Exception>();
         var processedTiles = new ConcurrentBag<string>();
         var batchLock = new object();
         var currentBatchSize = 0;
-        const int BATCH_SIZE = 5000;
-
+        const int BATCH_SIZE = 1000;
         await Parallel.ForEachAsync(tileDelta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
             async (tileHash, token) =>
             {
-                var tileData = tileHashMap[tileHash];
-
                 try
                 {
+                    var tileData = tileHashMap[tileHash];
                     using var tileStream = await _blizztrack.OpenStreamFDID(tileData.TileFDID, filesystem, validate: true, cancellation: token);
                     if (tileStream == null || tileStream == Stream.Null)
                     {
@@ -454,7 +481,7 @@ internal class ScanMapsService :
 
                     processedTiles.Add(tileHash);
 
-                    // batch insert on threshold (useful during long initial loads)
+                    // batch insert on hash threshold (useful during long initial loads)
                     bool shouldInsertBatch = false;
                     List<string>? tilesToInsert = null;
                     lock (batchLock)
@@ -473,25 +500,11 @@ internal class ScanMapsService :
                     }
 
                     if (shouldInsertBatch && tilesToInsert?.Count > 0)
-                    {
-                        using (var batch = new NpgsqlBatch(conn))
-                        {
-                            foreach (var hash in tilesToInsert)
-                            {
-                                batch.BatchCommands.Add(new NpgsqlBatchCommand("INSERT INTO minimap_tiles (hash) VALUES ($1) ON CONFLICT (hash) DO NOTHING")
-                                {
-                                    Parameters = { new NpgsqlParameter() { Value = hash.ToUpperInvariant() } }
-                                });
-                            }
-
-                            await batch.ExecuteNonQueryAsync(cancellation);
-                        }
-                        _logger.LogDebug("Inserted batch of {Count} tiles", tilesToInsert.Count);
-                    }
+                        await PushBatch(tilesToInsert);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error processing tile {TileHash} FDID {TileFDID}", tileHash, tileData.TileFDID);
+                    _logger.LogError(ex, "Error processing tile {TileHash} FDID {TileFDID}", tileHash, tileHashMap[tileHash].TileFDID);
                     lock (tileErrors)
                     {
                         tileErrors.Add(tileHash, ex);
@@ -499,29 +512,35 @@ internal class ScanMapsService :
                 }
             });
 
+        if (processedTiles.Count > 0)
+            await PushBatch(processedTiles);
+
         // Any failed tiles? Report and abort
         if (tileErrors.Count > 0)
             throw new AggregateException(tileErrors.Values);
 
-        var remainingTiles = new List<string>();
-        while (processedTiles.TryTake(out var tile))
-            remainingTiles.Add(tile);
-
-        if (remainingTiles.Count > 0)
+        // Push the minimap composition data now that all the tiles are registered
+        await using (var batch = new NpgsqlBatch(conn))
         {
-            using (var batch = new NpgsqlBatch(conn))
+            foreach (var comp in compositions)
             {
-                foreach (var hash in remainingTiles)
-                {
-                    batch.BatchCommands.Add(new NpgsqlBatchCommand("INSERT INTO minimap_tiles (hash) VALUES ($1) ON CONFLICT (hash) DO NOTHING")
-                    {
-                        Parameters = { new NpgsqlParameter() { Value = hash.ToUpperInvariant() } }
-                    });
-                }
+                var command = batch.CreateBatchCommand();
+                command.CommandText = "INSERT INTO minimap_compositions (hash, composition) VALUES ($1, $2::JSONB) " +
+                    "ON CONFLICT (hash) DO NOTHING";
+                command.Parameters.AddWithValue(comp.Value.Hash);
+                command.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
+                batch.BatchCommands.Add(command);
 
-                await batch.ExecuteNonQueryAsync(cancellation);
+                var commandMap = batch.CreateBatchCommand();
+                commandMap.CommandText = "INSERT INTO build_minimaps (build_id, map_id, composition_hash) VALUES ($1, $2, $3) " +
+                    "ON CONFLICT (build_id, map_id) DO UPDATE SET composition_hash = EXCLUDED.composition_hash";
+                commandMap.Parameters.AddWithValue(version);
+                commandMap.Parameters.AddWithValue(comp.Key);
+                commandMap.Parameters.AddWithValue(comp.Value.Hash);
+                batch.BatchCommands.Add(commandMap);
             }
-            _logger.LogDebug("Inserted final batch of {Count} tiles", remainingTiles.Count);
+
+            await batch.ExecuteNonQueryAsync(cancellation);
         }
 
 

@@ -399,7 +399,7 @@ public class BlizztrackTests
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
             var exception = await Assert.ThrowsAsync<FileSystemEncryptedException>(() => blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token));
-            Assert.Equal("wowdev3", exception.KeyName); // happens to match product name but doesn'
+            Assert.Equal("wowdev3", exception.KeyName); // happens to match product name in this case, but key name is a distinct thing
 
         }
         finally

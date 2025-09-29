@@ -35,7 +35,7 @@ internal class ListFileService : IListFileService
             throw new ArgumentNullException(nameof(filePath));
 
         var normalizedPath = filePath.Trim().ToLowerInvariant();
-        
+
         if (_cache.TryGetValue(normalizedPath, out var foundId))
             return foundId;
 
