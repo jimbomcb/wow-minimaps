@@ -5,7 +5,7 @@ namespace Minimaps.Tests;
 public class BuildVersionTests
 {
     [Theory]
-    [InlineData("4095.1023.1023.12345678")]
+    [InlineData("2047.1023.1023.12345678")]
     [InlineData("11.0.7.58046")]
     [InlineData("10.2.7.54577")]
     [InlineData("9.1.5.40196")]
@@ -84,7 +84,7 @@ public class BuildVersionTests
     }
 
     [Theory]
-    [InlineData("4096.1024.1024.12345678")]
+    [InlineData("2048.1024.1024.12345678")]
     [InlineData("-1.1.1.12345678")]
     public void ParseOutOfRangeVersion(string invalidVersion)
     {

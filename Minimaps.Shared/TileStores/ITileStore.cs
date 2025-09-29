@@ -1,4 +1,4 @@
-﻿namespace Minimaps.Web.API.TileStores;
+﻿namespace Minimaps.Shared.TileStores;
 
 public readonly record struct TileInfo(Stream Stream, string ContentType);
 

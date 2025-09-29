@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using Minimaps.Web.API.TileStores;
+using Minimaps.Shared.TileStores;
 
 namespace Minimaps.Web.API.Controllers;
 

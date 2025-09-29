@@ -1,9 +1,12 @@
 ﻿using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using Minimaps.Database.Tables;
 using Minimaps.Shared;
 using Minimaps.Shared.BackendDto;
-using Minimaps.Web.API.TileStores;
+using Minimaps.Shared.TileStores;
+using NodaTime;
 using Npgsql;
+using OpenTelemetry;
 using System.Security.Cryptography;
 
 namespace Minimaps.Web.API.Controllers;
@@ -26,66 +29,7 @@ public class PublishController : Controller
     [HttpPost]
     public async Task<IActionResult> Discovered([FromBody] DiscoveredRequestDto discoveredVersions)
     {
-        if (discoveredVersions.Entries.Count == 0)
-            return Json(new DiscoveredRequestDto([]));
-
-        var response = new List<DiscoveredBuildDto>();
-
-        try
-        {
-            await using var conn = await _data.OpenConnectionAsync();
-            await using var transaction = await conn.BeginTransactionAsync();
-
-            // Find which builds are locked and don't need processing
-            var lockedBuilds = (await conn.QueryAsync<BuildVersion>(
-                "SELECT id FROM builds WHERE id = ANY(@Ids) AND locked = TRUE;",
-                new { Ids = discoveredVersions.Entries.Select(x => x.Version).Distinct().ToList() },
-                transaction)).ToHashSet();
-
-            var unlockedEntries = discoveredVersions.Entries.Where(x => !lockedBuilds.Contains(x.Version)).ToList();
-
-            foreach (var entry in unlockedEntries.Select(x => x.Version).Distinct())
-            {
-                await conn.ExecuteAsync(
-                    "INSERT INTO builds (id, version) VALUES (@Id, @VersionStr) ON CONFLICT (id) DO NOTHING;",
-                    new { Id = entry, VersionStr = (string)entry },
-                    transaction);
-            }
-
-            foreach (var entry in unlockedEntries)
-            {
-                await conn.ExecuteAsync(@"
-                    INSERT INTO build_products (build_id, product, released, config_build, config_cdn, config_product, config_regions)
-                    VALUES (@Id, @Product, @Released, @ConfigBuild, @ConfigCdn, @ConfigProduct, @ConfigRegions)
-                    ON CONFLICT (build_id, product) 
-                    DO UPDATE SET 
-                        config_regions = array(SELECT DISTINCT unnest(build_products.config_regions || EXCLUDED.config_regions))",
-                    new
-                    {
-                        Id = entry.Version,
-                        Product = entry.Product,
-                        Released = DateTime.UtcNow,
-                        ConfigBuild = entry.BuildConfig,
-                        ConfigCdn = entry.CDNConfig,
-                        ConfigProduct = entry.ProductConfig,
-                        ConfigRegions = entry.Regions.ToArray()
-                    }, transaction);
-
-                response.Add(entry);
-            }
-
-            await transaction.CommitAsync();
-
-            _logger.LogInformation("Successfully processed {BuildCount} unique builds and {ProductCount} build products",
-                unlockedEntries.Select(x => x.Version).Distinct().Count(), unlockedEntries.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to process discovered builds");
-            return StatusCode(500, "Failed to process discovered builds");
-        }
-
-        return Json(new DiscoveredRequestDto(response));
+        throw new NotImplementedException("TODO");
     }
 
     [HttpPost]

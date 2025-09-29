@@ -11,6 +11,8 @@
     <PackageReference Include="FluentMigrator" Version="7.1.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9" />
     <PackageReference Include="Npgsql" Version="9.0.3" />
+    <PackageReference Include="Npgsql.NodaTime" Version="9.0.3" />
+    <PackageReference Include="Aspire.Npgsql" Version="9.5.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -3,13 +3,20 @@ using Blizztrack.Framework.TACT.Configuration;
 using Blizztrack.Framework.TACT.Enums;
 using Blizztrack.Framework.TACT.Implementation;
 using Blizztrack.Framework.TACT.Resources;
+using Minimaps.Shared.RibbitClient;
 using System.Security.Cryptography;
+using System.Text.Json;
 using EncodingKeyView = Blizztrack.Framework.TACT.Views.EncodingKey;
 using Index = Blizztrack.Framework.TACT.Implementation.Index;
 
 namespace Minimaps.Services.Blizztrack;
 
-public class BlizztrackFSService(IResourceLocator resourceLocator)
+public class FileSystemEncryptedException(string keyName) : Exception($"Build encrypted with key '{keyName}'")
+{
+    public string KeyName { get; } = keyName;
+}
+
+public class BlizztrackFSService(IRibbitClient ribbitClient, ResourceLocService resourceLocator)
 {
     public async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, bool validate = false, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
     {
@@ -38,8 +45,40 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
         throw new Exception($"Unable to open any of {descriptors.Length} descriptors for {fdid}");
     }
 
-    public async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, CancellationToken cancellation)
+    public async Task<IFileSystem> ResolveFileSystem(string product, string buildConfig, string CDNConfig, string productConfig, CancellationToken cancellation)
     {
+        // query the product list and populate CDN, not ideal but not too attached to this code as it sounds like blizztrack will change the handle stuff etc...
+        if (!resourceLocator.HasProductCDNs(product))
+        {
+            var productCDNs = await ribbitClient.CDNsAsync(product);
+
+            // level3.blizzard.com is backed by Akamai and pings an average of 1ms, max of 2ms so not getting much better than that
+            // interesting how it can be quicker to stream data from Akamai servers than read from my NAS RAID...
+            // I have yet to encounter data that exists on one CDN but not another (even the china specific CDNs)
+            var cdnStems = productCDNs.Data.Select(x => (DataStem: x.Path, ConfigStem: x.ConfigPath)).Distinct();
+            resourceLocator.SetProductCDNs(product, cdnStems.Select(x => new ResourceCDN("level3.blizzard.com", x.DataStem, x.ConfigStem)));
+        }
+
+        // temporary, apparently the resource handle stuff is going away anyway
+        // we need to pull the product config from the config CDN path.
+        await using var configStream = await resourceLocator.OpenConfigStream(product, productConfig);
+        using (var jsonData = await JsonDocument.ParseAsync(configStream))
+        {
+            // expecting this not to change...
+            if (!jsonData.RootElement.TryGetProperty("all", out var prodJsonAll))
+                throw new Exception("Malformed product JSON, no 'all' for " + productConfig);
+
+            if (!prodJsonAll.TryGetProperty("config", out var prodJsonConfig))
+                throw new Exception("Malformed product JSON, no 'all:config' for " + productConfig);
+
+            var requiresDecryptKey = prodJsonConfig.TryGetProperty("decryption_key_name", out var decKeyProperty);
+            if (requiresDecryptKey)
+            {
+                // todo: do we have any of these to load? they're only referenced by name unlike tact keys?
+                throw new FileSystemEncryptedException(decKeyProperty.GetString()!);
+            }
+        }
+
         var buildBytes = Convert.FromHexString(buildConfig);
         var serverBytes = Convert.FromHexString(CDNConfig);
         return await ResolveFileSystem(product, new EncodingKey(buildBytes), new EncodingKey(serverBytes), cancellation) ?? throw new Exception("Failed to resolve file system");
@@ -47,24 +86,27 @@ public class BlizztrackFSService(IResourceLocator resourceLocator)
 
     private async Task<IFileSystem> ResolveFileSystem(string productCode, EncodingKey buildConfiguration, EncodingKey serverConfiguration, CancellationToken stoppingToken)
     {
-        var buildTask = OpenConfig<BuildConfiguration>(productCode, buildConfiguration, stoppingToken);
-        var serverTask = OpenConfig<ServerConfiguration>(productCode, serverConfiguration, stoppingToken);
-        return await OpenFileSystem(productCode, await buildTask, await serverTask, resourceLocator, stoppingToken);
+        var build = await OpenConfig<BuildConfiguration>(productCode, buildConfiguration, stoppingToken);
+        var server = await OpenConfig<ServerConfiguration>(productCode, serverConfiguration, stoppingToken);
+        return await OpenFileSystem(productCode, build, server, resourceLocator, stoppingToken);
     }
 
     private async Task<T> OpenConfig<T>(string productCode, EncodingKey encodingKey, CancellationToken stoppingToken) where T : class, IResourceParser<T>
     {
         var descriptor = ResourceType.Config.ToDescriptor(productCode, encodingKey, ContentKey.Zero);
-        return T.OpenResource(await resourceLocator.OpenHandle(descriptor, stoppingToken));
+        var openedHandle = await resourceLocator.OpenHandle(descriptor, stoppingToken);
+        if (!openedHandle.Exists)
+            throw new Exception($"Failed opening handle for config {encodingKey}");
+
+        return T.OpenResource(openedHandle);
     }
 
     private async Task<IFileSystem> OpenFileSystem(string productCode, BuildConfiguration buildConfiguration,
-        ServerConfiguration cdnConfiguration, IResourceLocator locator, CancellationToken stoppingToken = default)
+        ServerConfiguration cdnConfiguration, ResourceLocService locator, CancellationToken stoppingToken = default)
     {
         // Based on how the Blizztrack project's FileSystemController, stream in the Encoding, Install, Indicies etc.
-
         if (cdnConfiguration.FileIndex.Size == 0)
-            throw new Exception("TODO"); // not yet encountered? is it ever possible?
+            throw new Exception("Malformed file index?"); // only ever encountered when feeding encrypted invalid data 
 
         var encodingTask = resourceLocator.OpenCompressed<Encoding>(productCode,
             buildConfiguration.Encoding.Encoding.Key,

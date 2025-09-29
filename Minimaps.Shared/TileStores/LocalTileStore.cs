@@ -1,4 +1,6 @@
-﻿namespace Minimaps.Web.API.TileStores;
+﻿using Microsoft.Extensions.Configuration;
+
+namespace Minimaps.Shared.TileStores;
 
 public class LocalTileStore : ITileStore
 {

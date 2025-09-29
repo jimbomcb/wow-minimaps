@@ -1,4 +1,4 @@
-namespace RibbitClient;
+namespace Minimaps.Shared.RibbitClient;
 
 public enum RibbitRegion
 {

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
+using Minimaps.Shared.RibbitClient;
 using System.Security.Cryptography;
 
 namespace Minimaps.Tests;
@@ -32,7 +33,7 @@ public class BlizztrackTests
     }
 
     [Fact]
-    public async Task TestBlizztrack_MapDB2()
+    public async Task MapDB2()
     {
         var configValues = GetTestConfigValues("C:\\temp\\lfs_test");
 
@@ -45,14 +46,15 @@ public class BlizztrackTests
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
         services.AddHttpClient();
 
-        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<ResourceLocService>();
         services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
 
         var serviceProvider = services.BuildServiceProvider();
 
         try
         {
-            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
             var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
             var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
 
@@ -60,9 +62,10 @@ public class BlizztrackTests
             const string product = "wow";
             const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
             const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+            const string productConfig = "53020d32e1a25648c8e1eafd5771935f";
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token);
 
             const uint testFileId = 1349477; // Map DBC
             foreach (var entry in fileSystem.OpenFDID(testFileId, Blizztrack.Framework.TACT.Enums.Locale.enUS))
@@ -83,7 +86,7 @@ public class BlizztrackTests
     }
 
     [Fact]
-    public async Task TestBlizztrack_EncryptedMap()
+    public async Task EncryptedMap()
     {
         var configValues = GetTestConfigValues("C:\\temp\\lfs_test");
 
@@ -96,8 +99,9 @@ public class BlizztrackTests
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
         services.AddHttpClient();
 
-        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<ResourceLocService>();
         services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -112,16 +116,17 @@ public class BlizztrackTests
             }
             logger.LogInformation("Loaded {KeyCount} TACT keys", tactKeys.Count);
 
-            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
             var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
 
             // todo: will break once the products cycle, need to grab a known active product from version server
             const string product = "wow";
             const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
             const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+            const string productConfig = "53020d32e1a25648c8e1eafd5771935f";
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token);
 
             const uint testFileId = 3182457; // known-encrypted file: "b:{256K*=e:{F21C5CA430F434D1,8E085D49,z}}"
             foreach (var entry in fileSystem.OpenFDID(testFileId, Blizztrack.Framework.TACT.Enums.Locale.enUS))
@@ -147,7 +152,7 @@ public class BlizztrackTests
     }
 
     [Fact]
-    public async Task TestBlizztrack_EncryptedBLP()
+    public async Task EncryptedBLP()
     {
         var configValues = GetTestConfigValues("C:\\temp\\lfs_test");
 
@@ -160,8 +165,9 @@ public class BlizztrackTests
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
         services.AddHttpClient();
 
-        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<ResourceLocService>();
         services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -176,16 +182,17 @@ public class BlizztrackTests
             }
             logger.LogInformation("Loaded {KeyCount} TACT keys", tactKeys.Count);
 
-            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
             var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
 
             // todo: will break once the products cycle, need to grab a known active product from version server
             const string product = "wow";
             const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
             const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+            const string productConfig = "53020d32e1a25648c8e1eafd5771935f";
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token);
 
             const uint testFileId = 3182843; // known-encrypted file: "b:{256K*=e:{F21C5CA430F434D1,40821F74,z}}
             foreach (var entry in fileSystem.OpenFDID(testFileId, Blizztrack.Framework.TACT.Enums.Locale.enUS))
@@ -245,23 +252,25 @@ public class BlizztrackTests
         services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
         services.AddHttpClient();
 
-        services.AddSingleton<IResourceLocator, ResourceLocService>();
+        services.AddSingleton<ResourceLocService>();
         services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
 
         var serviceProvider = services.BuildServiceProvider();
 
         try
         {
-            var resourceLocService = serviceProvider.GetRequiredService<IResourceLocator>();
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
             var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
             var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
 
             const string product = "wow";
             const string buildConfig = "0a613ab3d004dd2b19c9c62637c9599a";
             const string cdnConfig = "20d8c0c2f193328ec144b3ecac49e574";
+            const string productConfig = "53020d32e1a25648c8e1eafd5771935f";
 
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, cts.Token);
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token);
 
             // sample of fdids and their expected hashes, some of these files exist within the same archvie and raise the problem
             uint[] problematicFdids = { 204244, 204461, 204672, 204711 };
@@ -339,6 +348,59 @@ public class BlizztrackTests
                     Assert.Fail($"Data corruption on FDID {fdid}: expected hash {expectedHash}, got {computedHashString}");
                 }
             }
+        }
+        finally
+        {
+            serviceProvider.Dispose();
+        }
+    }
+
+
+    [Fact]
+    public async Task EncryptedBuild()
+    {
+        var configValues = GetTestConfigValues("C:\\temp\\lfs_test");
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        services.AddHttpClient();
+
+        services.AddSingleton<ResourceLocService>();
+        services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        try
+        {
+            // Load TACT keys before testing
+            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
+            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test", logger);
+            foreach (var key in tactKeys)
+            {
+                TACTKeyService.SetKey(key.KeyName, key.KeyValue);
+            }
+            logger.LogInformation("Loaded {KeyCount} TACT keys", tactKeys.Count);
+
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
+            var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
+
+            // todo: will break once the products cycle, need to grab a known active product from version server
+            const string product = "wowdev3";
+            const string buildConfig = "8396e4b4232de0560702939e5cc3e70e";
+            const string cdnConfig = "23a93a492d2b78b25741732185893f33";
+            const string productConfig = "529a30f6d6950f318d8ae6a5d8fb3a3d";
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+
+            var exception = await Assert.ThrowsAsync<FileSystemEncryptedException>(() => blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token));
+            Assert.Equal("wowdev3", exception.KeyName); // happens to match product name but doesn'
+
         }
         finally
         {

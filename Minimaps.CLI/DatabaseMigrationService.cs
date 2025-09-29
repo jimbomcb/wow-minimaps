@@ -37,6 +37,10 @@ public class DatabaseMigrationService(string connectionString, ILogger<DatabaseM
         {
             _logger?.LogInformation("Executing database migrations...");
             runner.MigrateUp();
+
+            if (runner.HasMigrationsToApplyUp())
+                throw new Exception("Still migrations to apply");
+
             _logger?.LogInformation("Database migration completed successfully.");
         }
         catch (Exception ex)

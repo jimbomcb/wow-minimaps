@@ -15,6 +15,7 @@ using ViewEncodingKey = Blizztrack.Framework.TACT.Views.EncodingKey;
 
 namespace Minimaps.Services.Blizztrack;
 
+public readonly record struct ResourceCDN(string Host, string DataStem, string ConfigStem);
 public class ResourceLocService : IResourceLocator
 {
     private readonly BlizztrackConfig _config = new();
@@ -212,24 +213,15 @@ public class ResourceLocService : IResourceLocator
         return new OwnedContentKey();
     }
 
-    private IList<(string Host, string DataStem, string ConfigStem)> GetEndpoints(string productCode, string region = "xx") =>
-        new List<(string, string, string)>
-            // todo parse from cdn endpoint
-            // Example CDN list:
-            // us|tpr/wow|blzddist1-a.akamaihd.net level3.blizzard.com us.cdn.blizzard.com|http://blzddist1-a.akamaihd.net/?maxhosts=5&fallback=1 http://level3.blizzard.com/?maxhosts=8
-            //   http://us.cdn.blizzard.com/?maxhosts=4&fallback=1 https://blzddist1-a.akamaihd.net/?maxhosts=4&fallback=1 https://level3.ssl.blizzard.com/?maxhosts=4&fallback=1
-            //   https://us.cdn.blizzard.com/?maxhosts=4&fallback=1|tpr/configs/data
+    private List<ResourceCDN> GetEndpoints(string productCode)
+    {
+        if (!HasProductCDNs(productCode))
+            throw new Exception("Attempting to get endpoints but no registered CDNs for " + productCode);
 
-            // Each URL has max hosts, presumably max concurrent connections to that host, and a "fallback" presumably meaning anything without the fallback is prioriy for queries
-            //   (ie level3.blizzard.com is current preferred)
-            // TODO: see if other libraries at least try and follow that behaviour
-        {
-            ("level3.blizzard.com", "tpr/wow", "tpr/configs/data"),
-            ("blzddist1-a.akamaihd.net", "tpr/wow", "tpr/configs/data"),
-            ("us.cdn.blizzard.com", "tpr/wow", "tpr/configs/data")
-        };
+        return _resourceCDNs[productCode];
+    }
 
-    private async Task<Stream> Download(ResourceDescriptor descriptor, IList<(string Host, string DataStem, string ConfigStem)> endpoints, CancellationToken token)
+    private async Task<Stream> Download(ResourceDescriptor descriptor, List<ResourceCDN> endpoints, CancellationToken token)
     {
         var client = _clientFactory.CreateClient();
         foreach (var ep in endpoints)
@@ -268,5 +260,100 @@ public class ResourceLocService : IResourceLocator
                 : new RangeHeaderValue(descriptor.Offset, null);
         }
         return request;
+    }
+
+    private readonly Dictionary<string, List<ResourceCDN>> _resourceCDNs = [];
+
+    public bool HasProductCDNs(string product)
+    {
+        return _resourceCDNs.ContainsKey(product) && _resourceCDNs[product].Count > 0;
+    }
+
+    public void SetProductCDNs(string product, IEnumerable<ResourceCDN> cdnEntries)
+    {
+        if (!_resourceCDNs.TryGetValue(product, out var entries))
+        {
+            _resourceCDNs.Add(product, []);
+            entries = _resourceCDNs[product];
+        }
+
+        entries.AddRange(cdnEntries);
+    }
+
+    /// <summary>
+    /// Probably temporary way to grab something using the CDN config stem for a given product
+    /// </summary>
+    public async Task<Stream> OpenConfigStream(string product, string path)
+    {
+        var productCDN = _resourceCDNs[product] ?? throw new Exception("No CDNs tracked for product " + product);
+
+        var localPath = Path.Combine(_config.CachePath, "configdata", product, path[..2], path[2..4], path);
+
+        if (File.Exists(localPath))
+            return new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        var fileLock = _fileLocks.GetOrAdd(localPath, _ => new SemaphoreSlim(1, 1));
+        await fileLock.WaitAsync();
+        try
+        {
+            if (File.Exists(localPath))
+                return new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+            foreach (var ep in productCDN)
+            {
+                var client = _clientFactory.CreateClient();
+                var url = $"http://{ep.Host}/{ep.ConfigStem}/{path[..2]}/{path[2..4]}/{path}";
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                try
+                {
+                    var response = await _acquisitionPipeline.ExecuteAsync(async (ct) =>
+                    {
+                        return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+                    }, CancellationToken.None);
+
+                    if (response.StatusCode == HttpStatusCode.OK)
+                    {
+                        var content = await response.Content.ReadAsByteArrayAsync();
+
+                        var dir = Path.GetDirectoryName(localPath)!;
+                        Directory.CreateDirectory(dir);
+                        var temp = localPath + $".tmp.{Guid.NewGuid():N}";
+                        try
+                        {
+                            await File.WriteAllBytesAsync(temp, content);
+                            File.Move(temp, localPath, true);
+                        }
+                        catch
+                        {
+                            try
+                            {
+                                if (File.Exists(temp))
+                                    File.Delete(temp);
+                            }
+                            catch { }
+                            throw;
+                        }
+
+                        return new MemoryStream(content);
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Config fetch failed {Host} for {Path}", ep.Host, path);
+                }
+            }
+        }
+        finally
+        {
+            fileLock.Release();
+            if (fileLock.CurrentCount == 1)
+            {
+                _fileLocks.TryRemove(localPath, out _);
+                fileLock.Dispose();
+            }
+        }
+
+        return Stream.Null;
     }
 }

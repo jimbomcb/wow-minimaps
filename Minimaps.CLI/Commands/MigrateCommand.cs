@@ -39,6 +39,7 @@ public static class MigrateCommand
 
                 var migrationService = new DatabaseMigrationService(connectionString, logger);
                 await migrationService.MigrateAsync(cancellationToken);
+                await Task.Delay(500, cancellationToken);
                 return 0;
             }
             catch (Exception ex)

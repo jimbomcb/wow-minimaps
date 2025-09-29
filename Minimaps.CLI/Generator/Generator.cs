@@ -3,7 +3,7 @@ using DBCD;
 using DBCD.Providers;
 using Microsoft.Extensions.Logging;
 using Minimaps.Shared;
-using RibbitClient;
+using Minimaps.Shared.RibbitClient;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -48,7 +48,7 @@ internal class Generator
 
     internal async Task Generate()
     {
-        var versionServer = new RibbitClient.RibbitClient(RibbitRegion.US);
+        var versionServer = new RibbitClient(RibbitRegion.US);
         var loadKeyTask = TACTKeys.LoadAsync(_config.CachePath, _logger);
 
         var productVersions = await versionServer.VersionsAsync(_config.Product);

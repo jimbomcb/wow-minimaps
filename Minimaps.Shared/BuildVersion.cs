@@ -4,9 +4,9 @@ namespace Minimaps.Shared;
 
 /// <summary>
 /// Responsible for converting WoW's [patch].[build] (i.e. 11.0.7.58046) between
-/// its individual components and a single sortable int64
-/// Bit-packed to: expansion(12) | major(10) | minor(10) | build(32)
-/// Max:           4095          | 1023      | 1023      | int32.max
+/// its individual components and a single sortable BIGINT for use in PgSQL.
+/// Bit-packed to: reserved(1) | expansion(11) | major(10) | minor(10) | build(32)
+/// Max:           reserved      2047          | 1023      | 1023      | int32.max
 /// </summary>
 [JsonConverter(typeof(BuildVersionConverter))]
 public readonly struct BuildVersion : IComparable<BuildVersion>, IEquatable<BuildVersion>
@@ -17,7 +17,7 @@ public readonly struct BuildVersion : IComparable<BuildVersion>, IEquatable<Buil
     private const long BuildMask = 0xFFFFFFFF; // 32 bits
     private const long MinorMask = 0x3FF;      // 10 bits
     private const long MajorMask = 0x3FF;      // 10 bits
-    private const long ExpansionMask = 0xFFF;      // 12 bits
+    private const long ExpansionMask = 0x7FF;  // 11 bits
 
     private const int BuildShift = 0;
     private const int MinorShift = 32;
@@ -28,19 +28,23 @@ public readonly struct BuildVersion : IComparable<BuildVersion>, IEquatable<Buil
     public static explicit operator string(BuildVersion version) => version.ToString();
     public static explicit operator BuildVersion(long value) => new(value);
 
-    public BuildVersion(long value) => _value = value;
+    public BuildVersion(long value) 
+    {
+        if (value < 0)
+            throw new ArgumentOutOfRangeException(nameof(value), "BuildVersion encoded value must be non-negative");
+        _value = value;
+    }
+
     public BuildVersion(int expansion, int major, int minor, int build)
     {
         if (expansion < 0 || expansion > ExpansionMask)
-            throw new ArgumentOutOfRangeException(nameof(expansion));
+            throw new ArgumentOutOfRangeException(nameof(expansion), $"Expansion must be between 0 and {ExpansionMask}");
         if (major < 0 || major > MajorMask)
-            throw new ArgumentOutOfRangeException(nameof(major));
+            throw new ArgumentOutOfRangeException(nameof(major), $"Major must be between 0 and {MajorMask}");
         if (minor < 0 || minor > MinorMask)
-            throw new ArgumentOutOfRangeException(nameof(minor));
-#pragma warning disable CS0652 // Even though this is never possible with the current BuildMask, it will change if BuildMask changes
+            throw new ArgumentOutOfRangeException(nameof(minor), $"Minor must be between 0 and {MinorMask}");
         if (build < 0 || build > BuildMask)
-            throw new ArgumentOutOfRangeException(nameof(build));
-#pragma warning restore CS0652
+            throw new ArgumentOutOfRangeException(nameof(build), $"Build must be between 0 and {BuildMask}");
 
         _value = ((long)expansion << ExpansionShift) |
                  ((long)major << MajorShift) |

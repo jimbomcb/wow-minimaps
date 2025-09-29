@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Minimaps.Database.TypeHandlers;
-using Minimaps.Web.API.TileStores;
+using Minimaps.Shared.TileStores;
+using Minimaps.Database;
 
 namespace Minimaps.Web.API;
 
@@ -12,11 +13,7 @@ public class Program
 
         var builder = WebApplication.CreateBuilder(args);
         builder.AddServiceDefaults();
-        builder.AddNpgsqlDataSource("minimaps-database", configureDataSourceBuilder: x =>
-        {
-            x.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory()); // BuildVersion type handling
-        });
-
+        builder.AddMinimapsDatabase();
 
         builder.Services.AddControllers();
         builder.Services.AddSingleton<ITileStore, LocalTileStore>();

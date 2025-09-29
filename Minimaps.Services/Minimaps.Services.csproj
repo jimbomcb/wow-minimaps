@@ -28,6 +28,7 @@
     <ProjectReference Include="..\External\BLPSharp\BLPSharp\BLPSharp.csproj" />
     <ProjectReference Include="..\External\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Minimaps.Database\Minimaps.Database.csproj" />
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>
 

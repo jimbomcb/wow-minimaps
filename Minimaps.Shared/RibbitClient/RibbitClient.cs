@@ -1,15 +1,22 @@
-namespace RibbitClient;
+namespace Minimaps.Shared.RibbitClient;
 
 /// <summary>
 /// Response from the TACT/Ribbit server containing a sequence ID (incremented per change) and the response data
 /// </summary>
 public readonly record struct RibbitResponse<T>(uint SequenceId, T Data);
 
+public interface IRibbitClient
+{
+    public Task<RibbitResponse<List<Product>>> SummaryAsync();
+    public Task<RibbitResponse<List<Version>>> VersionsAsync(string product);
+    public Task<RibbitResponse<List<ProductCDN>>> CDNsAsync(string product);
+}
+
 /// <summary>
 /// Client for interfacing with the TACT/Ribbit Battle.net server, provides data about the available products 
 /// and their versions contained in the TACT system
 /// </summary>
-public class RibbitClient(RibbitRegion region)
+public class RibbitClient(RibbitRegion region) : IRibbitClient
 {
     private readonly string _server = region switch
     {
@@ -17,6 +24,28 @@ public class RibbitClient(RibbitRegion region)
         RibbitRegion.EU => "https://eu.version.battle.net",
         _ => throw new NotImplementedException()
     };
+
+    /// <summary>
+    /// Query the CDNs for a given product name
+    /// </summary>
+    /// <param name="product"></param>
+    /// <returns></returns>
+    /// <exception cref="ProductNotFoundException">Thrown if the specified product does not exist.</exception>
+    /// <exception cref="SchemaException">Thrown if the response schema does not match the expected format.</exception>
+    public async Task<RibbitResponse<List<ProductCDN>>> CDNsAsync(string product)
+    {
+        return await MakeRequestAsync($"/v2/products/{product}/cdns",
+            "Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0",
+            parts =>
+            {
+                var name = parts[0];
+                var path = parts[1];
+                var hosts = parts[2];
+                var servers = parts[3];
+                var configPath = parts[4];
+                return new ProductCDN(name, path, hosts, servers, configPath);
+            }, product);
+    }
 
     /// <summary>
     /// Get all available products on the TACT server
@@ -54,6 +83,9 @@ public class RibbitClient(RibbitRegion region)
             return new Version(region, buildConfig, cdnConfig, keyRing, buildId, versionsName, productConfig);
         }, product);
     }
+
+    // todo: CDNs
+    // todo: BGDLs?
 
     private async Task<RibbitResponse<List<T>>> MakeRequestAsync<T>(string endpoint, string expectedSchema, Func<string[], T> parseRow, string? productName = null)
     {
