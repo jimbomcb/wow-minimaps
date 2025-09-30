@@ -50,3 +50,12 @@ Tile 3c41c 512 ImageSharp: 3118ms (112628 bytes), NetVips: 3515ms (110366 bytes)
 Tile 18692 512 ImageSharp: 3825ms (203064 bytes), NetVips: 4284ms (203212 bytes)
 Tile b2e06 512 ImageSharp: 2536ms (113132 bytes), NetVips: 2804ms (112914 bytes)
 Tile 44963 512 ImageSharp: 736ms  (52772 bytes),  NetVips: 1493ms (51768 bytes)```
+
+
+Minimap Composition thoughts:
+- The largest map is Dragon Isles 2444 with 1634 tiles, it works out to a roughly 68kb composition
+- Using this composition index it should be possible to look up any individual tile hash (for downloading), meta-tiles for zoomed out views will be built of grouping of ADT tiles:
+  - 2x2 (32x32)
+  - 4x4 (16x16)
+  - 8x8 (8x8)
+- 68KB isn't a big deal for a one time load per map per version, compared to the traffic saved with smarter tile usage/streaming fewer unnecessary zoom levels

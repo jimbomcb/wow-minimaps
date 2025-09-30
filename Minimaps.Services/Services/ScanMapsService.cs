@@ -363,7 +363,12 @@ internal class ScanMapsService :
                         // get the content hash from the FDID, gather the deduped list of Tiles
                         var ckey = filesystem.GetFDIDContentKey(tile.FileId);
                         if (ckey.Length == 0)
+                        {
+                            // TODO: Ensure that the file can't still be downloaded despite not having a content key, 
+                            // worst case we can retroactively figure out the content key from the BLP stream
+
                             throw new Exception("Tile had no content key, essential for our system");
+                        }
 
                         var tileCkey = Convert.ToHexStringLower(ckey.AsSpan());
 
@@ -520,29 +525,33 @@ internal class ScanMapsService :
             throw new AggregateException(tileErrors.Values);
 
         // Push the minimap composition data now that all the tiles are registered
-        await using (var batch = new NpgsqlBatch(conn))
+        // Batched super conservatively otherwise we often hit NpgsqlBufferWriter.ThrowOutOfMemory, probably need to up the connection string buffer?
+        const int COMPOSITION_BATCH_SIZE = 3;
+        for (int i = 0; i < compositions.Count; i += COMPOSITION_BATCH_SIZE)
         {
-            foreach (var comp in compositions)
+            var batch = compositions.Skip(i).Take(COMPOSITION_BATCH_SIZE);
+            await using var npgsqlBatch = new NpgsqlBatch(conn);
+
+            foreach (var comp in batch)
             {
-                var command = batch.CreateBatchCommand();
+                var command = npgsqlBatch.CreateBatchCommand();
                 command.CommandText = "INSERT INTO minimap_compositions (hash, composition) VALUES ($1, $2::JSONB) " +
                     "ON CONFLICT (hash) DO NOTHING";
                 command.Parameters.AddWithValue(comp.Value.Hash);
                 command.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
-                batch.BatchCommands.Add(command);
+                npgsqlBatch.BatchCommands.Add(command);
 
-                var commandMap = batch.CreateBatchCommand();
+                var commandMap = npgsqlBatch.CreateBatchCommand();
                 commandMap.CommandText = "INSERT INTO build_minimaps (build_id, map_id, composition_hash) VALUES ($1, $2, $3) " +
                     "ON CONFLICT (build_id, map_id) DO UPDATE SET composition_hash = EXCLUDED.composition_hash";
                 commandMap.Parameters.AddWithValue(version);
                 commandMap.Parameters.AddWithValue(comp.Key);
                 commandMap.Parameters.AddWithValue(comp.Value.Hash);
-                batch.BatchCommands.Add(commandMap);
+                npgsqlBatch.BatchCommands.Add(commandMap);
             }
 
-            await batch.ExecuteNonQueryAsync(cancellation);
+            await npgsqlBatch.ExecuteNonQueryAsync(cancellation);
         }
-
 
         _logger.LogInformation("Done!");
 
