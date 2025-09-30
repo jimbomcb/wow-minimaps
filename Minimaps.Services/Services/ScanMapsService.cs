@@ -184,9 +184,9 @@ internal class ScanMapsService :
         _logger.LogInformation("Scanning maps for build {BuildVer}", version);
 
         // todo: transition to DB stored tact keys + service that updates & requeues prior encrypted builds/maps when discovering new keys
-        //var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
-        //foreach (var entry in await tactKeysTask)
-        //    TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
+        var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
+        foreach (var entry in await tactKeysTask)
+            TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
         // Find the list of BuildProducts for this specific build, we might need to try a few I think?
         // Some builds are region specific.
@@ -356,36 +356,38 @@ internal class ScanMapsService :
                     }
 
                     // TODO: WMO based minimaps have 0 tiles I think, need some way to represent on backend
-                    var compositionEntry = new Dictionary<TileCoord, string>();
 
+                    var compositionEntry = new Dictionary<TileCoord, string>();
+                    var missingTiles = new HashSet<TileCoord>();
                     foreach (var tile in minimapTiles)
                     {
+                        var tilePos = new TileCoord(tile.X, tile.Y);
+
                         // get the content hash from the FDID, gather the deduped list of Tiles
                         var ckey = filesystem.GetFDIDContentKey(tile.FileId);
                         if (ckey.Length == 0)
                         {
-                            // TODO: Ensure that the file can't still be downloaded despite not having a content key, 
-                            // worst case we can retroactively figure out the content key from the BLP stream
-
-                            throw new Exception("Tile had no content key, essential for our system");
+                            // tiles with no content key are missing from the archives, note it as missing
+                            missingTiles.Add(tilePos);
+                            continue;
                         }
 
                         var tileCkey = Convert.ToHexStringLower(ckey.AsSpan());
 
                         tileHashMap.AddOrUpdate(tileCkey,
-                            _ => new(tile.FileId, [new(row.ID, new(tile.X, tile.Y))]),
+                            _ => new(tile.FileId, [new(row.ID, tilePos)]),
                             (_, existing) =>
                             {
-                                existing.Tiles.Add(new(row.ID, new(tile.X, tile.Y)));
+                                existing.Tiles.Add(new(row.ID, tilePos));
                                 return existing;
                             });
 
-                        compositionEntry.Add(new(tile.X, tile.Y), tileCkey);
+                        compositionEntry.Add(tilePos, tileCkey);
                     }
 
                     lock (compositions)
                     {
-                        compositions.Add(row.ID, new(compositionEntry));
+                        compositions.Add(row.ID, new(compositionEntry, missingTiles));
                     }
                 }
                 catch (DecryptionKeyMissingException ex)
