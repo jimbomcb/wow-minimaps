@@ -26,16 +26,11 @@ var migrationService = builder.AddProject<Projects.Minimaps_CLI>("migration")
         .WithArgs("migrate")
         .WaitFor(minimapsDb);
 
-// web services
-var webapi = builder.AddProject<Projects.Minimaps_Web_API>("web-api")
-	.WithReference(minimapsDb)
-	.WaitFor(migrationService);
+builder.AddProject<Projects.Minimaps_Services>("services")
+    .WithReference(minimapsDb)
+    .WaitFor(migrationService);
 
-var frontend = builder.AddProject<Projects.Minimaps_Web_Frontend>("web-frontend")
-	.WaitFor(webapi);
-
-// background services
-var services = builder.AddProject<Projects.Minimaps_Services>("services")
+builder.AddProject<Projects.Minimaps_Frontend>("minimaps-frontend")
     .WithReference(minimapsDb)
     .WaitFor(migrationService);
 

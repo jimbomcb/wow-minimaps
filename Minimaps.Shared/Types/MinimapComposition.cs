@@ -8,6 +8,7 @@ namespace Minimaps.Shared.Types;
 /// A minimap composition describes the list of tile hashes and the location of each hash that make up a minimap.
 /// In the database this is stored as a JSONB object mapping "X,Y" to "hash".
 /// Hashed in a specific order to produce a unique hash for this specific layout and contents (regardless of JSON key order).
+/// TODO: Composition LODing, composition thumbnail
 /// </summary>
 [JsonConverter(typeof(MinimapCompositionConverter))]
 public class MinimapComposition(IReadOnlyDictionary<TileCoord, string> compositionEntry, IReadOnlySet<TileCoord> missingTiles) : IEquatable<MinimapComposition?>

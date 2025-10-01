@@ -483,4 +483,6 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
+# Project
 /Temp/
+/Minimaps.Frontend/wwwroot/js/dist
