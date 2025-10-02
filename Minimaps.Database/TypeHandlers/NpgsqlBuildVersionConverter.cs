@@ -16,7 +16,7 @@ public class NpgsqlBuildVersionConverter : PgStreamingConverter<BuildVersion>
     public override ValueTask<BuildVersion> ReadAsync(PgReader reader, CancellationToken cancellationToken = default)
     {
         var longValue = reader.ReadInt64();
-        return new ValueTask<BuildVersion>((BuildVersion)longValue);
+        return ValueTask.FromResult((BuildVersion)longValue);
     }
 
     public override void Write(PgWriter writer, BuildVersion value)

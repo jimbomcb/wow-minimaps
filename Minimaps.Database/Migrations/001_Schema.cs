@@ -35,6 +35,39 @@ public class InitialSchema : Migration
                        (encoded_value & 4294967295);
             END;
             $$;");
+
+        Create.Table("builds")
+            .WithColumn("id").AsInt64().PrimaryKey()
+            .WithColumn("version").AsString()
+            .WithColumn("discovered").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
+        // Deciding if it's worth keeping the version string, for now ensure that if it does exist that it's in sync with the ID
+        Execute.Sql(@"ALTER TABLE builds ADD CONSTRAINT builds_version_matches_id CHECK (encode_build_version(version) = id);");
+
+        Create.Table("products")
+            .WithColumn("id").AsInt64().Identity().PrimaryKey()
+            .WithColumn("build_id").AsInt64()
+            .WithColumn("product").AsString(50)
+            .WithColumn("config_build").AsString()
+            .WithColumn("config_cdn").AsString()
+            .WithColumn("config_product").AsString()
+            .WithColumn("config_regions").AsCustom("TEXT[]")
+            .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
+        // Ensure we don't end up with the same region multiple times (done via trigger as check constraint can't do subquery)
+        Execute.Sql(@"CREATE OR REPLACE FUNCTION ensure_unique_regions() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN " +
+                "IF array_length(NEW.config_regions, 1) != (SELECT count(DISTINCT elem) FROM unnest(NEW.config_regions) AS elem) THEN " +
+                    "RAISE EXCEPTION 'products contains duplicate region, must be unique'; " +
+                "END IF; " +
+                "RETURN NEW; " +
+            "END; $$;" +
+            "CREATE TRIGGER trigger_unique_regions BEFORE INSERT OR UPDATE ON products FOR EACH ROW EXECUTE FUNCTION ensure_unique_regions();");
+
+        Create.UniqueConstraint().OnTable("products")
+            .Columns("build_id", "product", "config_build", "config_cdn", "config_product");
+
+        Create.ForeignKey("FK_products_build")
+            .FromTable("products").ForeignColumn("build_id")
+            .ToTable("builds").PrimaryColumn("id");
+
         Execute.Sql(@"
             CREATE TYPE scan_state AS ENUM (
                 'pending',
@@ -46,70 +79,24 @@ public class InitialSchema : Migration
             );
         ");
 
-        Create.Table("builds")
-            .WithColumn("id").AsInt64().PrimaryKey()
-            .WithColumn("version").AsString()
-            .WithColumn("discovered").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
-        Execute.Sql(@"
-            ALTER TABLE builds ADD CONSTRAINT builds_version_matches_id CHECK (encode_build_version(version) = id);
-        ");
-
-        Create.Table("build_scans")
-            .WithColumn("build_id").AsInt64().PrimaryKey()
-            .WithColumn("state").AsCustom("scan_state")
-            .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime)
+        Create.Table("product_scans")
+            .WithColumn("product_id").AsInt64().PrimaryKey()
+            .WithColumn("state").AsCustom("scan_state").WithDefaultValue("pending")
             .WithColumn("last_scanned").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime)
             .WithColumn("scan_time").AsCustom("INTERVAL").Nullable()
             .WithColumn("exception").AsString().Nullable()
             .WithColumn("encrypted_key").AsString().Nullable()
-            .WithColumn("encrypted_maps").AsCustom("jsonb").Nullable()
-            .WithColumn("scanned_product").AsString().Nullable()
-            .WithColumn("config_build").AsString().Nullable()
-            .WithColumn("config_cdn").AsString().Nullable()
-            .WithColumn("config_product").AsString().Nullable();
+            .WithColumn("encrypted_maps").AsCustom("jsonb").Nullable();
 
-        Create.ForeignKey("FK_build_scans_build")
-                .FromTable("build_scans").ForeignColumn("build_id")
-                .ToTable("builds").PrimaryColumn("id");
-
-        Create.Table("build_products")
-            .WithColumn("build_id").AsInt64()
-            .WithColumn("product").AsString(50)
-            .WithColumn("config_build").AsString()
-            .WithColumn("config_cdn").AsString()
-            .WithColumn("config_product").AsString()
-            .WithColumn("config_regions").AsCustom("TEXT[]")
-            .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
-        // Ensure we don't end up with the same region multiple times (done via trigger as check constraint can't do subquery)
-        Execute.Sql(@"CREATE OR REPLACE FUNCTION ensure_unique_regions() RETURNS TRIGGER LANGUAGE plpgsql AS $$ BEGIN " +
-                "IF array_length(NEW.config_regions, 1) != (SELECT count(DISTINCT elem) FROM unnest(NEW.config_regions) AS elem) THEN " +
-                    "RAISE EXCEPTION 'build_product contains duplicate region, must be unique'; " +
-                "END IF; " +
-                "RETURN NEW; " +
-            "END; $$;" +
-            "CREATE TRIGGER trigger_unique_regions BEFORE INSERT OR UPDATE ON build_products FOR EACH ROW EXECUTE FUNCTION ensure_unique_regions();");
-
-        Create.PrimaryKey("PK_build_products")
-            .OnTable("build_products")
-            .Columns("build_id", "product", "config_build", "config_cdn", "config_product");
-
-        Create.ForeignKey("FK_build_products_build")
-            .FromTable("build_products").ForeignColumn("build_id")
-            .ToTable("builds").PrimaryColumn("id");
-
-        Create.ForeignKey("FK_build_scans_build_product") // BuildScans must have an associated product that they're scanning
-                .FromTable("build_scans").ForeignColumns("build_id", "scanned_product", "config_build", "config_cdn", "config_product")
-                .ToTable("build_products").PrimaryColumns("build_id", "product", "config_build", "config_cdn", "config_product");
-
-        Create.Index("IX_build_products_product")
-            .OnTable("build_products")
-            .OnColumn("product");
+        Create.ForeignKey("FK_product_scans_build")
+                .FromTable("product_scans").ForeignColumn("product_id")
+                .ToTable("products").PrimaryColumn("id");
 
         Create.Table("maps")
             .WithColumn("id").AsInt32().PrimaryKey()
-            .WithColumn("json").AsCustom("jsonb")// Latest version raw database row
-            .WithColumn("directory").AsString() // Most recent directory
-            .WithColumn("name").AsString() // Most recent name
+            .WithColumn("json").AsCustom("jsonb")
+            .WithColumn("directory").AsString()
+            .WithColumn("name").AsString()
             .WithColumn("first_version").AsInt64()
             .WithColumn("last_version").AsInt64()
             .WithColumn("name_history").AsCustom("jsonb");
@@ -184,15 +171,13 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
 
         // Minimap tiles
         Create.Table("minimap_tiles")
-            .WithColumn("hash").AsString(32).PrimaryKey()
+            .WithColumn("hash").AsCustom("BYTEA").PrimaryKey()
             .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").NotNullable().WithDefault(SystemMethods.CurrentUTCDateTime);
-        Execute.Sql("ALTER TABLE minimap_tiles ADD CONSTRAINT minimap_tiles_hash_upperhex_only CHECK (hash ~ '^[A-F0-9]+$');");
 
         Create.Table("tact_keys")
             .WithColumn("key_name").AsString(16).PrimaryKey()
-            .WithColumn("key").AsCustom("bytea").NotNullable()
+            .WithColumn("key").AsCustom("BYTEA").NotNullable()
             .WithColumn("discovered").AsCustom("TIMESTAMPTZ").WithDefault(SystemMethods.CurrentUTCDateTime);
-        Execute.Sql("ALTER TABLE tact_keys ADD CONSTRAINT tact_keys_key_name_upperhex_only CHECK (key_name ~ '^[A-F0-9]+$');");
 
         // K/V store
         Create.Table("settings")
@@ -200,13 +185,13 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
             .WithColumn("value").AsString().Nullable();
 
         Create.Table("minimap_compositions")
-            .WithColumn("hash").AsString(32).PrimaryKey()
+            .WithColumn("hash").AsCustom("BYTEA").PrimaryKey()
             .WithColumn("composition").AsCustom("JSONB");
 
         Create.Table("build_minimaps")
             .WithColumn("build_id").AsInt64()
             .WithColumn("map_id").AsInt32()
-            .WithColumn("composition_hash").AsString(32);
+            .WithColumn("composition_hash").AsCustom("BYTEA");
 
         Create.PrimaryKey("PK_build_minimap")
             .OnTable("build_minimaps")
@@ -227,17 +212,6 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
 
     public override void Down()
     {
-        Delete.Table("settings");
-        Delete.Table("build_scans");
-        Delete.Table("tact_keys");
-        Delete.Table("build_maps");
-        Delete.Table("build_products");
-        Delete.Table("maps");
-        Delete.Table("minimap_tiles");
-        Delete.Table("builds");
-
-        Execute.Sql("DROP FUNCTION IF EXISTS encode_build_version(TEXT);");
-        Execute.Sql("DROP FUNCTION IF EXISTS decode_build_version(BIGINT);");
-        Execute.Sql("DROP TYPE IF EXISTS scan_state;");
+        throw new Exception("not supported");
     }
 }

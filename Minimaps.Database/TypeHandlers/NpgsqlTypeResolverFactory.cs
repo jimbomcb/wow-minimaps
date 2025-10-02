@@ -9,43 +9,47 @@ namespace Minimaps.Database.TypeHandlers;
 
 public class NpgsqlTypeResolverFactory : PgTypeInfoResolverFactory
 {
-    public override IPgTypeInfoResolver? CreateArrayResolver() => new ArrayResolver();
     public override IPgTypeInfoResolver CreateResolver() => new Resolver();
+    public override IPgTypeInfoResolver? CreateArrayResolver() => new ArrayResolver();
+    protected static DataTypeName ContentHashDataType => new("pg_catalog.bytea");
+    protected static DataTypeName BuildVersionDataType => new("pg_catalog.int8");
 
     private class Resolver : IPgTypeInfoResolver
     {
+
+        TypeInfoMappingCollection? _mappings;
+        protected TypeInfoMappingCollection Mappings => _mappings ??= AddMappings(new());
+
         public PgTypeInfo? GetTypeInfo(Type? type, DataTypeName? dataTypeName, PgSerializerOptions options)
+            => Mappings.Find(type, dataTypeName, options);
+
+        static TypeInfoMappingCollection AddMappings(TypeInfoMappingCollection mappings)
         {
-            if (type == typeof(BuildVersion))
-                return new(options, new NpgsqlBuildVersionConverter(), new(DataTypeName.FromDisplayName("int8")));
-
-            // Minimap compositions get serialized as JSONB objects of {"0,5": "hash", "12,34": "hash"}
-            if (type == typeof(MinimapComposition))
-                //return new(options, new NpgsqlMinimapCompositionConverter(), new(DataTypeName.FromDisplayName("jsonb")));
-                throw new NotImplementedException("Please don't pass compositions directly to Npgsql, serialize to string");
-
-
-            return null;
+            mappings.AddStructType<ContentHash>(ContentHashDataType,
+                static (options, mapping, _) => mapping.CreateInfo(options, new NpgsqlContentHashConverter()));
+            mappings.AddStructType<BuildVersion>(BuildVersionDataType,
+                static (options, mapping, _) => mapping.CreateInfo(options, new NpgsqlBuildVersionConverter()));
+            // TODO: MinimapComposition mapping? 
+            return mappings;
         }
     }
 
-    private class ArrayResolver : IPgTypeInfoResolver
+    private class ArrayResolver : Resolver, IPgTypeInfoResolver
     {
-        public PgTypeInfo? GetTypeInfo(Type? type, DataTypeName? dataTypeName, PgSerializerOptions options)
-        {
-            // TODO: Validation
-            if (type == typeof(BuildVersion[]) || type == typeof(List<BuildVersion>))
-            {
-                return new PgTypeInfo(
-                    options,
-                    new NpgsqlBuildVersionConverter(),
-                    new(DataTypeName.FromDisplayName("int8[]"))
-                );
-            }
+        TypeInfoMappingCollection? _mappings;
+        new TypeInfoMappingCollection Mappings => _mappings ??= AddMappings(new(base.Mappings));
 
-            return null;
+        public new PgTypeInfo? GetTypeInfo(Type? type, DataTypeName? dataTypeName, PgSerializerOptions options)
+            => Mappings.Find(type, dataTypeName, options);
+
+        static TypeInfoMappingCollection AddMappings(TypeInfoMappingCollection mappings)
+        {
+            mappings.AddStructArrayType<ContentHash>(ContentHashDataType);
+            mappings.AddStructArrayType<BuildVersion>(BuildVersionDataType);
+            return mappings;
         }
     }
 }
+
 
 #pragma warning restore NPG9001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.

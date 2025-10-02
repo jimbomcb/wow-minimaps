@@ -15,7 +15,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected StartObject token");
 
-        var composition = new Dictionary<TileCoord, string>();
+        var composition = new Dictionary<TileCoord, ContentHash>();
         var missing = new HashSet<TileCoord>();
 
         void ReadMissingTiles(HashSet<TileCoord> missing, ref Utf8JsonReader reader)
@@ -42,7 +42,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             }
         }
 
-        void ReadTile(string coords, Dictionary<TileCoord, string> composition, ref Utf8JsonReader reader)
+        void ReadTile(string coords, Dictionary<TileCoord, ContentHash> composition, ref Utf8JsonReader reader)
         {
             var parts = coords.Split(',');
             if (parts.Length != 2)
@@ -56,7 +56,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             if (string.IsNullOrEmpty(hash))
                 throw new JsonException("Hash value cannot be null or empty");
 
-            composition[new(x, y)] = hash;
+            composition[new(x, y)] = new ContentHash(hash);
         }
 
         while (reader.Read())
@@ -87,7 +87,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
         foreach (var kvp in value.Composition.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
         {
             var coordString = $"{kvp.Key.X},{kvp.Key.Y}";
-            writer.WriteString(coordString, kvp.Value);
+            writer.WriteString(coordString, kvp.Value.ToHex());
         }
 
         if (value.MissingTiles.Count > 0)

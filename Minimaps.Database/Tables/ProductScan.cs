@@ -1,5 +1,4 @@
-﻿using Minimaps.Shared;
-using NodaTime;
+﻿using NodaTime;
 
 namespace Minimaps.Database.Tables;
 
@@ -35,14 +34,16 @@ public enum ScanState
 }
 
 /// <summary>
-/// Each new build (not historical builds) will have an associated scan entry
+/// 1:1 with products, tracks the scan state of each discovered product
 /// </summary>
-internal class BuildScan
+internal class ProductScan
 {
-    public BuildVersion build_id { get; set; }
+    public Int64 product_id { get; set; }
     public ScanState state { get; set; }
-    public Instant first_seen { get; set; }
     public Instant last_scanned { get; set; }
+    /// <summary>
+    /// The period of time it took to run the last ScanMapsService.ProcessBuild
+    /// </summary>
     public Period scan_time { get; set; }
 
     /// <summary>
@@ -59,18 +60,11 @@ internal class BuildScan
     /// JSONB serialized list of encrypted maps and their decryption key name
     /// IF we're in the PartialDecrypt state
     /// {
-    ///     map_id: "key_name",
+    ///     "key_name" : [ enc_map_id, enc_map_id, ],
     ///     ...
     /// }
     /// </summary>
     public string encrypted_maps { get; set; }
-
-    /// <summary>
-    /// The specific build/CDN/product used during this scan (FK to BuildProduct)
-    /// </summary>
-    public string config_build { get; set; }
-    public string config_cdn { get; set; }
-    public string config_product { get; set; }
 }
 
 #pragma warning restore IDE1006, CS8618

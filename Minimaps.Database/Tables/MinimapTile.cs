@@ -9,9 +9,9 @@
 internal class MinimapTile
 {
     /// <summary>
-    /// The "ContentKey" MD5 checksum of the minimap's original BLP file, in uppercase hex (enforced via CHECK)
+    /// The "ContentKey" MD5 checksum of the minimap's original BLP file
     /// </summary>
-    public required string hash { get; set; }
+    public required byte[] hash { get; set; }
 }
 
 #pragma warning restore IDE1006

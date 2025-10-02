@@ -24,30 +24,5 @@ internal class Build
     public Instant discovered { get; set; }
 }
 
-// todo
-
-internal class MinimapComposition
-{
-    /// <summary>
-    /// Calculated hash of this specific composition, guaranteed to be unique for each specific minimap layout and contents. 
-    /// See MinimapComposition.GenerateHash
-    /// </summary>
-    public string hash { get; set; }
-
-    /// <summary>
-    /// JSONB backed MinimapComposition: {"0,5": "hash", "12,34": "hash"}
-    /// </summary>
-    public MinimapComposition composition { get; set; }
-}
-
-internal class BuildMinimap
-{
-    public BuildVersion build_id { get; set; }
-    public int map_id { get; set; }
-    public string composition_hash { get; set; }
-
-    // Primary key: (build_id, map_id)
-}
-
 #pragma warning restore IDE1006, CS8618
 

@@ -12,7 +12,6 @@ using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Minimaps.Services;
@@ -65,7 +64,7 @@ internal class ScanMapsService :
 
     public ScanMapsService(ILogger<ScanMapsService> logger, WebhookEventLog eventLog, IConfiguration configuration,
         NpgsqlDataSource dataSource, ITileStore tileStore, BlizztrackFSService blizztrack, ResourceLocService resourceLocator, IListFileService listfile) :
-        base(logger, TimeSpan.FromSeconds(5), eventLog)
+        base(logger, TimeSpan.FromSeconds(2), eventLog)
     {
         _logger = logger;
         configuration.GetSection("Services:ScanMaps").Bind(_serviceConfig);
@@ -89,21 +88,28 @@ internal class ScanMapsService :
         // todo: obey _productFilter
 
         BuildVersion build;
-        await using (var command = new NpgsqlCommand("SELECT build_id FROM build_scans WHERE state = $1 FOR UPDATE SKIP LOCKED LIMIT 1", conn, transaction))
+        Int64 productId;
+        await using (var command = new NpgsqlCommand("SELECT p.build_id, p.id FROM product_scans ps " +
+            "LEFT JOIN products p ON p.id = ps.product_id " +
+            "WHERE ps.state = $1 " +
+            "FOR UPDATE OF ps SKIP LOCKED " +
+            "LIMIT 1", conn, transaction))
         {
             command.Parameters.AddWithValue(Database.Tables.ScanState.Pending);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            // No pending jobs
             if (!await reader.ReadAsync(cancellationToken))
                 return;
 
             build = reader.GetFieldValue<BuildVersion>(0);
+            productId = reader.GetInt64(1);
         }
 
-        bool catchExceptions = true;
         var timer = Stopwatch.StartNew();
         try
         {
-            var scanResult = await ScanBuild(build, cancellationToken);
+            var scanResult = await ScanBuild(productId, build, cancellationToken);
             timer.Stop();
 
             // todo: distinguish the results between encrypted, map encrypted etc etc, not binary success/fail
@@ -111,31 +117,35 @@ internal class ScanMapsService :
 
             await using var successCmd = new NpgsqlCommand("", conn, transaction);
 
+            successCmd.CommandText = "UPDATE product_scans SET state = @NewState, last_scanned = timezone('utc', now()), scan_time = @ScanTime ";
+            successCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
+            successCmd.Parameters.AddWithValue("ProductId", productId);
             successCmd.Parameters.AddWithValue("NewState", scanResult.Status switch
             {
                 ProcessStatus.EncryptedBuild => Database.Tables.ScanState.EncryptedBuild,
                 ProcessStatus.EncryptedMapDB => Database.Tables.ScanState.EncryptedMapDatabase,
-                ProcessStatus.Valid => Database.Tables.ScanState.FullDecrypt,
+                ProcessStatus.EncryptedMaps => Database.Tables.ScanState.PartialDecrypt,
+                ProcessStatus.FullDecrypt => Database.Tables.ScanState.FullDecrypt,
                 _ => throw new Exception("Unhandled scan result state")
             });
-            successCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
-            successCmd.Parameters.AddWithValue("BuildId", build);
-            successCmd.Parameters.AddWithValue("Product", scanResult.Product.Product);
-            successCmd.Parameters.AddWithValue("CfgBuild", scanResult.Product.BuildConfig);
-            successCmd.Parameters.AddWithValue("CfgCdn", scanResult.Product.CDNConfig);
-            successCmd.Parameters.AddWithValue("CfgProduct", scanResult.Product.ProductConfig);
-
-            successCmd.CommandText = "UPDATE build_scans SET " +
-                "state = @NewState, last_scanned = timezone('utc', now()), " +
-                "scan_time = @ScanTime, scanned_product = @Product, config_build = @CfgBuild, config_cdn = @CfgCdn, config_product = @CfgProduct ";
 
             if (scanResult.Status == ProcessStatus.EncryptedBuild || scanResult.Status == ProcessStatus.EncryptedMapDB)
             {
                 successCmd.CommandText += ", encrypted_key = @EncKey ";
                 successCmd.Parameters.AddWithValue("EncKey", scanResult.EncryptKey!);
             }
+            else if (scanResult.Status == ProcessStatus.EncryptedMaps)
+            {
+                Debug.Assert(scanResult.EncryptedMaps!.Any());
+                successCmd.CommandText += ", encrypted_maps = @EncMaps ";
 
-            successCmd.CommandText += "WHERE build_id = @BuildId;";
+                var keyGrouped = scanResult.EncryptedMaps!
+                    .GroupBy(x => x.KeyName, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Select(x => x.MapId).ToArray(), StringComparer.OrdinalIgnoreCase);
+                successCmd.Parameters.AddWithValue("EncMaps", NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(keyGrouped));
+            }
+
+            successCmd.CommandText += "WHERE product_id = @ProductId;";
 
             await successCmd.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -145,17 +155,12 @@ internal class ScanMapsService :
 
             _logger.LogWarning(ex, "Caught BuildProcessException: {Msg}", ex.Message);
 
-            await using var failCmd = new NpgsqlCommand("UPDATE build_scans SET state = @NewState, exception = @Exception, " +
-                "last_scanned = timezone('utc', now()), scan_time = @ScanTime, scanned_product = @Product, config_build = @CfgBuild, config_cdn = @CfgCdn, " +
-                "config_product = @CfgProduct WHERE build_id = @BuildId;", conn, transaction);
+            await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
+                "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
             failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
             failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
             failCmd.Parameters.AddWithValue("Exception", ex.ToString());
-            failCmd.Parameters.AddWithValue("BuildId", build);
-            failCmd.Parameters.AddWithValue("Product", ex.Product.Product);
-            failCmd.Parameters.AddWithValue("CfgBuild", ex.Product.BuildConfig);
-            failCmd.Parameters.AddWithValue("CfgCdn", ex.Product.CDNConfig);
-            failCmd.Parameters.AddWithValue("CfgProduct", ex.Product.ProductConfig);
+            failCmd.Parameters.AddWithValue("ProductId", productId);
             await failCmd.ExecuteNonQueryAsync(cancellationToken);
         }
         catch (Exception ex) when (_serviceConfig.CatchScanExceptions)
@@ -164,12 +169,12 @@ internal class ScanMapsService :
 
             _logger.LogError(ex, "Caught unhandled exception");
 
-            await using var failCmd = new NpgsqlCommand("UPDATE build_scans SET state = @NewState, exception = @Exception, " +
-                "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE build_id = @BuildId;", conn, transaction);
+            await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
+                "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
             failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
             failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
             failCmd.Parameters.AddWithValue("Exception", "Unhandled processing exception: " + ex.ToString());
-            failCmd.Parameters.AddWithValue("BuildId", build);
+            failCmd.Parameters.AddWithValue("ProductId", productId);
             await failCmd.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -177,29 +182,32 @@ internal class ScanMapsService :
     }
 
     private readonly record struct BuildProductDto(string Product, string BuildConfig, string CDNConfig, string ProductConfig, List<string> Regions);
-    private async Task<ProcessResult> ScanBuild(BuildVersion version, CancellationToken cancellation)
+    private async Task<ProcessResult> ScanBuild(Int64 productId, BuildVersion version, CancellationToken cancellation)
     {
         // todo cancellation pass
-        _logger.BeginScope($"ScanBuild:{version}");
-        _logger.LogInformation("Scanning maps for build {BuildVer}", version);
+        _logger.BeginScope($"ScanBuild:{productId}:{version}");
+        _logger.LogInformation("Scanning maps for build {BuildVer} product {ProductId}", version, productId);
 
         // todo: transition to DB stored tact keys + service that updates & requeues prior encrypted builds/maps when discovering new keys
-        var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
-        foreach (var entry in await tactKeysTask)
-            TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
+        //var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
+        //foreach (var entry in await tactKeysTask)
+        //    TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
         // Find the list of BuildProducts for this specific build, we might need to try a few I think?
         // Some builds are region specific.
         await using var conn = await _data.OpenConnectionAsync();
         var products = new List<BuildProductDto>();
-
-        await using (var scanProds = new NpgsqlCommand("SELECT product, config_build, config_cdn, config_product, config_regions FROM build_products WHERE build_id = $1;", conn))
+        await using (var scanProds = new NpgsqlCommand("SELECT product, config_build, config_cdn, config_product, config_regions " +
+            "FROM products WHERE id = $1;", conn))
         {
-            scanProds.Parameters.AddWithValue(version);
+            scanProds.Parameters.AddWithValue(productId);
             await using var reader = await scanProds.ExecuteReaderAsync();
 
             while (await reader.ReadAsync())
-                products.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), [.. reader.GetFieldValue<string[]>(4)]));
+            {
+                var regions = reader.GetFieldValue<string[]>(4);
+                products.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), [.. regions]));
+            }
         }
 
         // shouldn't happen, build scans are created at the same time as build product discovery
@@ -228,12 +236,15 @@ internal class ScanMapsService :
 
     private enum ProcessStatus
     {
-        Valid,
+        FullDecrypt,
         EncryptedBuild,
-        EncryptedMapDB
+        EncryptedMapDB,
+        EncryptedMaps
         // todo: valid map db, but one or two encrypted maps that need stored
     }
-    private readonly record struct ProcessResult(ProcessStatus Status, BuildProductDto Product, string? EncryptKey);
+
+    private readonly record struct EncryptedMap(int MapId, string KeyName);
+    private readonly record struct ProcessResult(ProcessStatus Status, BuildProductDto Product, string? EncryptKey, IEnumerable<EncryptedMap>? EncryptedMaps = null);
 
     private async Task<ProcessResult> ProcessBuild(NpgsqlConnection conn, BuildVersion version, BuildProductDto product, CancellationToken cancellation)
     {
@@ -308,8 +319,8 @@ internal class ScanMapsService :
             await mapBatch.ExecuteNonQueryAsync();
         }
 
-        var encryptedMaps = new ConcurrentDictionary<int, string>();
-        var tileHashMap = new ConcurrentDictionary<string, TileHashData>(); // map hashes to their corresponding file & map tile positions
+        var encryptedMaps = new ConcurrentBag<EncryptedMap>();
+        var tileHashMap = new ConcurrentDictionary<ContentHash, TileHashData>(); // map hashes to their corresponding file & map tile positions
         var compositions = new Dictionary<int, MinimapComposition>(); // Build the tile composition of each map
 
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
@@ -357,7 +368,7 @@ internal class ScanMapsService :
 
                     // TODO: WMO based minimaps have 0 tiles I think, need some way to represent on backend
 
-                    var compositionEntry = new Dictionary<TileCoord, string>();
+                    var compositionEntry = new Dictionary<TileCoord, ContentHash>();
                     var missingTiles = new HashSet<TileCoord>();
                     foreach (var tile in minimapTiles)
                     {
@@ -372,9 +383,8 @@ internal class ScanMapsService :
                             continue;
                         }
 
-                        var tileCkey = Convert.ToHexStringLower(ckey.AsSpan());
-
-                        tileHashMap.AddOrUpdate(tileCkey,
+                        var tileHash = new ContentHash(ckey.AsSpan());
+                        tileHashMap.AddOrUpdate(tileHash,
                             _ => new(tile.FileId, [new(row.ID, tilePos)]),
                             (_, existing) =>
                             {
@@ -382,7 +392,7 @@ internal class ScanMapsService :
                                 return existing;
                             });
 
-                        compositionEntry.Add(tilePos, tileCkey);
+                        compositionEntry.Add(tilePos, tileHash);
                     }
 
                     lock (compositions)
@@ -393,7 +403,7 @@ internal class ScanMapsService :
                 catch (DecryptionKeyMissingException ex)
                 {
                     _logger.LogWarning("Failed processing map {MapId} ({MapDir}) FDID {FDID}, encrypted with unknown key '{Key}'", row.ID, row.Field<string>("Directory"), wdtFileID, ex.ExpectedKeyString);
-                    encryptedMaps.AddOrUpdate(row.ID, ex.ExpectedKeyString, (_, _) => ex.ExpectedKeyString);
+                    encryptedMaps.Add(new(row.ID, ex.ExpectedKeyString));
                 }
                 catch (Exception ex)
                 {
@@ -406,14 +416,14 @@ internal class ScanMapsService :
             tileHashMap.Count, mapList.Count, tileHashMap.Sum(x => x.Value.Tiles.Count), encryptedMaps.Count);
 
         // Send out the list of tiles we've seen, get the list of tiles we have and push the tiles we're missing
-        var tileDelta = new HashSet<string>(tileHashMap.Keys, StringComparer.OrdinalIgnoreCase);
+        var tileDelta = new HashSet<ContentHash>(tileHashMap.Keys);
         using (var existingTilesCmd = new NpgsqlCommand("SELECT hash FROM minimap_tiles WHERE hash = ANY($1)", conn))
         {
-            existingTilesCmd.Parameters.AddWithValue(tileHashMap.Keys.Select(x => x.Trim().ToUpperInvariant()).ToArray());
+            existingTilesCmd.Parameters.AddWithValue(tileHashMap.Keys);
 
             await using var reader = await existingTilesCmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                tileDelta.Remove(reader.GetString(0));
+                tileDelta.Remove(reader.GetFieldValue<ContentHash>(0));
         }
 
         _logger.LogInformation("{DeltaCount}/{TotalCount} {Pct} tiles to upload", tileDelta.Count, tileHashMap.Count, (float)tileDelta.Count / tileHashMap.Count);
@@ -421,22 +431,22 @@ internal class ScanMapsService :
 
         // Exceptions during processing will signal a failed processing and scan enters exception state pending intervention
 
-        async Task PushBatch(IEnumerable<string> tilesToInsert)
+        async Task PushBatch(IEnumerable<ContentHash> tilesToInsert)
         {
             using var batch = new NpgsqlBatch(conn);
             foreach (var hash in tilesToInsert)
             {
                 batch.BatchCommands.Add(new NpgsqlBatchCommand("INSERT INTO minimap_tiles (hash) VALUES ($1) ON CONFLICT (hash) DO NOTHING")
                 {
-                    Parameters = { new NpgsqlParameter() { Value = hash.ToUpperInvariant() } }
+                    Parameters = { new NpgsqlParameter() { Value = hash } }
                 });
             }
             await batch.ExecuteNonQueryAsync(cancellation);
             _logger.LogDebug("Inserted batch of {Count} tiles", tilesToInsert.Count());
         }
 
-        var tileErrors = new Dictionary<string, Exception>();
-        var processedTiles = new ConcurrentBag<string>();
+        var tileErrors = new Dictionary<ContentHash, Exception>();
+        var processedTiles = new ConcurrentBag<ContentHash>();
         var batchLock = new object();
         var currentBatchSize = 0;
         const int BATCH_SIZE = 1000;
@@ -476,21 +486,17 @@ internal class ScanMapsService :
                         });
                     }
 
-                    // Hash for content upload, not stored or used for anything other than validation
-                    webpStream.Position = 0;
-                    string webpHash = Convert.ToHexStringLower(MD5.HashData(webpStream));
-
                     webpStream.Position = 0;
                     await _tileStore.SaveAsync(tileHash, webpStream, "image/webp");
 
-                    _logger.LogTrace("Uploaded tile {TileHash} (WebP hash: {WebpHash}) FDID {TileFDID} used by {MapCount} tiles",
-                        tileHash, webpHash, tileData.TileFDID, tileData.Tiles.Count);
+                    _logger.LogTrace("Uploaded tile {TileHash} FDID {TileFDID} used by {MapCount} tiles",
+                        tileHash, tileData.TileFDID, tileData.Tiles.Count);
 
                     processedTiles.Add(tileHash);
 
                     // batch insert on hash threshold (useful during long initial loads)
                     bool shouldInsertBatch = false;
-                    List<string>? tilesToInsert = null;
+                    List<ContentHash>? tilesToInsert = null;
                     lock (batchLock)
                     {
                         currentBatchSize++;
@@ -559,7 +565,10 @@ internal class ScanMapsService :
 
         // todo: output encrypted map+keys, todo: wmo maps? empty maps?
 
-        return new(ProcessStatus.Valid, product, null);
+        if (!encryptedMaps.IsEmpty)
+            return new(ProcessStatus.EncryptedMaps, product, null, encryptedMaps);
+        else
+            return new(ProcessStatus.FullDecrypt, product, null);
     }
 
     private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) : Exception($"Build {version} {product} processing failed", inner)

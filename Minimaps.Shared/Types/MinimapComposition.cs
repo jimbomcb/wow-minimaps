@@ -11,32 +11,35 @@ namespace Minimaps.Shared.Types;
 /// TODO: Composition LODing, composition thumbnail
 /// </summary>
 [JsonConverter(typeof(MinimapCompositionConverter))]
-public class MinimapComposition(IReadOnlyDictionary<TileCoord, string> compositionEntry, IReadOnlySet<TileCoord> missingTiles) : IEquatable<MinimapComposition?>
+public class MinimapComposition(IReadOnlyDictionary<TileCoord, ContentHash> compositionEntry, IReadOnlySet<TileCoord> missingTiles) : IEquatable<MinimapComposition?>
 {
-    private readonly Dictionary<TileCoord, string> _composition = compositionEntry.ToDictionary();
+    private readonly Dictionary<TileCoord, ContentHash> _composition = compositionEntry.ToDictionary();
     private readonly HashSet<TileCoord> _missingTiles = [.. missingTiles];
-    private string? _hash;
-
-    public string Hash => _hash ??= CalculateHash();
-    public IReadOnlyDictionary<TileCoord, string> Composition => _composition;
+    private byte[]? _hash;
+    public byte[] Hash => _hash ??= CalculateHash();
+    public IReadOnlyDictionary<TileCoord, ContentHash> Composition => _composition;
     public IReadOnlyCollection<TileCoord> MissingTiles => _missingTiles;
 
     /// <summary>
     /// Follows a specific order that will result in a consistent hash from the same tile hashes at the same coordates
     /// The hash of a stream of ASCII bytes of:
-    /// - For each tile, in ascending x,y order, write the tile X, tile Y, and ASCII-encoded tile hash string
+    /// - For each tile, in ascending x,y order, write the tile X, tile Y, and hash bytes
     /// - Write the X,Y of each "missing" tile in ascending x,y order
     /// The hash bytes are returned as a lowercase hex string.
     /// </summary>
-    private string CalculateHash()
+    private byte[] CalculateHash()
     {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
+        Span<byte> hash = stackalloc byte[16];
+
         foreach (var entry in _composition.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
         {
             writer.Write(entry.Key.X);
             writer.Write(entry.Key.Y);
-            writer.Write(Encoding.ASCII.GetBytes(entry.Value));
+
+            entry.Value.CopyTo(hash);
+            writer.Write(hash);
         }
         foreach (var missingTile in _missingTiles.OrderBy(x => x.X).ThenBy(x => x.Y))
         {
@@ -45,8 +48,7 @@ public class MinimapComposition(IReadOnlyDictionary<TileCoord, string> compositi
         }
         writer.Flush();
         stream.Position = 0;
-        _hash = Convert.ToHexStringLower(MD5.HashData(stream));
-        return _hash;
+        return _hash = MD5.HashData(stream);
     }
 
     public override bool Equals(object? obj) => Equals(obj as MinimapComposition);

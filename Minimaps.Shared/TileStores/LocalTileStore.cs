@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Minimaps.Shared.Types;
 
 namespace Minimaps.Shared.TileStores;
 
@@ -21,9 +22,9 @@ public class LocalTileStore : ITileStore
             Directory.CreateDirectory(_basePath);
     }
 
-    public async Task<bool> HasAsync(string hash)
+    public async Task<bool> HasAsync(ContentHash hash)
     {
-        if (hash == null || hash.Length != 32)
+        if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
         var baseFilePath = GetBaseFilePath(hash);
@@ -36,9 +37,9 @@ public class LocalTileStore : ITileStore
         return false;
     }
 
-    public async Task<TileInfo> GetAsync(string hash)
+    public async Task<TileInfo> GetAsync(ContentHash hash)
     {
-        if (hash == null || hash.Length != 32)
+        if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
         var baseFilePath = GetBaseFilePath(hash);
@@ -57,10 +58,10 @@ public class LocalTileStore : ITileStore
         throw new FileNotFoundException($"Tile with hash '{hash}' not found");
     }
 
-    public async Task SaveAsync(string hash, Stream stream, string contentType)
+    public async Task SaveAsync(ContentHash hash, Stream stream, string contentType)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        if (hash == null || hash.Length != 32)
+        if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
         if (!_contentTypeToExtension.TryGetValue(contentType, out var extension))
@@ -76,11 +77,12 @@ public class LocalTileStore : ITileStore
         await stream.CopyToAsync(fileStream);
     }
 
-    private string GetBaseFilePath(string hash)
+    private string GetBaseFilePath(ContentHash hash)
     {
-        if (hash == null || hash.Length != 32)
+        if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
         // partition out based on the first 2 hash characters.
-        return Path.Combine(_basePath, hash[..2], hash);
+        var hex = hash.ToHex();
+        return Path.Combine(_basePath, hex[..2], hex);
     }
 }
