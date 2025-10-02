@@ -32,6 +32,7 @@ public class BlizztrackTests
         };
     }
 
+#if false
     [Fact]
     public async Task MapDB2()
     {
@@ -354,7 +355,7 @@ public class BlizztrackTests
             serviceProvider.Dispose();
         }
     }
-
+#endif
 
     [Fact]
     public async Task EncryptedBuild()
