@@ -184,9 +184,11 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
             .WithColumn("key").AsString().PrimaryKey()
             .WithColumn("value").AsString().Nullable();
 
-        Create.Table("minimap_compositions")
+        Create.Table("compositions")
             .WithColumn("hash").AsCustom("BYTEA").PrimaryKey()
-            .WithColumn("composition").AsCustom("JSONB");
+            .WithColumn("composition").AsCustom("JSONB")
+            .WithColumn("tiles").AsInt32()
+            .WithColumn("extents").AsCustom("JSONB").Nullable();
 
         Create.Table("build_minimaps")
             .WithColumn("build_id").AsInt64()
@@ -199,7 +201,7 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
 
         Create.ForeignKey("FK_build_minimap_composition")
             .FromTable("build_minimaps").ForeignColumn("composition_hash")
-            .ToTable("minimap_compositions").PrimaryColumn("hash");
+            .ToTable("compositions").PrimaryColumn("hash");
 
         Create.ForeignKey("FK_build_minimap_map")
             .FromTable("build_minimaps").ForeignColumn("map_id")

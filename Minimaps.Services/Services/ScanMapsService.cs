@@ -543,10 +543,28 @@ internal class ScanMapsService :
             foreach (var comp in batch)
             {
                 var command = npgsqlBatch.CreateBatchCommand();
-                command.CommandText = "INSERT INTO minimap_compositions (hash, composition) VALUES ($1, $2::JSONB) " +
+                command.CommandText = "INSERT INTO compositions (hash, composition, tiles, extents) VALUES ($1, $2::JSONB, $3, $4::JSONB) " +
                     "ON CONFLICT (hash) DO NOTHING";
                 command.Parameters.AddWithValue(comp.Value.Hash);
                 command.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
+                command.Parameters.AddWithValue(comp.Value.TotalTiles);
+
+                var extents = comp.Value.CalcExtents();
+                if (extents != null)
+                {
+                    command.Parameters.AddWithValue(JsonSerializer.Serialize(new
+                    {
+                        x0 = extents.Value.Min.X,
+                        y0 = extents.Value.Min.Y,
+                        x1 = extents.Value.Max.X,
+                        y1 = extents.Value.Max.Y,
+                    }));
+                }
+                else
+                {
+                    command.Parameters.AddWithValue(DBNull.Value);
+                }
+
                 npgsqlBatch.BatchCommands.Add(command);
 
                 var commandMap = npgsqlBatch.CreateBatchCommand();

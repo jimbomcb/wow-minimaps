@@ -4,6 +4,8 @@ using System.Text.Json.Serialization;
 
 namespace Minimaps.Shared.Types;
 
+public readonly record struct CompositionExtents(TileCoord Min, TileCoord Max);
+
 /// <summary>
 /// A minimap composition describes the list of tile hashes and the location of each hash that make up a minimap.
 /// In the database this is stored as a JSONB object mapping "X,Y" to "hash".
@@ -19,6 +21,25 @@ public class MinimapComposition(IReadOnlyDictionary<TileCoord, ContentHash> comp
     public byte[] Hash => _hash ??= CalculateHash();
     public IReadOnlyDictionary<TileCoord, ContentHash> Composition => _composition;
     public IReadOnlyCollection<TileCoord> MissingTiles => _missingTiles;
+    public int TotalTiles => _composition.Count + _missingTiles.Count;
+    public CompositionExtents? CalcExtents()
+    {
+        if (_composition.Count == 0)
+            return null;
+
+        int minX = int.MaxValue;
+        int minY = int.MaxValue;
+        int maxX = int.MinValue;
+        int maxY = int.MinValue;
+        foreach (var coord in _composition.Keys)
+        {
+            if (coord.X < minX) minX = coord.X;
+            if (coord.Y < minY) minY = coord.Y;
+            if (coord.X > maxX) maxX = coord.X;
+            if (coord.Y > maxY) maxY = coord.Y;
+        }
+        return new(new(minX, minY), new(maxX, maxY));
+    }
 
     /// <summary>
     /// Follows a specific order that will result in a consistent hash from the same tile hashes at the same coordates

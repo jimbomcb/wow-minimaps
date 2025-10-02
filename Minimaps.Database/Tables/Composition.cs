@@ -2,7 +2,7 @@
 
 #pragma warning disable IDE1006, CS8618
 
-internal class MinimapComposition
+internal class Composition
 {
     /// <summary>
     /// Calculated hash of this specific composition, guaranteed to be unique for each specific minimap layout and contents. 
@@ -19,7 +19,7 @@ internal class MinimapComposition
     /// <summary>
     /// JSONB backed MinimapComposition: {"0,5": "hash", "12,34": "hash"}
     /// </summary>
-    public MinimapComposition composition { get; set; }
+    public Composition composition { get; set; }
 
     /// <summary>
     /// Sum total tiles in the composition
@@ -27,10 +27,10 @@ internal class MinimapComposition
     public int tiles { get; set; }
 
     /// <summary>
-    /// Min/max populated tile coords, 
-    /// JSONB in the format { "min" : "0,0", "max": "0,0" }
+    /// Min/max populated tile coords, null with 0 tiles
+    /// JSONB in the format { "x0" : -5, "y0": -4, "x1": 5, "y1": 5 }
     /// </summary>
-    public string extents { get; set; }
+    public string? extents { get; set; }
 }
 
 #pragma warning restore IDE1006, CS8618
