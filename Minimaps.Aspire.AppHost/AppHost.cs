@@ -30,7 +30,7 @@ builder.AddProject<Projects.Minimaps_Services>("services")
     .WithReference(minimapsDb)
     .WaitFor(migrationService);
 
-builder.AddProject<Projects.Minimaps_Frontend>("minimaps-frontend")
+builder.AddProject<Projects.Minimaps_Frontend>("minimaps-frontend", launchProfileName: "httpsAlt")
     .WithReference(minimapsDb)
     .WaitFor(migrationService);
 
