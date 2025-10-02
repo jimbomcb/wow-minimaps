@@ -151,7 +151,7 @@ internal class ProductDiscoveryService : IntervalBackgroundService
             }
 
             // batch upsert the products and get the new product IDs
-            var productIds = new Dictionary<BuildVersion, Int64>();
+            var newProducts = new Dictionary<Int64, BuildVersion>();
             await using (var insertBatch = new NpgsqlBatch(conn, transaction))
             {
                 foreach (var group in regionDeltaProducts)
@@ -185,7 +185,7 @@ internal class ProductDiscoveryService : IntervalBackgroundService
                     if (!await insertBatchReader.ReadAsync(cancellationToken))
                         throw new Exception("Failed to insert or get product ID for " + group.Key.Version);
 
-                    productIds[group.Key.Version] = insertBatchReader.GetInt64(0);
+                    newProducts.Add(insertBatchReader.GetInt64(0), group.Key.Version);
                     await insertBatchReader.NextResultAsync(cancellationToken);
                 }
             }
@@ -194,20 +194,16 @@ internal class ProductDiscoveryService : IntervalBackgroundService
 
             await using (var insertBatch = new NpgsqlBatch(conn, transaction))
             {
-                foreach (var prod in regionDeltaProducts)
+                foreach (var prodId in newProducts)
                 {
                     var command = insertBatch.CreateBatchCommand();
                     command.CommandText = "INSERT INTO product_scans (product_id) VALUES ($1) ON CONFLICT (product_id) DO NOTHING;";
-                    command.Parameters.AddWithValue(productIds[prod.Key.Version]);
+                    command.Parameters.AddWithValue(prodId.Key);
                     insertBatch.BatchCommands.Add(command);
                 }
 
                 var newScans = await insertBatch.ExecuteNonQueryAsync(cancellationToken);
             }
-
-            // TODO TODO: 
-            // The above does a single batch insert product + insert scan
-            // We now need to insert the product, get the auto incrementing ID, use it for the product scan insert FK
 
             cancellationToken.ThrowIfCancellationRequested();
 
