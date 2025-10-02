@@ -132,19 +132,6 @@ BEGIN
 END;$$;
 CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps FOR EACH ROW EXECUTE FUNCTION dedupe_maps_name_history();");
 
-        //Create.Index("IX_maps_parent")
-        //    .OnTable("maps")
-        //    .OnColumn("parent");
-        //
-        //Create.Index("IX_maps_directory")
-        //    .OnTable("maps")
-        //    .OnColumn("directory");
-        //
-        //Create.Index("IX_maps_name")
-        //    .OnTable("maps")
-        //    .OnColumn("name");
-
-        // Build-Map relationship table
         Create.Table("build_maps")
             .WithColumn("build_id").AsInt64()
             .WithColumn("map_id").AsInt32();
@@ -190,6 +177,22 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
             .WithColumn("tiles").AsInt32()
             .WithColumn("extents").AsCustom("JSONB").Nullable();
 
+        Create.Table("product_compositions")
+            .WithColumn("composition_hash").AsCustom("BYTEA")
+            .WithColumn("product_id").AsInt64();
+
+        Create.PrimaryKey("PK_product_compositions")
+            .OnTable("product_compositions")
+            .Columns("composition_hash", "product_id");
+
+        Create.ForeignKey("FK_product_compositions_product")
+            .FromTable("product_compositions").ForeignColumn("product_id")
+            .ToTable("products").PrimaryColumn("id");
+
+        Create.ForeignKey("FK_product_compositions_composition")
+            .FromTable("product_compositions").ForeignColumn("composition_hash")
+            .ToTable("compositions").PrimaryColumn("hash");
+
         Create.Table("build_minimaps")
             .WithColumn("build_id").AsInt64()
             .WithColumn("map_id").AsInt32()
@@ -210,6 +213,7 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
         Create.ForeignKey("FK_build_minimap_build")
             .FromTable("build_minimaps").ForeignColumn("build_id")
             .ToTable("builds").PrimaryColumn("id");
+
     }
 
     public override void Down()

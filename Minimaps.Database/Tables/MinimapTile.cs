@@ -1,4 +1,6 @@
-﻿namespace Minimaps.Database.Tables;
+﻿using Minimaps.Shared.Types;
+
+namespace Minimaps.Database.Tables;
 
 #pragma warning disable IDE1006
 
@@ -11,7 +13,7 @@ internal class MinimapTile
     /// <summary>
     /// The "ContentKey" MD5 checksum of the minimap's original BLP file
     /// </summary>
-    public required byte[] hash { get; set; }
+    public ContentHash hash { get; set; }
 }
 
 #pragma warning restore IDE1006

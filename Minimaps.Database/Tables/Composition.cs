@@ -1,4 +1,6 @@
-﻿namespace Minimaps.Database.Tables;
+﻿using Minimaps.Shared.Types;
+
+namespace Minimaps.Database.Tables;
 
 #pragma warning disable IDE1006, CS8618
 
@@ -9,7 +11,7 @@ internal class Composition
     /// See MinimapComposition.GenerateHash
     /// Stored as BYTEA
     /// </summary>
-    public byte[] hash { get; set; }
+    public ContentHash hash { get; set; }
 
     /// <summary>
     /// FK to product table for the source product this composition was generated from

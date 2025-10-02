@@ -92,8 +92,9 @@ internal class ScanMapsService :
         await using (var command = new NpgsqlCommand("SELECT p.build_id, p.id FROM product_scans ps " +
             "LEFT JOIN products p ON p.id = ps.product_id " +
             "WHERE ps.state = $1 " +
-            "FOR UPDATE OF ps SKIP LOCKED " +
-            "LIMIT 1", conn, transaction))
+            "ORDER BY p.build_id ASC " + // scan in patch ascending order
+            "LIMIT 1 " +
+            "FOR UPDATE OF ps SKIP LOCKED", conn, transaction))
         {
             command.Parameters.AddWithValue(Database.Tables.ScanState.Pending);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -181,7 +182,7 @@ internal class ScanMapsService :
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private readonly record struct BuildProductDto(string Product, string BuildConfig, string CDNConfig, string ProductConfig, List<string> Regions);
+    private readonly record struct BuildProductDto(Int64 Id, string Product, string BuildConfig, string CDNConfig, string ProductConfig, List<string> Regions);
     private async Task<ProcessResult> ScanBuild(Int64 productId, BuildVersion version, CancellationToken cancellation)
     {
         // todo cancellation pass
@@ -202,11 +203,10 @@ internal class ScanMapsService :
         {
             scanProds.Parameters.AddWithValue(productId);
             await using var reader = await scanProds.ExecuteReaderAsync();
-
             while (await reader.ReadAsync())
             {
                 var regions = reader.GetFieldValue<string[]>(4);
-                products.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), [.. regions]));
+                products.Add(new(productId, reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), [.. regions]));
             }
         }
 
@@ -261,7 +261,6 @@ internal class ScanMapsService :
         }
 
         IDBCDStorage mapDB;
-
         try
         {
             var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(filesystem, _resourceLocator), _dbdProvider);
@@ -279,7 +278,6 @@ internal class ScanMapsService :
 
         // Aggregate maps
         var mapEntry = new List<(int Id, string Json, string Directory, string Name)>();
-
         await using (var mapBatch = new NpgsqlBatch(conn))
         {
             foreach (var rowPair in mapDB.AsReadOnly())
@@ -291,7 +289,7 @@ internal class ScanMapsService :
                 // so I'm taking the simple route for now. Limited to only here.
                 var mapJson = Newtonsoft.Json.JsonConvert.SerializeObject(row.AsType<object>());
 
-                // upsert the map entry, merge maps
+                // upsert the map entry, merge maps, prioritize data of the most recent build we see
                 var command = mapBatch.CreateBatchCommand();
                 command.CommandText = "INSERT INTO maps (id, json, directory, name, name_history, first_version, last_version) " +
                     "VALUES (@Id, @Json::JSONB, @Directory, @Name, jsonb_build_object(@BuildVersion::TEXT, @Name), @BuildVersion, @BuildVersion) " +
@@ -322,7 +320,6 @@ internal class ScanMapsService :
         var encryptedMaps = new ConcurrentBag<EncryptedMap>();
         var tileHashMap = new ConcurrentDictionary<ContentHash, TileHashData>(); // map hashes to their corresponding file & map tile positions
         var compositions = new Dictionary<int, MinimapComposition>(); // Build the tile composition of each map
-
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
         await Parallel.ForEachAsync(mapList,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -542,17 +539,17 @@ internal class ScanMapsService :
 
             foreach (var comp in batch)
             {
-                var command = npgsqlBatch.CreateBatchCommand();
-                command.CommandText = "INSERT INTO compositions (hash, composition, tiles, extents) VALUES ($1, $2::JSONB, $3, $4::JSONB) " +
+                var cmdAddComp = npgsqlBatch.CreateBatchCommand();
+                cmdAddComp.CommandText = "INSERT INTO compositions (hash, composition, tiles, extents) VALUES ($1, $2::JSONB, $3, $4::JSONB) " +
                     "ON CONFLICT (hash) DO NOTHING";
-                command.Parameters.AddWithValue(comp.Value.Hash);
-                command.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
-                command.Parameters.AddWithValue(comp.Value.TotalTiles);
+                cmdAddComp.Parameters.AddWithValue(comp.Value.Hash);
+                cmdAddComp.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
+                cmdAddComp.Parameters.AddWithValue(comp.Value.TotalTiles);
 
                 var extents = comp.Value.CalcExtents();
                 if (extents != null)
                 {
-                    command.Parameters.AddWithValue(JsonSerializer.Serialize(new
+                    cmdAddComp.Parameters.AddWithValue(JsonSerializer.Serialize(new
                     {
                         x0 = extents.Value.Min.X,
                         y0 = extents.Value.Min.Y,
@@ -562,18 +559,24 @@ internal class ScanMapsService :
                 }
                 else
                 {
-                    command.Parameters.AddWithValue(DBNull.Value);
+                    cmdAddComp.Parameters.AddWithValue(DBNull.Value);
                 }
+                npgsqlBatch.BatchCommands.Add(cmdAddComp);
 
-                npgsqlBatch.BatchCommands.Add(command);
-
-                var commandMap = npgsqlBatch.CreateBatchCommand();
-                commandMap.CommandText = "INSERT INTO build_minimaps (build_id, map_id, composition_hash) VALUES ($1, $2, $3) " +
+                var cmdAddMinimap = npgsqlBatch.CreateBatchCommand();
+                cmdAddMinimap.CommandText = "INSERT INTO build_minimaps (build_id, map_id, composition_hash) VALUES ($1, $2, $3) " +
                     "ON CONFLICT (build_id, map_id) DO UPDATE SET composition_hash = EXCLUDED.composition_hash";
-                commandMap.Parameters.AddWithValue(version);
-                commandMap.Parameters.AddWithValue(comp.Key);
-                commandMap.Parameters.AddWithValue(comp.Value.Hash);
-                npgsqlBatch.BatchCommands.Add(commandMap);
+                cmdAddMinimap.Parameters.AddWithValue(version);
+                cmdAddMinimap.Parameters.AddWithValue(comp.Key);
+                cmdAddMinimap.Parameters.AddWithValue(comp.Value.Hash);
+                npgsqlBatch.BatchCommands.Add(cmdAddMinimap);
+
+                var cmdProdCompJunction = npgsqlBatch.CreateBatchCommand();
+                cmdProdCompJunction.CommandText = "INSERT INTO product_compositions (composition_hash, product_id) VALUES($1, $2) " +
+                    "ON CONFLICT (composition_hash, product_id) DO NOTHING";
+                cmdProdCompJunction.Parameters.AddWithValue(comp.Value.Hash);
+                cmdProdCompJunction.Parameters.AddWithValue(product.Id);
+                npgsqlBatch.BatchCommands.Add(cmdProdCompJunction);
             }
 
             await npgsqlBatch.ExecuteNonQueryAsync(cancellation);
@@ -581,18 +584,16 @@ internal class ScanMapsService :
 
         _logger.LogInformation("Done!");
 
-        // todo: output encrypted map+keys, todo: wmo maps? empty maps?
-
         if (!encryptedMaps.IsEmpty)
             return new(ProcessStatus.EncryptedMaps, product, null, encryptedMaps);
         else
             return new(ProcessStatus.FullDecrypt, product, null);
     }
 
-    private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) : Exception($"Build {version} {product} processing failed", inner)
+    private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) : 
+        Exception($"Build {version} {product} processing failed", inner)
     {
         public BuildVersion Version { get; } = version;
         public BuildProductDto Product { get; } = product;
     }
-
 }

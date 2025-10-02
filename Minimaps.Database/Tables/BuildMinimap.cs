@@ -1,4 +1,5 @@
 ﻿using Minimaps.Shared;
+using Minimaps.Shared.Types;
 
 namespace Minimaps.Database.Tables;
 
@@ -8,7 +9,7 @@ internal class BuildMinimap
 {
     public BuildVersion build_id { get; set; }
     public int map_id { get; set; }
-    public string composition_hash { get; set; }
+    public ContentHash composition_hash { get; set; }
 
     // Primary key: (build_id, map_id)
 }
