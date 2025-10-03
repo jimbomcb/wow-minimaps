@@ -16,6 +16,7 @@
     <TypeScriptJSXEmit>None</TypeScriptJSXEmit>
     <TypeScriptModuleKind>ES2022</TypeScriptModuleKind>
     <TypeScriptCompileOnBuild>true</TypeScriptCompileOnBuild>
+    <UserSecretsId>5bf93916-37a3-422c-97b3-9a0d648ef629</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\Minimaps.Database\Minimaps.Database.csproj" />
+    <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>
 
 </Project>

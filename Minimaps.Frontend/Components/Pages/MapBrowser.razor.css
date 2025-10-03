@@ -1,0 +1,14 @@
+﻿::deep .content {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.map-viewport {
+    flex: 1;
+    display: flex;
+}
+
+#map-canvas {
+    flex: 1;
+    background-color: #111111;
+}

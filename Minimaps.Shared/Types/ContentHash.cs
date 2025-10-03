@@ -1,11 +1,6 @@
-﻿using System;
-using System.Buffers;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
+﻿using System.Buffers;
 using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.Json.Serialization;
 
 namespace Minimaps.Shared.Types;
 
@@ -13,6 +8,7 @@ namespace Minimaps.Shared.Types;
 /// Unique content identifier, MD5 hash of byte stream, used frequently for keying, deduplication
 /// Stored internally as 2x int64 (no heap alloc), 16 bytes BYTEA in Postgres, and json etc as lowercase hex string.
 /// </summary>
+[JsonConverter(typeof(ContentHashConverter))]
 public readonly struct ContentHash : IEquatable<ContentHash>
 {
     private readonly ulong _part1;
@@ -83,10 +79,26 @@ public readonly struct ContentHash : IEquatable<ContentHash>
         return new(hash);
     }
 
+    public static bool TryParse(string versiohash, out ContentHash result)
+    {
+        try
+        {
+            result = new ContentHash(versiohash);
+            return true;
+        }
+        catch
+        {
+            result = default;
+            return false;
+        }
+    }
+
+
     public bool Equals(ContentHash other) => _part1 == other._part1 && _part2 == other._part2;
     public override bool Equals(object? obj) => obj is ContentHash hash && Equals(hash);
     public override int GetHashCode() => HashCode.Combine(_part1, _part2);
     public override string ToString() => ToHex();
+
     public static bool operator ==(ContentHash left, ContentHash right) => left.Equals(right);
     public static bool operator !=(ContentHash left, ContentHash right) => !(left == right);
 }

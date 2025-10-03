@@ -1,0 +1,14 @@
+@page "/map/{MapId:int}/{Version?}"
+@using Minimaps.Frontend.Components.Layout
+
+<div data-page-module="/js/dist/map-viewer.js" data-page-init="MapViewerInit"></div>
+
+<div class="map-viewport">
+    <canvas id="map-canvas"></canvas>
+</div>
+
+    
+@code {
+    [Parameter] public int MapId { get; set; }
+    [Parameter] public string? Version { get; set; }
+}
