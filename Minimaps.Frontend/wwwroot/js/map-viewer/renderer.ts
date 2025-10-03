@@ -233,7 +233,7 @@ export class Renderer {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
         
-        const pixelsPerUnit = 256 / viewport.altitude;
+        const pixelsPerUnit = 512 / viewport.altitude;
         const screenX = (worldX - viewport.centerX) * pixelsPerUnit;
         const screenY = (worldY - viewport.centerY) * pixelsPerUnit;
         const screenTileSize = tileSize * pixelsPerUnit;
@@ -270,7 +270,7 @@ export class Renderer {
     private createGridTransform(viewport: MapViewport): Float32Array {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
-        const pixelsPerUnit = 256 / viewport.altitude;
+        const pixelsPerUnit = 512 / viewport.altitude;
 
         const screenX = (0 - viewport.centerX) * pixelsPerUnit;
         const screenY = (0 - viewport.centerY) * pixelsPerUnit;

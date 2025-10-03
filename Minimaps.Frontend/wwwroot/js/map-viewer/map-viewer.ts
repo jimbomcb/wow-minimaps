@@ -3,6 +3,7 @@ import { TileLoader } from './tile-loader.js';
 import { Renderer } from './renderer.js';
 import { TileManager } from './tile-manager.js';
 import { CoordinateTranslator } from './coordinate-translator.js';
+import { BuildVersion } from './build-version.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -23,7 +24,19 @@ export async function MapViewerInit() {
     }
 
     const mapId = parseInt(pathParts[1], 10);
-    const version = pathParts.length > 2 ? pathParts[2] : "latest";
+    var version : string | BuildVersion = "latest";
+    if (pathParts.length > 2) {
+        var versionStr = pathParts[2];
+        const buildVer = BuildVersion.tryParse(versionStr);
+        if (buildVer !== null) {
+            console.log("Querying exact version ", buildVer);
+            version = buildVer;
+        }
+        else {
+            console.log("Querying tagged version ", versionStr);
+            version = versionStr; // fall back to tag lookup
+        }
+    }
     
     const urlParams = new URLSearchParams(window.location.search);
     const initialViewport = CoordinateTranslator.parseViewportFromUrl(urlParams);
@@ -65,7 +78,11 @@ export class MapViewer {
         this.resizeCanvas();
         this.gl = this.canvas.getContext('webgl2');
         this.renderer = new Renderer(this.canvas);
-        this.loaderPromise = TileLoader.forVersion(options.mapId, options.version);
+        
+        const versionString = typeof options.version === 'string' 
+            ? options.version 
+            : options.version.encodedValueString;
+        this.loaderPromise = TileLoader.forVersion(options.mapId, versionString);
 
         this.setupEventHandlers();
         this.startRenderLoop();
@@ -192,7 +209,7 @@ export class MapViewer {
             if (isDragging) {
                 const deltaX = e.clientX - lastX;
                 const deltaY = e.clientY - lastY;
-                const unitsPerPixel = this.viewport.altitude / 256;
+                const unitsPerPixel = this.viewport.altitude / 512;
                 
                 const worldDeltaX = deltaX * unitsPerPixel;
                 const worldDeltaY = deltaY * unitsPerPixel;

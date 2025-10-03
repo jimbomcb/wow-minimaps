@@ -1,4 +1,5 @@
 import { CompositionDto } from "./backend-types.js";
+import { BuildVersion } from "./build-version.js";
 
 export interface TileCoord {
     x: number;
@@ -14,7 +15,7 @@ export interface MapViewport {
 export interface MapViewerOptions {
     container: HTMLCanvasElement;
     mapId: number;
-    version: string;
+    version: BuildVersion | string;
     initialViewport?: MapViewport;
 }
 

@@ -124,8 +124,8 @@ export class TileLoader {
     }
 
     private calculateViewportBounds(viewport: MapViewport, canvasSize: { width: number, height: number }) {
-        const tilesVisibleX = canvasSize.width / (256 / viewport.altitude);
-        const tilesVisibleY = canvasSize.height / (256 / viewport.altitude);
+        const tilesVisibleX = canvasSize.width / (512 / viewport.altitude);
+        const tilesVisibleY = canvasSize.height / (512 / viewport.altitude);
         const padding = Math.max(1, Math.min(3, Math.floor(tilesVisibleX / 10)));
         const bounds = {
             minX: Math.floor(viewport.centerX - tilesVisibleX / 2) - padding,
