@@ -6,8 +6,8 @@ export interface TileCoord {
 }
 
 export interface MapViewport {
-    centerX: number;
-    centerY: number;
+    centerX: number; // X tile coord, 0-64
+    centerY: number; // Y tile coord, 0-64
     altitude: number;
 }
 
@@ -15,6 +15,7 @@ export interface MapViewerOptions {
     container: HTMLCanvasElement;
     mapId: number;
     version: string;
+    initialViewport?: MapViewport;
 }
 
 export class MinimapComposition {
