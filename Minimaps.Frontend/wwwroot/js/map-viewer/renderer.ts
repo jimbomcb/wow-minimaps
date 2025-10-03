@@ -135,21 +135,18 @@ export class Renderer {
         this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
         this.gl.useProgram(this.program);
         this.gl.clearColor(0.0, 0.0, 0.0, 0.0);
-
     }
 
     private createQuadBuffer(): WebGLBuffer {
         const vertices = new Float32Array([
-            0.0, 0.0,    0.0, 1.0,
-            1.0, 0.0,    1.0, 1.0,
-            0.0, 1.0,    0.0, 0.0,
-            1.0, 1.0,    1.0, 0.0
+            0.0, 0.0,    0.0, 0.0,  // BL/BL
+            1.0, 0.0,    1.0, 0.0,  // BR/BR
+            0.0, 1.0,    0.0, 1.0,  // TL/TL
+            1.0, 1.0,    1.0, 1.0   // TR/TR
         ]);
-
         const buffer = this.gl.createBuffer()!;
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
         this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
-        
         return buffer;
     }
 
@@ -239,7 +236,6 @@ export class Renderer {
         const canvasHeight = this.gl.canvas.height;
         
         const pixelsPerUnit = 256 / viewport.altitude;
-        
         const screenX = (worldX - viewport.centerX) * pixelsPerUnit;
         const screenY = (worldY - viewport.centerY) * pixelsPerUnit;
         const screenTileSize = tileSize * pixelsPerUnit;
@@ -247,8 +243,8 @@ export class Renderer {
         const ndcX = (screenX * 2.0) / canvasWidth;
         const ndcY = -(screenY * 2.0) / canvasHeight;
         const ndcWidth = (screenTileSize * 2.0) / canvasWidth;
-        const ndcHeight = (screenTileSize * 2.0) / canvasHeight;
-        
+        const ndcHeight = -(screenTileSize * 2.0) / canvasHeight;
+    
         return new Float32Array([
             ndcWidth, 0.0,       0.0,
             0.0,      ndcHeight, 0.0,
@@ -276,17 +272,16 @@ export class Renderer {
     private createGridTransform(viewport: MapViewport): Float32Array {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
-        
         const pixelsPerUnit = 256 / viewport.altitude;
-        
+
         const screenX = (0 - viewport.centerX) * pixelsPerUnit;
         const screenY = (0 - viewport.centerY) * pixelsPerUnit;
-        
+
         const ndcX = (screenX * 2.0) / canvasWidth;
         const ndcY = -(screenY * 2.0) / canvasHeight;
         const ndcScaleX = (pixelsPerUnit * 2.0) / canvasWidth;
-        const ndcScaleY = (pixelsPerUnit * 2.0) / canvasHeight;
-        
+        const ndcScaleY = -(pixelsPerUnit * 2.0) / canvasHeight;
+
         return new Float32Array([
             ndcScaleX, 0.0,       0.0,
             0.0,       ndcScaleY, 0.0,
