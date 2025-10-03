@@ -6,8 +6,6 @@ using Minimaps.Shared;
 using Minimaps.Shared.RibbitClient;
 using Minimaps.Shared.TileStores;
 
-DapperTypeHandler.RegisterTypeHandlers();
-
 var builder = Host.CreateApplicationBuilder(args);
 builder.AddServiceDefaults();
 builder.AddMinimapsDatabase();
