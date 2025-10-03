@@ -101,7 +101,9 @@ public class InitialSchema : Migration
             .WithColumn("last_version").AsInt64()
             .WithColumn("name_history").AsCustom("jsonb");
 
-        Execute.Sql(@"ALTER TABLE maps ADD COLUMN parent INT4 GENERATED ALWAYS AS (COALESCE((json->>'CosmeticParentMapID')::INT4, (json->>'ParentMapID')::INT4)) VIRTUAL");
+        Execute.Sql("ALTER TABLE maps ADD COLUMN parent INT4 GENERATED ALWAYS AS (" +
+                "COALESCE(NULLIF((json->>'CosmeticParentMapID')::INT4, -1), NULLIF((json->>'ParentMapID')::INT4, -1))" +
+            ") VIRTUAL");
         Create.ForeignKey("FK_maps_first_version").FromTable("maps").ForeignColumn("first_version").ToTable("builds").PrimaryColumn("id");
         Create.ForeignKey("FK_maps_last_version").FromTable("maps").ForeignColumn("last_version").ToTable("builds").PrimaryColumn("id");
 
