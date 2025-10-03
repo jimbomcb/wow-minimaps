@@ -2,6 +2,7 @@ import { MapViewerOptions, MapViewport } from './types.js';
 import { TileLoader } from './tile-loader.js';
 import { Renderer } from './renderer.js';
 import { TileManager } from './tile-manager.js';
+import { CoordinateTranslator } from './coordinate-translator.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -11,8 +12,7 @@ export async function MapViewerInit() {
     }
 
     const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
-    if (pathParts.length < 2 || pathParts[0] !== 'map')
-    {
+    if (pathParts.length < 2 || pathParts[0] !== 'map') {
         console.error("invalid URL format, expected /map/{mapId}/{version}");
         return;
     }
@@ -23,18 +23,20 @@ export async function MapViewerInit() {
     }
 
     const mapId = parseInt(pathParts[1], 10);
-    const version = pathParts.length > 2 ? pathParts[2] : "latest"; 
-    var mapViewerInstance = new MapViewer({
+    const version = pathParts.length > 2 ? pathParts[2] : "latest";
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialViewport = CoordinateTranslator.parseViewportFromUrl(urlParams);
+    
+    const mapViewerInstance = new MapViewer({
         container: canvas,
         mapId: mapId,
-        version: version
+        version: version,
+        initialViewport: initialViewport
     });
 
     mapViewerInstance.setViewportChangedCallback(function (viewport) {
-        const display = document.getElementById('zoom-display');
-        if (display) {
-            display.textContent = `Altitude: ${viewport.altitude.toFixed(1)}`; // todo: pos/zoom overlay
-        }
+        // todo
     });
 
     return () => {
@@ -54,6 +56,8 @@ export class MapViewer {
     private lastTileRequest = 0;
     private needsRender = true;
 
+    private lastUrlUpdate = 0;
+    private readonly URL_UPDATE_THROTTLE = 50;
     private onViewportChanged?: (viewport: MapViewport) => void;
 
     constructor(options: MapViewerOptions) {
@@ -66,11 +70,15 @@ export class MapViewer {
         this.setupEventHandlers();
         this.startRenderLoop();
 
-        this.viewport = this.constrainViewport({
+        this.viewport = this.constrainViewport(options.initialViewport || {
             centerX: 32,
             centerY: 32,
-            altitude: 8.0 
+            altitude: 1.0
         });
+
+        if (options.initialViewport) {
+            this.updateUrlWithViewport(true);
+        }
 
         this.loaderPromise.then(loader => {
             this.tileLoader = loader;
@@ -80,6 +88,24 @@ export class MapViewer {
         }).catch(error => {
             console.error("Failed to initialize TileLoader:", error);
         });
+    }
+
+    private updateUrlWithViewport(forceUpdate = false): void {
+        const now = Date.now();
+
+        // Excessive state pushing results in chrome ignoring them due to their abuse to hang,
+        // so we're going to limit it to once every 50ms dragging, and once on release
+        if (!forceUpdate && now - this.lastUrlUpdate < this.URL_UPDATE_THROTTLE) {
+            return; 
+        }
+
+        this.lastUrlUpdate = now;
+        
+        const url = new URL(window.location.href);
+        const urlParams = CoordinateTranslator.viewportToUrlParams(this.viewport);
+        
+        url.search = urlParams;
+        window.history.replaceState({}, '', url.toString());
     }
 
     private scheduleRender(): void {
@@ -99,7 +125,6 @@ export class MapViewer {
     private requestVisibleTiles(): void {
         if (!this.tileLoader || !this.tileManager) return;
 
-        // temp throttle
         const now = Date.now();
         if (now - this.lastTileRequest < 100) {
             return;
@@ -121,6 +146,7 @@ export class MapViewer {
     setViewport(viewport: MapViewport): void {
         this.viewport = { ...viewport };
         this.onViewportChanged?.(this.viewport);
+        this.updateUrlWithViewport(true);
         this.scheduleRender();
         this.requestVisibleTiles();
     }
@@ -182,6 +208,7 @@ export class MapViewer {
                 lastX = e.clientX;
                 lastY = e.clientY;
                 
+                this.updateUrlWithViewport(false);
                 this.onViewportChanged?.(this.viewport);
                 this.scheduleRender();
                 this.requestVisibleTiles();
@@ -189,14 +216,17 @@ export class MapViewer {
         });
 
         this.canvas.addEventListener('mouseup', () => {
-            isDragging = false;
+            if (isDragging) {
+                isDragging = false;
+                this.updateUrlWithViewport(true);
+            }
         });
 
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
             const newAltitude = this.viewport.altitude * zoomFactor;
-            const clampedAltitude = Math.max(0.5, Math.min(50, newAltitude));
+            const clampedAltitude = Math.max(0.1, Math.min(50, newAltitude));
             
             const constrainedViewport = this.constrainViewport({
                 ...this.viewport,
@@ -205,6 +235,7 @@ export class MapViewer {
             
             this.viewport = constrainedViewport;
             
+            this.updateUrlWithViewport(true);
             this.onViewportChanged?.(this.viewport);
             this.scheduleRender();
             this.requestVisibleTiles();
