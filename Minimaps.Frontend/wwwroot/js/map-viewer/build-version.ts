@@ -2,6 +2,9 @@
  * TypeScript equivalent of Minimaps.Shared.BuildVersion
  * Responsible for converting WoW's [X].[Y].[Z].[BUILD] (i.e. 11.0.7.58046) between
  * its individual components and a single sortable BIGINT received from the API.
+ * This should never exist in javascript-land as a number (errors on construction), because 
+ * the horrors of JS mean that it would be susceptible to float precision loss.
+ * It will either be a BigInt in TS land, BIGINT in the database, or a string in transit.
  * Bit-packed to: reserved(1) | expansion(11) | major(10) | minor(10) | build(32)
  * Max:           reserved      2047          | 1023      | 1023      | int32.max
  */
