@@ -1,5 +1,7 @@
 # Minimap Explorer
 
+<img width="711" height="496" alt="image" src="https://github.com/user-attachments/assets/8d274a32-7102-404e-80f3-0357d90aaadf" />
+
 Automatic discovery and analysis of per-build WoW minimap data.
 
 Not yet deployed.
