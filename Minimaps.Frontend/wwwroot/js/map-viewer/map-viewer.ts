@@ -74,6 +74,10 @@ export class MapViewer {
     private readonly URL_UPDATE_THROTTLE = 50;
     private onViewportChanged?: (viewport: MapViewport) => void;
 
+    private footerOverlay: HTMLElement | null = null;
+    private lastDebugUpdate = 0;
+    private readonly DEBUG_UPDATE_THROTTLE = 250;
+
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
         this.resizeCanvas();
@@ -84,6 +88,11 @@ export class MapViewer {
             ? options.version 
             : options.version.encodedValueString;
         this.loaderPromise = TileLoader.forVersion(options.mapId, versionString);
+
+        this.footerOverlay = document.getElementById('map-footer-overlay');
+        if (this.footerOverlay) {
+            this.updateDebugOverlay();
+        }
 
         this.setupEventHandlers();
         this.startRenderLoop();
@@ -108,6 +117,38 @@ export class MapViewer {
         }).catch(error => {
             console.error("Failed to initialize TileLoader:", error);
         });
+    }
+
+    private updateDebugOverlay(): void {
+        if (!this.footerOverlay || !this.loaded) return;
+
+        const now = Date.now();
+        if (now - this.lastDebugUpdate < this.DEBUG_UPDATE_THROTTLE) {
+            return;
+        }
+        this.lastDebugUpdate = now;
+
+        let debugText = ``;
+        if (this.loaded && this.tileManager) {
+            const stats = this.tileManager.getStats();
+            debugText += `Tiles: ${stats.loadedTiles}/${stats.totalTiles}`;
+            if (stats.loadingTiles > 0) {
+                debugText += ` (${stats.loadingTiles} loading)`;
+            }
+            if (stats.queuedTiles > 0) {
+                debugText += ` (${stats.queuedTiles} queued)`;
+            }
+            if (stats.failedTiles > 0) {
+                debugText += ` (${stats.failedTiles} failed)`;
+            }
+        }
+
+        const debugContent = this.footerOverlay.querySelector('.debug-tilemap');
+        if (debugContent) {
+            debugContent.textContent = debugText;
+        } else {
+            this.footerOverlay.textContent = debugText;
+        }
     }
 
     private updateUrlWithViewport(forceUpdate = false): void {
@@ -169,6 +210,7 @@ export class MapViewer {
         this.viewport = { ...viewport };
         this.onViewportChanged?.(this.viewport);
         this.updateUrlWithViewport(true);
+        this.updateDebugOverlay();
         this.scheduleRender();
         this.requestVisibleTiles();
     }
@@ -181,6 +223,7 @@ export class MapViewer {
                     this.doRender();
                 }
             }
+            this.updateDebugOverlay();
             this.animationId = requestAnimationFrame(render);
         };
         render();
@@ -300,6 +343,7 @@ export class MapViewer {
             
             this.updateUrlWithViewport(true);
             this.onViewportChanged?.(this.viewport);
+            this.updateDebugOverlay();
             this.scheduleRender();
             this.requestVisibleTiles();
         });

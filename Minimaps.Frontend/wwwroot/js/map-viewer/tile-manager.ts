@@ -9,6 +9,16 @@ export interface TileState {
     priority: number;
 }
 
+export interface TileStats {
+    totalTiles: number;
+    loadedTiles: number;
+    loadingTiles: number;
+    failedTiles: number;
+    queuedTiles: number;
+    currentLoads: number;
+    maxConcurrentLoads: number;
+}
+
 export class TileManager {
     // todo: tile indexing on a number or something...
     private tileStates = new Map<string, TileState>();
@@ -82,6 +92,28 @@ export class TileManager {
         }
         
         return loadedTiles;
+    }
+
+    getStats(): TileStats {
+        let loadedTiles = 0;
+        let loadingTiles = 0;
+        let failedTiles = 0;
+
+        for (const state of this.tileStates.values()) {
+            if (state.loaded) loadedTiles++;
+            else if (state.loading) loadingTiles++;
+            else if (state.failed) failedTiles++;
+        }
+
+        return {
+            totalTiles: this.tileStates.size,
+            loadedTiles,
+            loadingTiles,
+            failedTiles,
+            queuedTiles: this.loadQueue.size,
+            currentLoads: this.currentLoads,
+            maxConcurrentLoads: this.maxConcurrentLoads
+        };
     }
 
     isDirtyAndClear(): boolean {
