@@ -58,6 +58,7 @@ export async function MapViewerInit() {
 }
 
 export class MapViewer {
+    private loaded: boolean;
     private canvas: HTMLCanvasElement;
     private renderer: Renderer;
     private tileLoader: TileLoader;
@@ -97,11 +98,13 @@ export class MapViewer {
             this.updateUrlWithViewport(true);
         }
 
+        this.loaded = false;
         this.loaderPromise.then(loader => {
             this.tileLoader = loader;
             this.tileManager = new TileManager(loader, this.renderer);
             this.tileManager.setRenderCallback(() => this.scheduleRender());
             this.requestVisibleTiles();
+            this.loaded = true;
         }).catch(error => {
             console.error("Failed to initialize TileLoader:", error);
         });
@@ -125,17 +128,19 @@ export class MapViewer {
         window.history.replaceState({}, '', url.toString());
     }
 
-    private scheduleRender(): void {
-        this.needsRender = true;
-    }
-
     private resizeCanvas(): void {
         const displayWidth = this.canvas.clientWidth;
         const displayHeight = this.canvas.clientHeight;
         if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
             this.canvas.width = displayWidth;
             this.canvas.height = displayHeight;
-            this.scheduleRender();
+
+            if (this.loaded) {
+                this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
+                this.doRender(); // immediate full render to avoid black frame flash
+            } else {
+                this.scheduleRender();
+            }
         }
     }
 
@@ -170,13 +175,10 @@ export class MapViewer {
 
     private startRenderLoop(): void {
         const render = () => {
-            if (this.tileManager) {
+            if (this.loaded) {
                 const isDirty = this.tileManager.isDirtyAndClear();
-                
                 if (this.needsRender || isDirty) {
-                    const loadedTiles = this.tileManager.getLoadedTiles();
-                    this.renderer.render(this.viewport, loadedTiles);
-                    this.needsRender = false;
+                    this.doRender();
                 }
             }
             this.animationId = requestAnimationFrame(render);
@@ -184,8 +186,43 @@ export class MapViewer {
         render();
     }
 
+    // queue a draw on the next render loop
+    private scheduleRender(): void {
+        this.needsRender = true;
+    }
+
+    // immediate render to canvas
+    private doRender(): void {
+        console.assert(this.loaded, "rendering pre-load");
+        const loadedTiles = this.tileManager.getLoadedTiles();
+        this.renderer.render(this.viewport, loadedTiles);
+        this.needsRender = false;
+    }
+
     setViewportChangedCallback(callback: (viewport: MapViewport) => void): void {
         this.onViewportChanged = callback;
+    }
+
+    private getCanvasMousePosition(clientX: number, clientY: number): { x: number, y: number } {
+        const rect = this.canvas.getBoundingClientRect();
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    }
+
+    private canvasPositionToWorldPosition(canvasX: number, canvasY: number): { x: number, y: number } {
+        const canvasWidth = this.canvas.width;
+        const canvasHeight = this.canvas.height;
+        
+        const offsetX = canvasX - canvasWidth / 2;
+        const offsetY = canvasY - canvasHeight / 2;
+        
+        const unitsPerPixel = this.viewport.altitude / 512;
+        const worldX = this.viewport.centerX + (offsetX * unitsPerPixel);
+        const worldY = this.viewport.centerY + (offsetY * unitsPerPixel);
+        
+        return { x: worldX, y: worldY };
     }
 
     private setupEventHandlers(): void {
@@ -195,7 +232,6 @@ export class MapViewer {
 
         const resizeObserver = new ResizeObserver(() => {
             this.resizeCanvas();
-            this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
         });
         resizeObserver.observe(this.canvas);
 
@@ -241,12 +277,22 @@ export class MapViewer {
 
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
+
+            // cursor pos based scrolling
+            const mouseCanvas = this.getCanvasMousePosition(e.clientX, e.clientY);
+            const worldMousePos = this.canvasPositionToWorldPosition(mouseCanvas.x, mouseCanvas.y);
+            
             const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
             const newAltitude = this.viewport.altitude * zoomFactor;
             const clampedAltitude = Math.max(0.1, Math.min(50, newAltitude));
             
+            const altitudeRatio = clampedAltitude / this.viewport.altitude;
+            const newCenterX = worldMousePos.x + (this.viewport.centerX - worldMousePos.x) * altitudeRatio;
+            const newCenterY = worldMousePos.y + (this.viewport.centerY - worldMousePos.y) * altitudeRatio;
+            
             const constrainedViewport = this.constrainViewport({
-                ...this.viewport,
+                centerX: newCenterX,
+                centerY: newCenterY,
                 altitude: clampedAltitude
             });
             
