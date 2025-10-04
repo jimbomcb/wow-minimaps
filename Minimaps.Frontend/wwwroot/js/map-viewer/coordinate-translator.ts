@@ -13,18 +13,20 @@ export class CoordinateTranslator {
     private static readonly ZOOM_PRECISION = 4;
 
     static wowToInternal(wowX: number, wowY: number): { x: number, y: number } {
+        // flip the X/Y to WoW's coordinate system, +X north/+Y west
         const normalizedX = (wowX - CoordinateTranslator.WOW_MIN) / CoordinateTranslator.WOW_SIZE;
         const normalizedY = (wowY - CoordinateTranslator.WOW_MIN) / CoordinateTranslator.WOW_SIZE;
         
         return {
-            x: normalizedX * CoordinateTranslator.TILE_COUNT,
-            y: normalizedY * CoordinateTranslator.TILE_COUNT
+            x: (1 - normalizedY) * CoordinateTranslator.TILE_COUNT,
+            y: (1 - normalizedX) * CoordinateTranslator.TILE_COUNT
         };
     }
 
     static internalToWow(internalX: number, internalY: number): { x: number, y: number } {
-        const normalizedX = internalX / CoordinateTranslator.TILE_COUNT;
-        const normalizedY = internalY / CoordinateTranslator.TILE_COUNT;
+        // inverse the X/Y flipping described above
+        const normalizedX = 1 - (internalY / CoordinateTranslator.TILE_COUNT);
+        const normalizedY = 1 - (internalX / CoordinateTranslator.TILE_COUNT);
         
         return {
             x: normalizedX * CoordinateTranslator.WOW_SIZE + CoordinateTranslator.WOW_MIN,
