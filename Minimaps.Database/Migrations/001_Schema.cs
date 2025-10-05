@@ -136,7 +136,9 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
 
         Create.Table("build_maps")
             .WithColumn("build_id").AsInt64()
-            .WithColumn("map_id").AsInt32();
+            .WithColumn("map_id").AsInt32()
+            .WithColumn("tiles").AsInt16().Nullable()
+            .WithColumn("composition_hash").AsCustom("BYTEA").Nullable();
 
         Create.PrimaryKey("PK_build_maps")
             .OnTable("build_maps")
@@ -161,7 +163,7 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
         // Minimap tiles
         Create.Table("minimap_tiles")
             .WithColumn("hash").AsCustom("BYTEA").PrimaryKey()
-            .WithColumn("first_seen").AsCustom("TIMESTAMPTZ").NotNullable().WithDefault(SystemMethods.CurrentUTCDateTime);
+            .WithColumn("tile_size").AsInt16();
 
         Create.Table("tact_keys")
             .WithColumn("key_name").AsString(16).PrimaryKey()
@@ -195,26 +197,10 @@ CREATE TRIGGER trigger_maps_name_history_dedupe BEFORE INSERT OR UPDATE ON maps 
             .FromTable("product_compositions").ForeignColumn("composition_hash")
             .ToTable("compositions").PrimaryColumn("hash");
 
-        Create.Table("build_minimaps")
-            .WithColumn("build_id").AsInt64()
-            .WithColumn("map_id").AsInt32()
-            .WithColumn("composition_hash").AsCustom("BYTEA");
-
-        Create.PrimaryKey("PK_build_minimap")
-            .OnTable("build_minimaps")
-            .Columns("build_id", "map_id");
-
-        Create.ForeignKey("FK_build_minimap_composition")
-            .FromTable("build_minimaps").ForeignColumn("composition_hash")
+        // Add foreign key from build_maps to compositions
+        Create.ForeignKey("FK_build_maps_composition")
+            .FromTable("build_maps").ForeignColumn("composition_hash")
             .ToTable("compositions").PrimaryColumn("hash");
-
-        Create.ForeignKey("FK_build_minimap_map")
-            .FromTable("build_minimaps").ForeignColumn("map_id")
-            .ToTable("maps").PrimaryColumn("id");
-
-        Create.ForeignKey("FK_build_minimap_build")
-            .FromTable("build_minimaps").ForeignColumn("build_id")
-            .ToTable("builds").PrimaryColumn("id");
 
     }
 

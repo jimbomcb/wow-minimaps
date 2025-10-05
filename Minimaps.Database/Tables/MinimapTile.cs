@@ -8,12 +8,13 @@ namespace Minimaps.Database.Tables;
 /// List of tiles keyed on the MD5 hash of the tile contents
 /// Redundant as it stands but might need extra metadata (ie backend store)
 /// </summary>
-internal class MinimapTile
+public class MinimapTile
 {
     /// <summary>
     /// The "ContentKey" MD5 checksum of the minimap's original BLP file
     /// </summary>
     public ContentHash hash { get; set; }
+    public short tile_size { get; set; }
 }
 
 #pragma warning restore IDE1006
