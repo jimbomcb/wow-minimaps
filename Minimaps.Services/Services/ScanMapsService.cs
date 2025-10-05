@@ -427,7 +427,7 @@ internal class ScanMapsService :
                                 }
 
                                 // no empty LOD chunks
-                                if (hashList.Any(x => x.HasValue))
+                                if (!hashList.Any(x => x.HasValue))
                                     continue;
 
                                 using var md5 = MD5.Create();
@@ -635,7 +635,7 @@ internal class ScanMapsService :
                     }
 
                     using var outputImage = new Image<Bgra32>(tileSize, tileSize, new Bgra32(0, 0, 0, 0));
-                    var lodTileStepSize = 64 / tilesPerSide;
+                    var lodTileStepSize = tileSize / tilesPerSide;
                     for (int i = 0; i < componentHashes.Count; i++)
                     {
                         var componentHash = componentHashes[i];
