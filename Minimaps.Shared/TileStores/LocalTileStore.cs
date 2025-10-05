@@ -37,7 +37,7 @@ public class LocalTileStore : ITileStore
         return false;
     }
 
-    public async Task<TileInfo> GetAsync(ContentHash hash)
+    public async Task<Stream> GetAsync(ContentHash hash)
     {
         if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
@@ -50,8 +50,7 @@ public class LocalTileStore : ITileStore
             if (File.Exists(filePath))
             {
                 // todo: decide on stream lifetime handling
-                var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-                return new TileInfo(stream, kvp.Key);
+                return new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
             }
         }
 
@@ -83,6 +82,6 @@ public class LocalTileStore : ITileStore
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
         // partition out based on the first 2 hash characters.
         var hex = hash.ToHex();
-        return Path.Combine(_basePath, hex[..2], hex);
+        return Path.Combine(_basePath, "temp", hex[..2], hex);
     }
 }
