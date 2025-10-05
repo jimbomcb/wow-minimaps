@@ -1,7 +1,6 @@
 using Minimaps.Shared.Types;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace Minimaps.Tests;
 
@@ -25,9 +24,9 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1"),
-            [new (1, 0)] = GetTestHash("hash2"),
-            [new (0, 1)] = GetTestHash("hash3")
+            [new(0, 0)] = GetTestHash("hash1"),
+            [new(1, 0)] = GetTestHash("hash2"),
+            [new(0, 1)] = GetTestHash("hash3")
         };
 
         var composition1 = new MinimapComposition(tiles, new HashSet<TileCoord>());
@@ -41,14 +40,14 @@ public class MinimapCompositionTests
     {
         var tiles1 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1"),
-            [new (1, 0)] = GetTestHash("hash2")
+            [new(0, 0)] = GetTestHash("hash1"),
+            [new(1, 0)] = GetTestHash("hash2")
         };
 
         var tiles2 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1"),
-            [new (1, 0)] = GetTestHash("hash3")
+            [new(0, 0)] = GetTestHash("hash1"),
+            [new(1, 0)] = GetTestHash("hash3")
         };
 
         var composition1 = new MinimapComposition(tiles1, new HashSet<TileCoord>());
@@ -62,18 +61,18 @@ public class MinimapCompositionTests
     {
         var tiles1 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (10, 5)] = GetTestHash("hashA"),
-            [new (0, 0)] = GetTestHash("hashB"),
-            [new (5, 10)] = GetTestHash("hashC"),
-            [new (-5, 2)] = GetTestHash("hashD")
+            [new(10, 5)] = GetTestHash("hashA"),
+            [new(0, 0)] = GetTestHash("hashB"),
+            [new(5, 10)] = GetTestHash("hashC"),
+            [new(-5, 2)] = GetTestHash("hashD")
         };
 
         var tiles2 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (-5, 2)] = GetTestHash("hashD"),
-            [new (5, 10)] = GetTestHash("hashC"),
-            [new (0, 0)] = GetTestHash("hashB"),
-            [new (10, 5)] = GetTestHash("hashA")
+            [new(-5, 2)] = GetTestHash("hashD"),
+            [new(5, 10)] = GetTestHash("hashC"),
+            [new(0, 0)] = GetTestHash("hashB"),
+            [new(10, 5)] = GetTestHash("hashA")
         };
 
         var composition1 = new MinimapComposition(tiles1, new HashSet<TileCoord>());
@@ -87,16 +86,16 @@ public class MinimapCompositionTests
     {
         var tiles1 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (1, 0)] = GetTestHash("hash1"),
-            [new (0, 1)] = GetTestHash("hash2"),
-            [new (0, 0)] = GetTestHash("hash3")
+            [new(1, 0)] = GetTestHash("hash1"),
+            [new(0, 1)] = GetTestHash("hash2"),
+            [new(0, 0)] = GetTestHash("hash3")
         };
 
         var tiles2 = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash3"),
-            [new (0, 1)] = GetTestHash("hash2"),
-            [new (1, 0)] = GetTestHash("hash1")
+            [new(0, 0)] = GetTestHash("hash3"),
+            [new(0, 1)] = GetTestHash("hash2"),
+            [new(1, 0)] = GetTestHash("hash1")
         };
 
         var composition1 = new MinimapComposition(tiles1, new HashSet<TileCoord>());
@@ -110,10 +109,10 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (-10, -5)] = GetTestHash("hash1"),
-            [new (-1, 0)] = GetTestHash("hash2"),
-            [new (0, -1)] = GetTestHash("hash3"),
-            [new (5, 10)] = GetTestHash("hash4")
+            [new(-10, -5)] = GetTestHash("hash1"),
+            [new(-1, 0)] = GetTestHash("hash2"),
+            [new(0, -1)] = GetTestHash("hash3"),
+            [new(5, 10)] = GetTestHash("hash4")
         };
 
         var composition = new MinimapComposition(tiles, new HashSet<TileCoord>());
@@ -127,7 +126,7 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("singlehash")
+            [new(0, 0)] = GetTestHash("singlehash")
         };
 
         var composition = new MinimapComposition(tiles, new HashSet<TileCoord>());
@@ -141,7 +140,7 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1")
+            [new(0, 0)] = GetTestHash("hash1")
         };
         var missingTiles = new HashSet<TileCoord>();
 
@@ -156,8 +155,8 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1"),
-            [new (2, 2)] = GetTestHash("hash2")
+            [new(0, 0)] = GetTestHash("hash1"),
+            [new(2, 2)] = GetTestHash("hash2")
         };
         var missingTiles = new HashSet<TileCoord>
         {
@@ -179,11 +178,11 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1")
+            [new(0, 0)] = GetTestHash("hash1")
         };
-        
+
         var compositionNoMissing = new MinimapComposition(tiles, new HashSet<TileCoord>());
-        var compositionWithMissing = new MinimapComposition(tiles, new HashSet<TileCoord> { new (1, 1) });
+        var compositionWithMissing = new MinimapComposition(tiles, new HashSet<TileCoord> { new(1, 1) });
 
         Assert.NotEqual(compositionNoMissing.Hash, compositionWithMissing.Hash);
     }
@@ -193,7 +192,7 @@ public class MinimapCompositionTests
     {
         var tiles = new Dictionary<TileCoord, ContentHash>
         {
-            [new (0, 0)] = GetTestHash("hash1")
+            [new(0, 0)] = GetTestHash("hash1")
         };
         var missingTiles1 = new HashSet<TileCoord> { new(1, 1), new(2, 2) };
         var missingTiles2 = new HashSet<TileCoord> { new(2, 2), new(1, 1) }; // Different order
@@ -202,123 +201,6 @@ public class MinimapCompositionTests
         var composition2 = new MinimapComposition(tiles, missingTiles2);
 
         Assert.Equal(composition1.Hash, composition2.Hash);
-    }
-
-    [Fact]
-    public void Json_WithoutMissingTiles()
-    {
-        var json = $$$"""{"0,0": "{{{GetTestHash("hash1").ToHex()}}}", "1,0": "{{{GetTestHash("hash2").ToHex()}}}", "0,1": "{{{GetTestHash("hash3").ToHex()}}}"}""";
-        
-        var composition = JsonSerializer.Deserialize<MinimapComposition>(json);
-        
-        Assert.NotNull(composition);
-        Assert.Equal(3, composition.Composition.Count);
-        Assert.Empty(composition.MissingTiles);
-        Assert.Equal(GetTestHash("hash1"), composition.Composition[new (0, 0)]);
-        Assert.Equal(GetTestHash("hash2"), composition.Composition[new (1, 0)]);
-        Assert.Equal(GetTestHash("hash3"), composition.Composition[new (0, 1)]);
-    }
-
-    [Fact]
-    public void Json_WithMissingTiles()
-    {
-        var json = $$$"""{"_m": ["0,1", "1,0"], "0,0": "{{{GetTestHash("hash1").ToHex()}}}", "2,2": "{{{GetTestHash("hash2").ToHex()}}}"}""";
-        
-        var composition = JsonSerializer.Deserialize<MinimapComposition>(json);
-        
-        Assert.NotNull(composition);
-        Assert.Equal(2, composition.Composition.Count);
-        Assert.Equal(2, composition.MissingTiles.Count);
-        
-        Assert.Equal(GetTestHash("hash1"), composition.Composition[new (0, 0)]);
-        Assert.Equal(GetTestHash("hash2"), composition.Composition[new (2, 2)]);
-        
-        Assert.Contains(new (0, 1), composition.MissingTiles);
-        Assert.Contains(new (1, 0), composition.MissingTiles);
-    }
-
-    [Fact]
-    public void Json_EmptyMissingArray()
-    {
-        var json = $$$"""{"_m": [], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        var composition = JsonSerializer.Deserialize<MinimapComposition>(json);
-        
-        Assert.NotNull(composition);
-        Assert.Single(composition.Composition);
-        Assert.Empty(composition.MissingTiles);
-        Assert.Equal(GetTestHash("hash1"), composition.Composition[new (0, 0)]);
-    }
-
-    [Fact]
-    public void Json_OnlyMissingTiles()
-    {
-        var json = """{"_m": ["0,0", "1,1", "-5,10"]}""";
-        
-        var composition = JsonSerializer.Deserialize<MinimapComposition>(json);
-        
-        Assert.NotNull(composition);
-        Assert.Empty(composition.Composition);
-        Assert.Equal(3, composition.MissingTiles.Count);
-        
-        Assert.Contains(new (0, 0), composition.MissingTiles);
-        Assert.Contains(new (1, 1), composition.MissingTiles);
-        Assert.Contains(new (-5, 10), composition.MissingTiles);
-    }
-
-    [Fact]
-    public void Json_RoundTrip_ExpectedFail()
-    {
-        var originalComposition = new MinimapComposition(
-            new Dictionary<TileCoord, ContentHash> { [new(0, 0)] = GetTestHash("hash1") },
-            new HashSet<TileCoord> { new(1, 1) }
-        );
-
-        var json = JsonSerializer.Serialize(originalComposition);
-        var deserializedComposition = JsonSerializer.Deserialize<MinimapComposition>(json);
-
-        Assert.NotNull(deserializedComposition);
-        Assert.Equal(originalComposition.MissingTiles.Count, deserializedComposition.MissingTiles.Count);
-    }
-
-    [Fact]
-    public void Json_InvalidCoord_Throws()
-    {
-        var json = $$$"""{"_m": ["invalid"], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<MinimapComposition>(json));
-    }
-
-    [Fact]
-    public void Json_ThreeValues_Throws()
-    {
-        var json = $$$"""{"_m": ["1,2,3"], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<MinimapComposition>(json));
-    }
-
-    [Fact]
-    public void Json_NonNumeric_Throws()
-    {
-        var json = $$$"""{"_m": ["a,b"], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<MinimapComposition>(json));
-    }
-
-    [Fact]
-    public void Json_NullValue_Throws()
-    {
-        var json = $$$"""{"_m": [null], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<MinimapComposition>(json));
-    }
-
-    [Fact]
-    public void Json_EmptyString_Throws()
-    {
-        var json = $$$"""{"_m": [""], "0,0": "{{{GetTestHash("hash1").ToHex()}}}"}""";
-        
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<MinimapComposition>(json));
     }
 
     [Fact]
@@ -349,7 +231,7 @@ public class MinimapCompositionTests
     public void Hash_MissingTilesOrdering()
     {
         var tiles = new Dictionary<TileCoord, ContentHash> { [new(0, 0)] = GetTestHash("hash1") };
-        
+
         var missing1 = new HashSet<TileCoord> { new(2, 0), new(1, 999), new(1, 0) };
         var missing2 = new HashSet<TileCoord> { new(1, 0), new(1, 999), new(2, 0) };
 
@@ -360,7 +242,7 @@ public class MinimapCompositionTests
     }
 
     [Fact]
-    public void Hash_UniqueForDifferentCoordinatesWithSameTileHash()
+    public void Hash_UniqueDiffCoordSameTileHash()
     {
         var tiles1 = new Dictionary<TileCoord, ContentHash>
         {
@@ -378,5 +260,69 @@ public class MinimapCompositionTests
         var composition2 = new MinimapComposition(tiles2, new HashSet<TileCoord>());
 
         Assert.NotEqual(composition1.Hash, composition2.Hash);
+    }
+
+    [Fact]
+    public void LOD_MultipleLevels()
+    {
+        var lods = new Dictionary<int, CompositionLOD>
+        {
+            [0] = new(new() { [new(0, 0)] = GetTestHash("lod0_tile1"), [new(1, 0)] = GetTestHash("lod0_tile2") }),
+            [1] = new(new() { [new(0, 0)] = GetTestHash("lod1_tile1") }),
+            [2] = new(new() { [new(0, 0)] = GetTestHash("lod2_tile1") })
+        };
+
+        var composition = new MinimapComposition(lods, new HashSet<TileCoord>());
+
+        Assert.NotNull(composition.GetLOD(0));
+        Assert.NotNull(composition.GetLOD(1));
+        Assert.NotNull(composition.GetLOD(2));
+        Assert.Null(composition.GetLOD(3));
+
+        Assert.Equal(2, composition.GetLOD(0)!.Tiles.Count);
+        Assert.Equal(1, composition.GetLOD(1)!.Tiles.Count);
+        Assert.Equal(1, composition.GetLOD(2)!.Tiles.Count);
+    }
+
+    [Fact]
+    public void LOD_DifferentLevels_DifferentHashes()
+    {
+        var lods1 = new Dictionary<int, CompositionLOD>
+        {
+            [0] = new(new() { [new(0, 0)] = GetTestHash("tile1") }),
+            [1] = new(new() { [new(0, 0)] = GetTestHash("lod_tile") })
+        };
+
+        var lods2 = new Dictionary<int, CompositionLOD>
+        {
+            [0] = new(new() { [new(0, 0)] = GetTestHash("tile1") }),
+            [2] = new(new() { [new(0, 0)] = GetTestHash("lod_tile") })
+        };
+
+        var composition1 = new MinimapComposition(lods1, new HashSet<TileCoord>());
+        var composition2 = new MinimapComposition(lods2, new HashSet<TileCoord>());
+
+        Assert.NotEqual(composition1.Hash, composition2.Hash);
+    }
+
+    [Fact]
+    public void LOD_SameLevels_SameHash()
+    {
+        var lods1 = new Dictionary<int, CompositionLOD>
+        {
+            [0] = new(new() { [new(0, 0)] = GetTestHash("tile1") }),
+            [1] = new(new() { [new(0, 0)] = GetTestHash("lod1_tile") })
+        };
+
+        var lods2 = new Dictionary<int, CompositionLOD>
+        {
+            [1] = new(new() { [new(0, 0)] = GetTestHash("lod1_tile") }),
+            [0] = new(new() { [new(0, 0)] = GetTestHash("tile1") })
+        };
+
+        var composition1 = new MinimapComposition(lods1, new HashSet<TileCoord>());
+        var composition2 = new MinimapComposition(lods2, new HashSet<TileCoord>());
+
+        Assert.Equal(composition1.Hash, composition2.Hash);
     }
 }

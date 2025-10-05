@@ -1,12 +1,11 @@
-﻿using System.Collections.Immutable;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 
 namespace Minimaps.Shared.Types;
 
 public readonly record struct CompositionExtents(TileCoord Min, TileCoord Max);
-public record class CompositionLOD(ImmutableDictionary<TileCoord, ContentHash> Tiles);
+public record class CompositionLOD(Dictionary<TileCoord, ContentHash> Tiles);
 
 /// <summary>
 /// A minimap composition describes the list of tile hashes and the location of each hash that make up a minimap.
@@ -19,39 +18,56 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
 {
     public const int MAX_LOD = 6; // LOD6: 2^6 = 64: single tile
 
-    private ImmutableDictionary<int, CompositionLOD> _lods;
+    private readonly CompositionLOD?[] _lods;
     private readonly HashSet<TileCoord> _missingTiles;
     private byte[]? _hash;
 
-    public MinimapComposition(ImmutableDictionary<int, CompositionLOD> lods, IReadOnlySet<TileCoord> missingTiles)
+    public byte[] Hash => _hash ??= CalculateHash();
+    public IReadOnlyCollection<TileCoord> MissingTiles => _missingTiles;
+
+    public MinimapComposition(IReadOnlyDictionary<int, CompositionLOD> lods, IReadOnlySet<TileCoord> missingTiles)
     {
         Debug.Assert(lods.ContainsKey(0), "Composition must contain LOD 0");
 
-        _lods = lods;
+        _lods = new CompositionLOD?[MAX_LOD + 1];
+        foreach (var kvp in lods)
+        {
+            _lods[kvp.Key] = kvp.Value;
+        }
         _missingTiles = [.. missingTiles];
     }
 
-    public byte[] Hash => _hash ??= CalculateHash();
-
-    public ImmutableDictionary<int, CompositionLOD> LODs => _lods;
-    public IReadOnlyCollection<TileCoord> MissingTiles => _missingTiles;
-
-    public int CountTiles() 
+    // LOD0-only (aka no LODs) composition
+    public MinimapComposition(Dictionary<TileCoord, ContentHash> lod0Tiles, IReadOnlySet<TileCoord> missingTiles)
     {
-        Debug.Assert(_lods.ContainsKey(0));
-        return _missingTiles.Count + _lods[0].Tiles.Count;
+        _lods = new CompositionLOD?[MAX_LOD + 1];
+        _lods[0] = new CompositionLOD(lod0Tiles);
+        _missingTiles = [.. missingTiles];
+    }
+
+    public CompositionLOD? GetLOD(int level)
+    {
+        if (level < 0 || level > MAX_LOD) return null;
+        return _lods[level];
+    }
+
+    public int CountTiles()
+    {
+        Debug.Assert(_lods[0] != null);
+        return _missingTiles.Count + _lods[0]!.Tiles.Count;
     }
 
     public CompositionExtents? CalcExtents()
     {
-        if (!_lods.TryGetValue(0, out var lod0) || lod0.Tiles.Count == 0)
+        var lod0 = _lods[0];
+        if (lod0?.Tiles.Count == 0)
             return null;
 
         int minX = int.MaxValue;
         int minY = int.MaxValue;
         int maxX = int.MinValue;
         int maxY = int.MinValue;
-        foreach (var coord in lod0.Tiles.Keys)
+        foreach (var coord in lod0!.Tiles.Keys)
         {
             if (coord.X < minX) minX = coord.X;
             if (coord.Y < minY) minY = coord.Y;
@@ -70,7 +86,7 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
     /// </summary>
     private byte[] CalculateHash()
     {
-        Debug.Assert(_lods.ContainsKey(0), "Composition must contain LOD 0");
+        Debug.Assert(_lods[0] != null, "Composition must contain LOD 0");
 
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
@@ -78,7 +94,8 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
 
         for (int lod = 0; lod <= MAX_LOD; lod++)
         {
-            if (!_lods.TryGetValue(lod, out var lodN))
+            var lodN = _lods[lod];
+            if (lodN == null)
                 continue;
 
             writer.Write(lod);

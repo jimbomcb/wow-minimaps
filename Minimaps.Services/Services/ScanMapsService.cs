@@ -13,7 +13,6 @@ using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using System.Data;
 using System.Diagnostics;
 using System.Security.Cryptography;
@@ -376,7 +375,7 @@ internal class ScanMapsService :
                     // TODO: WMO based minimaps have 0 tiles I think, need some way to represent on backend
                     // the list of tiles that are referenced by the WDT but their associated file doesn't exist on the CDN
                     var missingTiles = new HashSet<TileCoord>();
-                    var lod0Builder = ImmutableDictionary.CreateBuilder<TileCoord, ContentHash>();
+                    var lod0Builder = new Dictionary<TileCoord, ContentHash>();
                     foreach (var tile in minimapTiles)
                     {
                         var tilePos = new TileCoord(tile.X, tile.Y);
@@ -397,8 +396,8 @@ internal class ScanMapsService :
 
                     // Build the LOD tile componments, for now these are deduplicated by keying them
                     // based on the concatenated MD5 of their components
-                    var lodBuilder = ImmutableDictionary.CreateBuilder<int, CompositionLOD>();
-                    var lod0 = lod0Builder.ToImmutable();
+                    var lodBuilder = new Dictionary<int, CompositionLOD>();
+                    var lod0 = lod0Builder;
                     lodBuilder.Add(0, new(lod0));
                     Span<byte> hashBytes = stackalloc byte[16];
 
@@ -409,7 +408,7 @@ internal class ScanMapsService :
 
                         // each LOD tile covers a 2^level x 2^level area of LOD0 tiles
                         int factor = 1 << level;
-                        var builder = ImmutableDictionary.CreateBuilder<TileCoord, ContentHash>();
+                        var builder = new Dictionary<TileCoord, ContentHash>();
                         for (int lodX = 0; lodX < 64; lodX += factor)
                         {
                             for (int lodY = 0; lodY < 64; lodY += factor)
@@ -450,13 +449,11 @@ internal class ScanMapsService :
                             }
                         }
 
-                        var immutableLevel = builder.ToImmutable();
-                        if (immutableLevel.Count > 0)
-                            lodBuilder.Add(level, new(immutableLevel));
+                        if (builder.Count > 0)
+                            lodBuilder.Add(level, new(builder));
                     }
 
-                    var lodMap = lodBuilder.ToImmutable();
-                    compositions.TryAdd(row.ID, new(lodMap, missingTiles));
+                    compositions.TryAdd(row.ID, new(lodBuilder, missingTiles));
                 }
                 catch (DecryptionKeyMissingException ex)
                 {
@@ -473,9 +470,13 @@ internal class ScanMapsService :
         _logger.LogInformation("{MapCount} maps ({EncCount} encrypted): Unique/Total LOD0 {Lod0Unique}/{Lod0Total} (Total {AllUnique})",
             mapList.Count,
             encryptedMaps.Count,
-            compositions.Values.SelectMany(x => x.LODs[0].Tiles.Values).Distinct().Count(),
+            compositions.Values.SelectMany(x => x.GetLOD(0)!.Tiles.Values).Distinct().Count(),
             compositions.Values.Sum(x => x.CountTiles()),
-            compositions.Values.SelectMany(x => x.LODs.Values).SelectMany(x => x.Tiles.Values).Distinct().Count()
+            compositions.Values
+                .SelectMany(x => Enumerable.Range(0, MinimapComposition.MAX_LOD + 1)
+                    .Select(x.GetLOD).OfType<CompositionLOD>()
+                    .SelectMany(lod => lod.Tiles.Values))
+                .Distinct().Count()
             );
 
         // Send out the list of tiles we've seen, get the list of tiles we already have and push the tiles we're missing
@@ -525,7 +526,7 @@ internal class ScanMapsService :
                     command.Parameters.AddWithValue(data.tile_size);
                     batchConn.BatchCommands.Add(command);
                 }
-                await batchConn.ExecuteNonQueryAsync(cancellation);
+                await batchConn.ExecuteNonQueryAsync();
                 _logger.LogDebug("Inserted batch of {Count} tiles", batch.Count());
                 batch.Clear();
             }
@@ -711,7 +712,7 @@ internal class ScanMapsService :
                     "ON CONFLICT (hash) DO NOTHING";
                 cmdAddComp.Parameters.AddWithValue(comp.Value.Hash);
                 cmdAddComp.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
-                cmdAddComp.Parameters.AddWithValue(comp.Value.LODs[0].Tiles.Count);
+                cmdAddComp.Parameters.AddWithValue(comp.Value.GetLOD(0)!.Tiles.Count);
 
                 var extents = comp.Value.CalcExtents();
                 if (extents != null)
@@ -742,7 +743,7 @@ internal class ScanMapsService :
                     "ON CONFLICT (build_id, map_id) DO UPDATE SET tiles = EXCLUDED.tiles, composition_hash = EXCLUDED.composition_hash";
                 cmdBuildMaps.Parameters.AddWithValue(version);
                 cmdBuildMaps.Parameters.AddWithValue(comp.Key);
-                cmdBuildMaps.Parameters.AddWithValue((short)comp.Value.LODs[0].Tiles.Count);
+                cmdBuildMaps.Parameters.AddWithValue((short)comp.Value.GetLOD(0)!.Tiles.Count);
                 cmdBuildMaps.Parameters.AddWithValue(comp.Value.Hash);
                 npgsqlBatch.BatchCommands.Add(cmdBuildMaps);
             }

@@ -19,7 +19,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 {
     public override MinimapComposition Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        throw new NotImplementedException("");
+        throw new NotImplementedException("Not currently used");
 #if false
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected StartObject token");
@@ -109,12 +109,15 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
         writer.WritePropertyName("lod");
         writer.WriteStartObject();
 
-        foreach (var (lod, data) in value.LODs.OrderBy(x => x.Key))
+        for (int lod = 0; lod <= MinimapComposition.MAX_LOD; lod++)
         {
+            var data = value.GetLOD(lod);
+            if (data == null) continue;
+
             writer.WritePropertyName(lod.ToString());
             writer.WriteStartObject();
 
-            var hashGroups = data.Tiles.GroupBy(x => x.Value).OrderBy(x=>x.Key);
+            var hashGroups = data.Tiles.GroupBy(x => x.Value).OrderBy(x => x.Key);
             foreach (var group in hashGroups)
             {
                 writer.WritePropertyName(group.Key.ToString());
