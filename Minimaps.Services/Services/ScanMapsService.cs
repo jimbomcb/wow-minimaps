@@ -511,7 +511,7 @@ internal class ScanMapsService :
 
         var consumeToDB = Task.Run(async () =>
         {
-            const int BATCH_SIZE = 50; // todo config
+            const int BATCH_SIZE = 250; // todo config
             var batch = new List<Database.Tables.MinimapTile>(BATCH_SIZE);
             async Task PushBatch()
             {

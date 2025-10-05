@@ -27,13 +27,20 @@ export class MinimapComposition {
         this._compositionMap = new Map<string, string>();
         this._missingTilesSet = new Set<string>();
 
-        for (const [key, value] of Object.entries(data)) {
-            if (key === "_m" && Array.isArray(value)) {
-                for (const coord of value) {
-                    this._missingTilesSet.add(coord);
+        if (data.m && Array.isArray(data.m)) {
+            for (const coord of data.m) {
+                this._missingTilesSet.add(coord);
+            }
+        }
+
+        // for now, only process LOD 0
+        if (data.lod && data.lod["0"]) {
+            const lod0 = data.lod["0"];
+            for (const [hash, coordinates] of Object.entries(lod0)) {
+                // Each hash maps to an array of coordinate strings
+                for (const coord of coordinates) {
+                    this._compositionMap.set(coord, hash);
                 }
-            } else {
-                this._compositionMap.set(key, value);
             }
         }
     }
@@ -52,6 +59,18 @@ export class MinimapComposition {
 
     get missingTiles(): ReadonlySet<string> {
         return this._missingTilesSet;
+    }
+
+    // todo...
+    getLODData(lodLevel: number): ReadonlyMap<string, string[]> | null {
+        const lodData = this.data.lod?.[lodLevel.toString()];
+        if (!lodData) return null;
+
+        const result = new Map<string, string[]>();
+        for (const [hash, coordinates] of Object.entries(lodData)) {
+            result.set(hash, [...coordinates]); // copy
+        }
+        return result;
     }
 }
 
