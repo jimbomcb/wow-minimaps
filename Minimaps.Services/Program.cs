@@ -1,5 +1,4 @@
 using Minimaps.Database;
-using Minimaps.Database.TypeHandlers;
 using Minimaps.Services;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
