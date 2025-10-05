@@ -4,7 +4,14 @@ using System.Text.Json.Serialization;
 namespace Minimaps.Shared.Types;
 
 /// <summary>
-/// Formats as {"_m": ["0,0", "0,1"], "0,5": "hash", "12,34": "hash"}
+/// Formats as {
+///     "_m": ["0,0", "0,1"], 
+///     "lods": {
+///         "0": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
+///         "1": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
+///     }
+/// }
+/// LOD 0 always exists, LOD1 through to LOD6 (1 tile) are optional
 /// It _could_ be packed more optimally by using the hash as the key given tiles can share hashes (water planes), 
 /// but the rich JSON support in Postgres allows for some interesting database-level map diffing with coord keys etc I want to try.
 /// </summary>
@@ -12,6 +19,8 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 {
     public override MinimapComposition Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
+        throw new NotImplementedException("");
+#if false
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected StartObject token");
 
@@ -78,21 +87,16 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
         }
 
         return new MinimapComposition(composition, missing);
+#endif
     }
 
     public override void Write(Utf8JsonWriter writer, MinimapComposition value, JsonSerializerOptions options)
     {
         writer.WriteStartObject();
 
-        foreach (var kvp in value.Composition.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
-        {
-            var coordString = $"{kvp.Key.X},{kvp.Key.Y}";
-            writer.WriteString(coordString, kvp.Value.ToHex());
-        }
-
         if (value.MissingTiles.Count > 0)
         {
-            writer.WritePropertyName("_m");
+            writer.WritePropertyName("m");
             writer.WriteStartArray();
             foreach (var missing in value.MissingTiles.OrderBy(x => x.X).ThenBy(x => x.Y))
             {
@@ -102,6 +106,31 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             writer.WriteEndArray();
         }
 
+        writer.WritePropertyName("lod");
+        writer.WriteStartObject();
+
+        foreach (var (lod, data) in value.LODs.OrderBy(x => x.Key))
+        {
+            writer.WritePropertyName(lod.ToString());
+            writer.WriteStartObject();
+
+            var hashGroups = data.Tiles.GroupBy(x => x.Value).OrderBy(x=>x.Key);
+            foreach (var group in hashGroups)
+            {
+                writer.WritePropertyName(group.Key.ToString());
+                writer.WriteStartArray();
+                foreach (var entry in group.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
+                {
+                    var coordString = $"{entry.Key.X},{entry.Key.Y}";
+                    writer.WriteStringValue(coordString);
+                }
+                writer.WriteEndArray();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndObject();
         writer.WriteEndObject();
     }
 }

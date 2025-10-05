@@ -1,4 +1,4 @@
-@page "/map/{MapId:int}/{Version?}"
+@page "/map/{MapId:int}/{Version?}/{X?}/{Y?}/{Z?}"
 @using Minimaps.Frontend.Components.Layout
 
 <div data-page-module="/js/dist/map-viewer.js" data-page-init="MapViewerInit"></div>
@@ -14,4 +14,7 @@
 @code {
     [Parameter] public int MapId { get; set; }
     [Parameter] public string? Version { get; set; }
+    [Parameter] public string? X { get; set; }
+    [Parameter] public string? Y { get; set; }
+    [Parameter] public string? Z { get; set; }
 }

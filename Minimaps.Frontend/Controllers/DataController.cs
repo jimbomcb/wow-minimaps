@@ -16,7 +16,7 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     public async Task<ActionResult<MapVersionsDto>> GetMapVersions(int mapId)
     {
         await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = new NpgsqlCommand("SELECT build_id, composition_hash FROM build_minimaps WHERE map_id = $1 ORDER BY build_id ASC", conn); // TODO:INDEX
+        await using var cmd = new NpgsqlCommand("SELECT build_id, composition_hash FROM build_maps WHERE map_id = $1 AND composition_hash IS NOT NULL ORDER BY build_id ASC", conn); // TODO:INDEX
         cmd.Parameters.AddWithValue(mapId);
 
         await using var reader = await cmd.ExecuteReaderAsync();
@@ -51,7 +51,7 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         //minimapComposition = reader.GetFieldValue<MinimapComposition>(0);
 
         var json = reader.GetString(0);
-        return JsonSerializer.Deserialize<MinimapComposition>(json!)!;
+        return Content(json, "application/json");
     }
 
     [HttpGet("tile/{hash}")]
@@ -64,7 +64,7 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         try
         {
             var tileInfo = await tileStore.GetAsync(contentHash);
-            return File(tileInfo.Stream, tileInfo.ContentType);
+            return File(tileInfo, "image/webp"); // just hardcoding for now, no other foramts
         }
         catch (FileNotFoundException)
         {

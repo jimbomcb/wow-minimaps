@@ -9,7 +9,7 @@ namespace Minimaps.Shared.Types;
 /// Stored internally as 2x int64 (no heap alloc), 16 bytes BYTEA in Postgres, and json etc as lowercase hex string.
 /// </summary>
 [JsonConverter(typeof(ContentHashConverter))]
-public readonly struct ContentHash : IEquatable<ContentHash>
+public readonly struct ContentHash : IEquatable<ContentHash>, IComparable<ContentHash>
 {
     private readonly ulong _part1;
     private readonly ulong _part2;
@@ -93,7 +93,6 @@ public readonly struct ContentHash : IEquatable<ContentHash>
         }
     }
 
-
     public bool Equals(ContentHash other) => _part1 == other._part1 && _part2 == other._part2;
     public override bool Equals(object? obj) => obj is ContentHash hash && Equals(hash);
     public override int GetHashCode() => HashCode.Combine(_part1, _part2);
@@ -101,4 +100,13 @@ public readonly struct ContentHash : IEquatable<ContentHash>
 
     public static bool operator ==(ContentHash left, ContentHash right) => left.Equals(right);
     public static bool operator !=(ContentHash left, ContentHash right) => !(left == right);
+    public int CompareTo(ContentHash other)
+    {
+        int result = _part1.CompareTo(other._part1);
+        return result != 0 ? result : _part2.CompareTo(other._part2);
+    }
+    public static bool operator <(ContentHash left, ContentHash right) => left.CompareTo(right) < 0;
+    public static bool operator <=(ContentHash left, ContentHash right) => left.CompareTo(right) <= 0;
+    public static bool operator >(ContentHash left, ContentHash right) => left.CompareTo(right) > 0;
+    public static bool operator >=(ContentHash left, ContentHash right) => left.CompareTo(right) >= 0;
 }

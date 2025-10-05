@@ -82,6 +82,6 @@ public class LocalTileStore : ITileStore
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
         // partition out based on the first 2 hash characters.
         var hex = hash.ToHex();
-        return Path.Combine(_basePath, "temp", hex[..2], hex);
+        return Path.Combine(_basePath, hex[..2], hex);
     }
 }

@@ -2,8 +2,6 @@
 
 namespace Minimaps.Shared.TileStores;
 
-public readonly record struct TileInfo(Stream Stream, string ContentType);
-
 public interface ITileStore
 {
     Task<bool> HasAsync(ContentHash hash);
