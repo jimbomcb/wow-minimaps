@@ -59,3 +59,9 @@ Minimap Composition thoughts:
   - 4x4 (16x16)
   - 8x8 (8x8)
 - 68KB isn't a big deal for a one time load per map per version, compared to the traffic saved with smarter tile usage/streaming fewer unnecessary zoom levels
+
+Minimap Zoom Level thoughts:
+
+- I want to use something that doesn't keep ending up in non-rounded zoom levels, the map looks good at 1:1 pixels/screen and ideally we're showing that, not at like 101% scale with shitty filtering applied
+- The google maps method of a mousewheel setting the interp target to rounded 0.25 steps works well
+- Alternatively google maps in globe/3D view has a specific meter altitude (above the "ground", not meters above sea level)

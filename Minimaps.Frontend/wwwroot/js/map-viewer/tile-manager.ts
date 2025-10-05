@@ -19,6 +19,7 @@ export interface TileStats {
     maxConcurrentLoads: number;
 }
 
+// tile streamer todo: handling of composite layers
 export class TileManager {
     // todo: tile indexing on a number or something...
     private tileStates = new Map<string, TileState>();
