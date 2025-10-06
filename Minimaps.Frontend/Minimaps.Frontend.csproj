@@ -6,18 +6,45 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TypeScriptCompileOnSaveEnabled>True</TypeScriptCompileOnSaveEnabled>
     <TypeScriptNoImplicitAny>True</TypeScriptNoImplicitAny>
-    <TypeScriptRemoveComments>false</TypeScriptRemoveComments>
+    <TypeScriptRemoveComments>True</TypeScriptRemoveComments>
     <TypeScriptOutFile />
     <TypeScriptOutDir>wwwroot/js/dist</TypeScriptOutDir>
     <TypeScriptGeneratesDeclarations>false</TypeScriptGeneratesDeclarations>
     <TypeScriptNoEmitOnError>true</TypeScriptNoEmitOnError>
     <TypeScriptSourceMap>true</TypeScriptSourceMap>
-    <TypeScriptTarget>ES2021</TypeScriptTarget>
+    <TypeScriptTarget>es2024</TypeScriptTarget>
     <TypeScriptJSXEmit>None</TypeScriptJSXEmit>
-    <TypeScriptModuleKind>ES2022</TypeScriptModuleKind>
+    <TypeScriptModuleKind>nodenext</TypeScriptModuleKind>
+    <TypeScriptModuleResolution>nodenext</TypeScriptModuleResolution>
     <TypeScriptCompileOnBuild>true</TypeScriptCompileOnBuild>
+    <TypeScriptNoImplicitReturns>true</TypeScriptNoImplicitReturns>
+    <TypeScriptNoFallthroughCasesInSwitch>true</TypeScriptNoFallthroughCasesInSwitch>
+    <TypeScriptAllowUnreachableCode>false</TypeScriptAllowUnreachableCode>
+    <TypeScriptForceConsistentCasingInFileNames>true</TypeScriptForceConsistentCasingInFileNames>
+    <TypeScriptIsolatedModules>true</TypeScriptIsolatedModules>
+    <TypeScriptStrictBindCallApply>true</TypeScriptStrictBindCallApply>
+    <TypeScriptStrict>true</TypeScriptStrict>
+    <TypeScriptStrictPropertyInitialization>true</TypeScriptStrictPropertyInitialization>
+    <TypeScriptStrictFunctionTypes>true</TypeScriptStrictFunctionTypes>
+    <TypeScriptLib>esnext,dom</TypeScriptLib>
+    <TypeScriptNoImplicitOverride>true</TypeScriptNoImplicitOverride>
+    <TypeScriptExactOptionalPropertyTypes>true</TypeScriptExactOptionalPropertyTypes>
+    <TypeScriptUseUnknownInCatchVariables>true</TypeScriptUseUnknownInCatchVariables>
+    <TypeScriptNoUnusedLocals>false</TypeScriptNoUnusedLocals>
+    <TypeScriptNoUnusedParameters>true</TypeScriptNoUnusedParameters>
+    <TypeScriptSkipLibCheck>false</TypeScriptSkipLibCheck>
+    <TypeScriptNoImplicitThis>true</TypeScriptNoImplicitThis>
+    <TypeScriptStrictNullChecks>true</TypeScriptStrictNullChecks>
+    <TypeScriptAlwaysStrict>true</TypeScriptAlwaysStrict>
+    <TypeScriptNoPropertyAccessFromIndexSignature>true</TypeScriptNoPropertyAccessFromIndexSignature>
+    <TypeScriptNoUncheckedIndexedAccess>true</TypeScriptNoUncheckedIndexedAccess>
+    <TypeScriptNoErrorTruncation>true</TypeScriptNoErrorTruncation>
     <UserSecretsId>5bf93916-37a3-422c-97b3-9a0d648ef629</UserSecretsId>
-  </PropertyGroup>
+</PropertyGroup>
+
+  <ItemGroup>
+    <!--<Content Remove="wwwroot\js\dist\**" />-->
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.TypeScript.MSBuild" Version="5.9.2">

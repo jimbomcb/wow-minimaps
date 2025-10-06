@@ -1,4 +1,4 @@
-﻿import { MapViewport } from "./types.js";
+﻿import { CameraPosition } from "./types.js";
 
 export class Renderer {
     private gl: WebGL2RenderingContext;
@@ -6,19 +6,18 @@ export class Renderer {
     private gridProgram: WebGLProgram;
     private quadBuffer: WebGLBuffer;
     private gridBuffer: WebGLBuffer;
-    private positionAttribute: number;
-    private texCoordAttribute: number;
-    private transformUniform: WebGLUniformLocation;
-    private textureUniform: WebGLUniformLocation;
-    private opacityUniform: WebGLUniformLocation;
-    private gridPositionAttribute: number;
-    private gridTransformUniform: WebGLUniformLocation;
-    private gridColorUniform: WebGLUniformLocation;
+    private positionAttribute!: number;
+    private texCoordAttribute!: number;
+    private transformUniform!: WebGLUniformLocation;
+    private textureUniform!: WebGLUniformLocation;
+    private opacityUniform!: WebGLUniformLocation;
+    private gridPositionAttribute!: number;
+    private gridTransformUniform!: WebGLUniformLocation;
+    private gridColorUniform!: WebGLUniformLocation;
     
     constructor(canvas: HTMLCanvasElement) {
         const gl = canvas.getContext('webgl2');
         if (!gl) throw new Error('WebGL2 not supported');
-        
         this.gl = gl;
         
         const displayWidth = canvas.clientWidth;
@@ -194,18 +193,18 @@ export class Renderer {
         this.gl.vertexAttribPointer(this.texCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
     }
 
-    render(viewport: MapViewport, loadedTiles?: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>): void {
+    render(position: CameraPosition, loadedTiles?: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>): void {
         this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
         this.gl.clear(this.gl.COLOR_BUFFER_BIT);
         
-        this.renderGrid(viewport);
+        this.renderGrid(position);
         
         if (loadedTiles && loadedTiles.length > 0) {
-            this.renderLoadedTiles(loadedTiles, viewport);
+            this.renderLoadedTiles(loadedTiles, position);
         }
     }
 
-    private renderLoadedTiles(loadedTiles: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>, viewport: MapViewport): void {
+    private renderLoadedTiles(loadedTiles: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>, position: CameraPosition): void {
         this.gl.useProgram(this.program);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
         this.gl.enableVertexAttribArray(this.positionAttribute);
@@ -214,12 +213,13 @@ export class Renderer {
         this.gl.vertexAttribPointer(this.texCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
         
         for (const tileData of loadedTiles) {
-            this.renderTileWithTexture(tileData.x, tileData.y, tileData.texture, viewport);
+            const tileSize = Math.pow(2, tileData.zoom);
+            this.renderTileWithTexture(tileData.x, tileData.y, tileSize, tileData.texture, position);
         }
     }
 
-    private renderTileWithTexture(x: number, y: number, texture: WebGLTexture, viewport: MapViewport): void {
-        const transform = this.createTileTransform(x, y, 1.0, viewport);
+    private renderTileWithTexture(x: number, y: number, tileSize: number, texture: WebGLTexture, position: CameraPosition): void {
+        const transform = this.createTileTransform(x, y, tileSize, position);
         
         this.gl.activeTexture(this.gl.TEXTURE0);
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -229,13 +229,13 @@ export class Renderer {
         this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    private createTileTransform(worldX: number, worldY: number, tileSize: number, viewport: MapViewport): Float32Array {
+    private createTileTransform(worldX: number, worldY: number, tileSize: number, position: CameraPosition): Float32Array {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
         
-        const pixelsPerUnit = 512 / viewport.altitude;
-        const screenX = (worldX - viewport.centerX) * pixelsPerUnit;
-        const screenY = (worldY - viewport.centerY) * pixelsPerUnit;
+        const pixelsPerUnit = 512 / position.zoom;
+        const screenX = (worldX - position.centerX) * pixelsPerUnit;
+        const screenY = (worldY - position.centerY) * pixelsPerUnit;
         const screenTileSize = tileSize * pixelsPerUnit;
         
         const ndcX = (screenX * 2.0) / canvasWidth;
@@ -250,14 +250,14 @@ export class Renderer {
         ]);
     }
 
-    private renderGrid(viewport: MapViewport): void {
+    private renderGrid(position: CameraPosition): void {
         this.gl.useProgram(this.gridProgram);
         
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.gridBuffer);
         this.gl.enableVertexAttribArray(this.gridPositionAttribute);
         this.gl.vertexAttribPointer(this.gridPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
         
-        const transform = this.createGridTransform(viewport);
+        const transform = this.createGridTransform(position);
         this.gl.uniformMatrix3fv(this.gridTransformUniform, false, transform);
         
         this.gl.uniform4f(this.gridColorUniform, 0.3, 0.3, 0.35, 0.3);
@@ -267,13 +267,13 @@ export class Renderer {
         this.gl.drawArrays(this.gl.LINES, 0, totalLines * 2);
     }
 
-    private createGridTransform(viewport: MapViewport): Float32Array {
+    private createGridTransform(position: CameraPosition): Float32Array {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
-        const pixelsPerUnit = 512 / viewport.altitude;
+        const pixelsPerUnit = 512 / position.zoom;
 
-        const screenX = (0 - viewport.centerX) * pixelsPerUnit;
-        const screenY = (0 - viewport.centerY) * pixelsPerUnit;
+        const screenX = (0 - position.centerX) * pixelsPerUnit;
+        const screenY = (0 - position.centerY) * pixelsPerUnit;
 
         const ndcX = (screenX * 2.0) / canvasWidth;
         const ndcY = -(screenY * 2.0) / canvasHeight;
@@ -285,20 +285,5 @@ export class Renderer {
             0.0,       ndcScaleY, 0.0,
             ndcX,      ndcY,      1.0
         ]);
-    }
-
-    createTileTexture(image: HTMLImageElement): WebGLTexture {
-        const texture = this.gl.createTexture()!;
-
-        // alloc via webgl2 texStorage & strip alpha
-        this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGB8, image.width, image.height);
-        this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGB, this.gl.UNSIGNED_BYTE, image);
-
-        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
-        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
-        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
-        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
-        return texture;
     }
 }

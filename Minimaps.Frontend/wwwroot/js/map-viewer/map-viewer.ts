@@ -1,9 +1,11 @@
-import { MapViewerOptions, MapViewport } from './types.js';
-import { TileLoader } from './tile-loader.js';
+import { MapViewerOptions } from './types.js';
 import { Renderer } from './renderer.js';
-import { TileManager } from './tile-manager.js';
-import { CoordinateTranslator } from './coordinate-translator.js';
 import { BuildVersion } from './build-version.js';
+import { CameraController } from './camera-controller.js';
+import { LayerManager } from './layer-manager.js';
+import { TileStreamer, TileRequest } from './tile-streamer.js';
+import { TileLayer } from './layers/tile-layer.js';
+import { isTileLayer } from './layers/layers.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -23,10 +25,20 @@ export async function MapViewerInit() {
         window.history.replaceState({}, '', newUrl);
     }
 
-    const mapId = parseInt(pathParts[1], 10);
+    const mapIdStr = pathParts[1];
+    if (!mapIdStr) {
+        console.error("missing mapId in URL");
+        return;
+    }
+    const mapId = parseInt(mapIdStr, 10);
+    
     var version : string | BuildVersion = "latest";
     if (pathParts.length > 2) {
         var versionStr = pathParts[2];
+        if (!versionStr) {
+            console.error("invalid version in URL");
+            return;
+        }
         const buildVer = BuildVersion.tryParse(versionStr);
         if (buildVer !== null) {
             console.log("Querying exact version ", buildVer);
@@ -38,18 +50,11 @@ export async function MapViewerInit() {
         }
     }
     
-    const urlParams = new URLSearchParams(window.location.search);
-    const initialViewport = CoordinateTranslator.parseViewportFromUrl(urlParams);
-    
+    const versionString = typeof version === 'string' ? version : version.encodedValueString;
     const mapViewerInstance = new MapViewer({
         container: canvas,
         mapId: mapId,
-        version: version,
-        initialViewport: initialViewport
-    });
-
-    mapViewerInstance.setViewportChangedCallback(function (viewport) {
-        // todo
+        version: versionString
     });
 
     return () => {
@@ -57,70 +62,152 @@ export async function MapViewerInit() {
     };
 }
 
+interface TileLayerOptions {
+    id?: string;
+    visible?: boolean;
+    opacity?: number;
+    zIndex?: number;
+    lodLevel?: number;
+    parentLayer?: TileLayer;
+}
+
 export class MapViewer {
-    private loaded: boolean;
     private canvas: HTMLCanvasElement;
     private renderer: Renderer;
-    private tileLoader: TileLoader;
-    private tileManager: TileManager;
-    private viewport: MapViewport;
+    private cameraController: CameraController;
     private animationId?: number;
-    private loaderPromise: Promise<TileLoader>;
-    private gl: WebGL2RenderingContext | null = null;
+    private gl: WebGL2RenderingContext;
     private lastTileRequest = 0;
     private needsRender = true;
-
-    private lastUrlUpdate = 0;
-    private readonly URL_UPDATE_THROTTLE = 50;
-    private onViewportChanged?: (viewport: MapViewport) => void;
+    private layerManager: LayerManager;
+    private tileStreamer: TileStreamer;
+    private pendingRequests: TileRequest[] = []; // Store the last frame requests
 
     private footerOverlay: HTMLElement | null = null;
     private lastDebugUpdate = 0;
-    private readonly DEBUG_UPDATE_THROTTLE = 250;
+    private readonly DEBUG_UPDATE_THROTTLE = 250; // ms
+    private currentLoadedTiles: any[] = [];
 
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
-        this.resizeCanvas();
-        this.gl = this.canvas.getContext('webgl2');
+        this.gl = this.canvas.getContext('webgl2')!;
+        if (!this.gl) throw new Error('WebGL2 not supported');
+
         this.renderer = new Renderer(this.canvas);
-        
-        const versionString = typeof options.version === 'string' 
-            ? options.version 
-            : options.version.encodedValueString;
-        this.loaderPromise = TileLoader.forVersion(options.mapId, versionString);
+        this.resizeCanvas();
+
+        this.layerManager = new LayerManager();
+        this.tileStreamer = new TileStreamer(this.gl);
+        this.tileStreamer.setTextureLoadedCallback(() => {
+            // new texture becoming available in the streamer rerenders 
+            this.updateCurrentLoadedTiles(); // todo: clean up reconciling the desired tile list with what's available
+            this.scheduleRender();
+        });
+
+        this.cameraController = new CameraController({
+            centerX: 32,
+            centerY: 32,
+            zoom: 1
+        });
+        this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
+        this.cameraController.onCameraMoved((_) => {
+            this.updateDebugOverlay();
+            this.scheduleRender();
+            this.requestVisibleTiles();
+        });
 
         this.footerOverlay = document.getElementById('map-footer-overlay');
         if (this.footerOverlay) {
             this.updateDebugOverlay();
         }
 
-        this.setupEventHandlers();
         this.startRenderLoop();
 
-        this.viewport = this.constrainViewport(options.initialViewport || {
-            centerX: 32,
-            centerY: 32,
-            altitude: 1.0
-        });
-
-        if (options.initialViewport) {
-            this.updateUrlWithViewport(true);
-        }
-
-        this.loaded = false;
-        this.loaderPromise.then(loader => {
-            this.tileLoader = loader;
-            this.tileManager = new TileManager(loader, this.renderer);
-            this.tileManager.setRenderCallback(() => this.scheduleRender());
-            this.requestVisibleTiles();
-            this.loaded = true;
-        }).catch(error => {
-            console.error("Failed to initialize TileLoader:", error);
+        // temp for now initial single layer based on url path
+        // todo: parsing backend response for current map's parent, add as layer behind w fade
+        const versionString = typeof options.version === 'string' ? options.version : options.version.encodedValueString;
+        this.addTileLayer(options.mapId, versionString, {
+            id: 'main',
+            zIndex: 0
         });
     }
 
+    public addTileLayer(mapId: number, version: string, options: Partial<TileLayerOptions> = {}): TileLayer {
+        const layer = new TileLayer({
+            id: options.id || `layer-${mapId}-${version}-${Date.now()}`,
+            mapId,
+            version,
+            visible: options.visible ?? true,
+            opacity: options.opacity ?? 1.0,
+            zIndex: options.zIndex ?? 0,
+            lodLevel: options.lodLevel ?? 0,
+            parentLayer: options.parentLayer
+        });
+
+        this.layerManager.addLayer(layer);
+
+        // keep a baseline LOD level in memory for LOD fallback
+        const loadingPromise = layer.getLoadingPromise();
+        if (loadingPromise) {
+            loadingPromise.then(() => {
+                this.initializeBaseTiles(layer);
+            }).catch(error => {
+                console.error(`Failed to load fallback tiles for layer ${layer.id}:`, error);
+            });
+        }
+
+        this.requestVisibleTiles();
+        return layer;
+    }
+
+    public removeTileLayer(layerId: string): void {
+        this.layerManager.removeLayer(layerId);
+        this.requestVisibleTiles();
+    }
+
+    private initializeBaseTiles(layer: TileLayer): void {
+        // todo: configuring, LOD5?
+        const composition = layer.getComposition();
+        if (composition) {
+            const lod5Data = composition.getLODData(5);
+            if (lod5Data) {
+                for (const [hash] of lod5Data) {
+                    this.tileStreamer.markResident(hash);
+                }
+            }
+        }
+    }
+
+    private requestVisibleTiles(): void {
+        const now = Date.now();
+        if (now - this.lastTileRequest < 100) {
+            return;
+        }
+
+        this.lastTileRequest = now;
+
+        const camera = this.cameraController.getPos();
+        const canvasSize = {
+            width: this.canvas.width,
+            height: this.canvas.height
+        };
+
+        const allRequests = [];
+        const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
+        for (const layer of tileLayers) {
+            if (layer.isLoaded()) {
+                const layerRequests = layer.calculateVisibleTiles(camera, canvasSize);
+                allRequests.push(...layerRequests);
+            }
+        }
+
+        // pass latest request data to the texture streamer
+        this.pendingRequests = allRequests;
+        this.currentLoadedTiles = this.tileStreamer.processFrameRequirements(allRequests);
+    }
+
     private updateDebugOverlay(): void {
-        if (!this.footerOverlay || !this.loaded) return;
+        if (!this.footerOverlay) return;
 
         const now = Date.now();
         if (now - this.lastDebugUpdate < this.DEBUG_UPDATE_THROTTLE) {
@@ -129,18 +216,21 @@ export class MapViewer {
         this.lastDebugUpdate = now;
 
         let debugText = ``;
-        if (this.loaded && this.tileManager) {
-            const stats = this.tileManager.getStats();
-            debugText += `Tiles: ${stats.loadedTiles}/${stats.totalTiles}`;
-            if (stats.loadingTiles > 0) {
-                debugText += ` (${stats.loadingTiles} loading)`;
-            }
-            if (stats.queuedTiles > 0) {
-                debugText += ` (${stats.queuedTiles} queued)`;
-            }
-            if (stats.failedTiles > 0) {
-                debugText += ` (${stats.failedTiles} failed)`;
-            }
+        const stats = this.tileStreamer.getStats();
+        debugText += `Textures: ${stats.cachedTextures} cached, ${stats.currentLoads} loading`;
+        if (stats.residentTiles > 0) {
+            debugText += ` (${stats.residentTiles} resident)`;
+        }
+        
+        const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
+        const loadedLayers = tileLayers.filter(layer => layer.isLoaded());
+        const errorLayers = tileLayers.filter(layer => layer.hasError());
+        
+        if (tileLayers.length > 1) {
+            debugText += ` | Layers: ${loadedLayers.length}/${tileLayers.length}`;
+        }
+        if (errorLayers.length > 0) {
+            debugText += ` (${errorLayers.length} errors)`;
         }
 
         const debugContent = this.footerOverlay.querySelector('.debug-tilemap');
@@ -151,24 +241,6 @@ export class MapViewer {
         }
     }
 
-    private updateUrlWithViewport(forceUpdate = false): void {
-        const now = Date.now();
-
-        // Excessive state pushing results in chrome ignoring them due to their abuse to hang,
-        // so we're going to limit it to once every 50ms dragging, and once on release
-        if (!forceUpdate && now - this.lastUrlUpdate < this.URL_UPDATE_THROTTLE) {
-            return; 
-        }
-
-        this.lastUrlUpdate = now;
-        
-        const url = new URL(window.location.href);
-        const urlParams = CoordinateTranslator.viewportToUrlParams(this.viewport);
-        
-        url.search = urlParams;
-        window.history.replaceState({}, '', url.toString());
-    }
-
     private resizeCanvas(): void {
         const displayWidth = this.canvas.clientWidth;
         const displayHeight = this.canvas.clientHeight;
@@ -176,52 +248,15 @@ export class MapViewer {
             this.canvas.width = displayWidth;
             this.canvas.height = displayHeight;
 
-            if (this.loaded) {
-                this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
-                this.doRender(); // immediate full render to avoid black frame flash
-            } else {
-                this.scheduleRender();
-            }
+            this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            this.doRender(); // immediate full render to avoid black frame flash
         }
-    }
-
-    private requestVisibleTiles(): void {
-        if (!this.tileLoader || !this.tileManager) return;
-
-        const now = Date.now();
-        if (now - this.lastTileRequest < 100) {
-            return;
-        }
-        this.lastTileRequest = now;
-
-        const canvasSize = {
-            width: this.canvas.width,
-            height: this.canvas.height
-        };
-
-        const visibleTiles = this.tileLoader.getVisibleTilesWithPriority(this.viewport, canvasSize);
-        
-        for (const tile of visibleTiles) {
-            this.tileManager.requestTile(tile.hash, tile.x, tile.y, tile.zoom, tile.priority);
-        }
-    }
-
-    setViewport(viewport: MapViewport): void {
-        this.viewport = { ...viewport };
-        this.onViewportChanged?.(this.viewport);
-        this.updateUrlWithViewport(true);
-        this.updateDebugOverlay();
-        this.scheduleRender();
-        this.requestVisibleTiles();
     }
 
     private startRenderLoop(): void {
         const render = () => {
-            if (this.loaded) {
-                const isDirty = this.tileManager.isDirtyAndClear();
-                if (this.needsRender || isDirty) {
-                    this.doRender();
-                }
+            if (this.needsRender) {
+                this.doRender();
             }
             this.updateDebugOverlay();
             this.animationId = requestAnimationFrame(render);
@@ -229,133 +264,37 @@ export class MapViewer {
         render();
     }
 
-    // queue a draw on the next render loop
     private scheduleRender(): void {
         this.needsRender = true;
     }
 
-    // immediate render to canvas
     private doRender(): void {
-        console.assert(this.loaded, "rendering pre-load");
-        const loadedTiles = this.tileManager.getLoadedTiles();
-        this.renderer.render(this.viewport, loadedTiles);
+        const camera = this.cameraController.getPos();
+
+        // todo: think about layer handling, keying
+        const tilesToRender = this.currentLoadedTiles.map(tile => ({
+            tileKey: `${tile.worldX}-${tile.worldY}-${tile.lodLevel}`,
+            texture: tile.texture,
+            x: tile.worldX,
+            y: tile.worldY,
+            zoom: tile.lodLevel
+        }));
+        this.renderer.render(camera, tilesToRender);
         this.needsRender = false;
     }
 
-    setViewportChangedCallback(callback: (viewport: MapViewport) => void): void {
-        this.onViewportChanged = callback;
-    }
-
-    private getCanvasMousePosition(clientX: number, clientY: number): { x: number, y: number } {
-        const rect = this.canvas.getBoundingClientRect();
-        return {
-            x: clientX - rect.left,
-            y: clientY - rect.top
-        };
-    }
-
-    private canvasPositionToWorldPosition(canvasX: number, canvasY: number): { x: number, y: number } {
-        const canvasWidth = this.canvas.width;
-        const canvasHeight = this.canvas.height;
-        
-        const offsetX = canvasX - canvasWidth / 2;
-        const offsetY = canvasY - canvasHeight / 2;
-        
-        const unitsPerPixel = this.viewport.altitude / 512;
-        const worldX = this.viewport.centerX + (offsetX * unitsPerPixel);
-        const worldY = this.viewport.centerY + (offsetY * unitsPerPixel);
-        
-        return { x: worldX, y: worldY };
-    }
-
-    private setupEventHandlers(): void {
-        let isDragging = false;
-        let lastX = 0;
-        let lastY = 0;
-
-        const resizeObserver = new ResizeObserver(() => {
-            this.resizeCanvas();
-        });
-        resizeObserver.observe(this.canvas);
-
-        this.canvas.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            lastX = e.clientX;
-            lastY = e.clientY;
-        });
-
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (isDragging) {
-                const deltaX = e.clientX - lastX;
-                const deltaY = e.clientY - lastY;
-                const unitsPerPixel = this.viewport.altitude / 512;
-                
-                const worldDeltaX = deltaX * unitsPerPixel;
-                const worldDeltaY = deltaY * unitsPerPixel;
-                
-                const constrainedViewport = this.constrainViewport({
-                    ...this.viewport,
-                    centerX: this.viewport.centerX - worldDeltaX,
-                    centerY: this.viewport.centerY - worldDeltaY
-                });
-                
-                this.viewport = constrainedViewport;
-                
-                lastX = e.clientX;
-                lastY = e.clientY;
-                
-                this.updateUrlWithViewport(false);
-                this.onViewportChanged?.(this.viewport);
-                this.scheduleRender();
-                this.requestVisibleTiles();
-            }
-        });
-
-        this.canvas.addEventListener('mouseup', () => {
-            if (isDragging) {
-                isDragging = false;
-                this.updateUrlWithViewport(true);
-            }
-        });
-
-        this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-
-            // cursor pos based scrolling
-            const mouseCanvas = this.getCanvasMousePosition(e.clientX, e.clientY);
-            const worldMousePos = this.canvasPositionToWorldPosition(mouseCanvas.x, mouseCanvas.y);
-            
-            const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-            const newAltitude = this.viewport.altitude * zoomFactor;
-            const clampedAltitude = Math.max(0.1, Math.min(50, newAltitude));
-            
-            const altitudeRatio = clampedAltitude / this.viewport.altitude;
-            const newCenterX = worldMousePos.x + (this.viewport.centerX - worldMousePos.x) * altitudeRatio;
-            const newCenterY = worldMousePos.y + (this.viewport.centerY - worldMousePos.y) * altitudeRatio;
-            
-            const constrainedViewport = this.constrainViewport({
-                centerX: newCenterX,
-                centerY: newCenterY,
-                altitude: clampedAltitude
-            });
-            
-            this.viewport = constrainedViewport;
-            
-            this.updateUrlWithViewport(true);
-            this.onViewportChanged?.(this.viewport);
-            this.updateDebugOverlay();
-            this.scheduleRender();
-            this.requestVisibleTiles();
-        });
-    }
-
-    private constrainViewport(viewport: MapViewport): MapViewport {
-        return viewport;
+    private updateCurrentLoadedTiles(): void {
+        // todo: streamer cleanup
+        if (this.pendingRequests.length > 0) {
+            const loadedTiles = this.tileStreamer.processFrameRequirements(this.pendingRequests);
+            this.currentLoadedTiles = loadedTiles;
+        }
     }
 
     dispose(): void {
         if (this.animationId) {
             cancelAnimationFrame(this.animationId);
         }
+        this.cameraController.detachCanvas();
     }
 }

@@ -280,8 +280,8 @@ public class MinimapCompositionTests
         Assert.Null(composition.GetLOD(3));
 
         Assert.Equal(2, composition.GetLOD(0)!.Tiles.Count);
-        Assert.Equal(1, composition.GetLOD(1)!.Tiles.Count);
-        Assert.Equal(1, composition.GetLOD(2)!.Tiles.Count);
+        Assert.Single(composition.GetLOD(1)!.Tiles);
+        Assert.Single(composition.GetLOD(2)!.Tiles);
     }
 
     [Fact]

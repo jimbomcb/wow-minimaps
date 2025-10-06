@@ -6,17 +6,16 @@ export interface TileCoord {
     y: number;
 }
 
-export interface MapViewport {
-    centerX: number; // X tile coord, 0-64
+export interface CameraPosition {
+    centerX: number; // X tile coord, 0-64 // todo: -32 to 32
     centerY: number; // Y tile coord, 0-64
-    altitude: number;
+    zoom: number;
 }
 
 export interface MapViewerOptions {
     container: HTMLCanvasElement;
     mapId: number;
     version: BuildVersion | string;
-    initialViewport?: MapViewport;
 }
 
 export class MinimapComposition {
@@ -73,4 +72,3 @@ export class MinimapComposition {
         return result;
     }
 }
-

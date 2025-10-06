@@ -32,6 +32,8 @@ export class BuildVersion {
             this._value = bigintValue;
         } else if (typeof value === 'number') {
             throw new Error("wrong type, either encode as BigInt or string, not number that is a float internally");
+        } else {
+            throw new Error("Invalid type for BuildVersion constructor");
         }
     }
 
@@ -67,10 +69,10 @@ export class BuildVersion {
             throw new Error(`Version string '${version}' must be in format 'expansion.major.minor.build'`);
         }
 
-        const expansion = parseInt(parts[0], 10);
-        const major = parseInt(parts[1], 10);
-        const minor = parseInt(parts[2], 10);
-        const build = parseInt(parts[3], 10);
+        const expansion = parseInt(parts[0]!, 10);
+        const major = parseInt(parts[1]!, 10);
+        const minor = parseInt(parts[2]!, 10);
+        const build = parseInt(parts[3]!, 10);
 
         if (isNaN(expansion) || isNaN(major) || isNaN(minor) || isNaN(build)) {
             throw new Error(`Invalid version string '${version}'`);

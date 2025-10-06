@@ -1,4 +1,4 @@
-﻿import { MapViewport, MinimapComposition, TileCoord } from "./types.js";
+﻿import { CameraPosition, MinimapComposition, TileCoord } from "./types.js";
 import type { MapVersionsDto } from "./backend-types.js";
 
 export class TileLoader {
@@ -17,9 +17,9 @@ export class TileLoader {
             if (vers.length === 0) {
                 throw new Error(`No versions available for map ${mapId}`);
             }
-            hash = vers[vers.length - 1];
+            hash = vers.at(-1)!;
         } else {
-            hash = mapVers.versions[version] || '';
+            hash = mapVers.versions[version] ?? '';
             if (!hash) {
                 // todo: bubbling up errors...
                 throw new Error(`Version ${version} not found for map ${mapId}`);
@@ -45,6 +45,10 @@ export class TileLoader {
         this.buildHashToCoordMap();
     }
 
+    getComposition(): MinimapComposition {
+        return this.composition;
+    }
+
     private buildHashToCoordMap(): void {
         // todo: rework when rethinking composition lookup approach
         for (const [coordString, hash] of this.composition.composition) {
@@ -58,7 +62,7 @@ export class TileLoader {
 
     getCoordinatesForHash(hash: string): TileCoord[] {
         // todo: rework when rethinking composition lookup approach
-        return this.hashToCoordMap.get(hash) || [];
+        return this.hashToCoordMap.get(hash) ?? [];
     }
 
     async loadTileByHash(hash: string): Promise<HTMLImageElement> {
@@ -96,7 +100,7 @@ export class TileLoader {
         });
     }
 
-    getVisibleTilesWithPriority(viewport: MapViewport, canvasSize: { width: number, height: number }): Array<{
+    getVisibleTilesWithPriority(position: CameraPosition, canvasSize: { width: number, height: number }): Array<{
         hash: string;
         x: number;
         y: number;
@@ -104,7 +108,7 @@ export class TileLoader {
         priority: number;
     }> {
         const visibleTiles: Array<{ hash: string; x: number; y: number; zoom: number; priority: number; }> = [];
-        const bounds = this.calculateViewportBounds(viewport, canvasSize);
+        const bounds = this.calculateViewportBounds(position, canvasSize);
         const processedCoordinates = new Set<string>();
         
         for (const [coordString, hash] of this.composition.composition) {
@@ -114,7 +118,7 @@ export class TileLoader {
                 const coordKey = `${x},${y}`;
                 if (!processedCoordinates.has(coordKey)) {
                     processedCoordinates.add(coordKey);
-                    const priority = this.calculateTilePriority(x, y, viewport, bounds);
+                    const priority = this.calculateTilePriority(x, y, position, bounds);
                     visibleTiles.push({ hash, x, y, zoom: 0, priority });
                 }
             }
@@ -123,15 +127,15 @@ export class TileLoader {
         return visibleTiles.sort((a, b) => b.priority - a.priority);
     }
 
-    private calculateViewportBounds(viewport: MapViewport, canvasSize: { width: number, height: number }) {
-        const tilesVisibleX = canvasSize.width / (512 / viewport.altitude);
-        const tilesVisibleY = canvasSize.height / (512 / viewport.altitude);
+    private calculateViewportBounds(position: CameraPosition, canvasSize: { width: number, height: number }) {
+        const tilesVisibleX = canvasSize.width / (512 / position.zoom);
+        const tilesVisibleY = canvasSize.height / (512 / position.zoom);
         const padding = Math.max(1, Math.min(3, Math.floor(tilesVisibleX / 10)));
         const bounds = {
-            minX: Math.floor(viewport.centerX - tilesVisibleX / 2) - padding,
-            maxX: Math.ceil(viewport.centerX + tilesVisibleX / 2) + padding,
-            minY: Math.floor(viewport.centerY - tilesVisibleY / 2) - padding,
-            maxY: Math.ceil(viewport.centerY + tilesVisibleY / 2) + padding
+            minX: Math.floor(position.centerX - tilesVisibleX / 2) - padding,
+            maxX: Math.ceil(position.centerX + tilesVisibleX / 2) + padding,
+            minY: Math.floor(position.centerY - tilesVisibleY / 2) - padding,
+            maxY: Math.ceil(position.centerY + tilesVisibleY / 2) + padding
         };
         return bounds;
     }
@@ -141,12 +145,12 @@ export class TileLoader {
                y >= bounds.minY && y <= bounds.maxY;
     }
 
-    private calculateTilePriority(x: number, y: number, viewport: MapViewport, bounds: any): number {
+    private calculateTilePriority(x: number, y: number, position: CameraPosition, bounds: any): number {
         // todo: what other factors... 
 
         const distanceFromCenter = Math.sqrt(
-            Math.pow(x - viewport.centerX, 2) + 
-            Math.pow(y - viewport.centerY, 2)
+            Math.pow(x - position.centerX, 2) + 
+            Math.pow(y - position.centerY, 2)
         );
         
         const maxDistance = Math.sqrt(
