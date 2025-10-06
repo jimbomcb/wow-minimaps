@@ -52,7 +52,7 @@ export class TileLoader {
     private buildHashToCoordMap(): void {
         // todo: rework when rethinking composition lookup approach
         for (const [coordString, hash] of this.composition.composition) {
-            const [x, y] = coordString.split(',').map(Number);
+            const [x, y] = coordString.split(',').map(Number) as [number, number];
             if (!this.hashToCoordMap.has(hash)) {
                 this.hashToCoordMap.set(hash, []);
             }
@@ -112,7 +112,7 @@ export class TileLoader {
         const processedCoordinates = new Set<string>();
         
         for (const [coordString, hash] of this.composition.composition) {
-            const [x, y] = coordString.split(',').map(Number);
+            const [x, y] = coordString.split(',').map(Number) as [number, number];
             
             if (this.isTileInBounds(x, y, bounds)) {
                 const coordKey = `${x},${y}`;

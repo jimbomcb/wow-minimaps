@@ -10,7 +10,7 @@ export interface TileLayerOptions {
     opacity?: number;
     zIndex?: number;
     lodLevel?: number;
-    parentLayer?: TileLayer;
+    //parentLayer?: TileLayer | undefined;
 }
 
 interface ViewportBounds {
@@ -29,7 +29,7 @@ export class TileLayer implements Layer {
     public readonly mapId: number;
     public readonly version: string;
     public readonly lodLevel: number;
-    public readonly parentLayer?: TileLayer;
+    //public readonly parentLayer: TileLayer | undefined = undefined;
 
     private composition: MinimapComposition | null = null;
     private loadingPromise: Promise<MinimapComposition> | null = null;
@@ -43,7 +43,7 @@ export class TileLayer implements Layer {
         this.opacity = options.opacity ?? 1.0;
         this.zIndex = options.zIndex ?? 0;
         this.lodLevel = options.lodLevel ?? 0;
-        this.parentLayer = options.parentLayer;
+        //this.parentLayer = options.parentLayer;
         this.loadComposition();
     }
 
@@ -147,8 +147,7 @@ export class TileLayer implements Layer {
 
         for (const [hash, coordinates] of lodData) {
             for (const coord of coordinates) {
-                const [x, y] = coord.split(',').map(Number);
-                
+                const [x, y] = coord.split(',').map(Number) as [number, number];                
                 if (x !== undefined && y !== undefined && this.isTileInBounds(x, y, lodLevel, bounds)) {
                     const priority = this.calculateTilePriority(x, y, camera);
                     requests.push({ hash, worldX: x, worldY: y, lodLevel, layerId: this.id, priority });

@@ -10,7 +10,7 @@ export class CameraController {
     private isDragging = false;
     private lastX = 0;
     private lastY = 0;
-    private onResizeCallback?: () => void;
+    private onResizeCallback: (() => void) | undefined = undefined;
 
     constructor(initPos: CameraPosition) {
         this.position = initPos;

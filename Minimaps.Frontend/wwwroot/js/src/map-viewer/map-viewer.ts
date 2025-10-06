@@ -68,7 +68,7 @@ interface TileLayerOptions {
     opacity?: number;
     zIndex?: number;
     lodLevel?: number;
-    parentLayer?: TileLayer;
+    //parentLayer?: TileLayer | undefined;
 }
 
 export class MapViewer {
@@ -141,7 +141,7 @@ export class MapViewer {
             opacity: options.opacity ?? 1.0,
             zIndex: options.zIndex ?? 0,
             lodLevel: options.lodLevel ?? 0,
-            parentLayer: options.parentLayer
+            //parentLayer: options.parentLayer ?? undefined
         });
 
         this.layerManager.addLayer(layer);
