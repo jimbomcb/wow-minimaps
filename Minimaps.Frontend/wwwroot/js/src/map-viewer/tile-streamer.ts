@@ -7,15 +7,6 @@
     priority: number;
 }
 
-export interface LoadedTile {
-    hash: string;
-    texture: WebGLTexture;
-    worldX: number;
-    worldY: number;
-    lodLevel: number;
-    layerId: string;
-}
-
 interface PendingLoad {
     hash: string;
     priority: number;
@@ -23,9 +14,8 @@ interface PendingLoad {
 
 export class TileStreamer {
     private textureCache = new Map<string, WebGLTexture>(); // hash -> texture
-    private loadingPromises = new Map<string, Promise<HTMLImageElement>>(); // hash -> loading promise
+    private loadingPromises = new Map<string, Promise<ImageBitmap>>(); // hash -> loading promise
     private tileLastUsed = new Map<string, number>(); // hash -> timestamp
-    private tileLodLevels = new Map<string, number>(); // hash -> lodLevel
     private residentHashes = new Set<string>(); // LOD5+ tiles that never get evicted
     private pendingQueue: PendingLoad[] = []; // Tiles waiting to be loaded
     private maxConcurrentLoads = 6;
@@ -41,18 +31,37 @@ export class TileStreamer {
         this.onTextureLoaded = callback;
     }
 
-    // per-frame tile request processing
-    processFrameRequirements(requests: TileRequest[]): LoadedTile[] {
-        for (const request of requests) {
+    getLoadedTile(hash: string): { texture: WebGLTexture } | null {
+        const texture = this.textureCache.get(hash);
+        return texture ? { texture } : null;
+    }
 
-            // todo: think about how I want to handle this...
-            if (!this.tileLodLevels.has(request.hash)) {
-                this.tileLodLevels.set(request.hash, request.lodLevel);
-            }
+    isLoaded(hash: string): boolean {
+        return this.textureCache.has(hash);
+    }
+
+    isLoading(hash: string): boolean {
+        return this.loadingPromises.has(hash);
+    }
+
+    // Mark a tile hash as resident (never evicted)
+    markResident(hash: string): void {
+        this.residentHashes.add(hash);
+        if (!this.isLoaded(hash) && !this.isLoading(hash)) {
+            this.requestTexture(hash, 999999); // Very high priority for resident tiles
+        }
+    }
+
+    // Unmark, can be evicted again
+    unmarkResident(hash: string): void {
+        this.residentHashes.delete(hash);
+    }
+
+    // per-frame tile request processing
+    processFrameRequirements(requests: TileRequest[]): void {
+        for (const request of requests) {
             this.requestTexture(request.hash, request.priority);
         }
-
-        return this.getAvailableTiles(requests);
     }
 
     private async requestTexture(hash: string, priority: number): Promise<void> {
@@ -85,7 +94,8 @@ export class TileStreamer {
 
         // todo: think about how I want to handle tex memory eviction, loading in ALL LOD0 
         // tiles on EK results in ~1GB of video memory, not ideal...
-        if (this.textureCache.size > 100) {
+        // For now, allow more tiles since resident tiles help with LOD fallback
+        if (this.textureCache.size > 125) {
             this.evictLRU();
         }
 
@@ -94,10 +104,12 @@ export class TileStreamer {
         this.loadingPromises.set(hash, loadPromise);
 
         try {
-            const image = await loadPromise;
-            const lodLevel = this.tileLodLevels.get(hash) ?? 0;
-            const texture = this.createTileTexture(image, lodLevel);
+            const imageBitmap = await loadPromise;
+            const texture = this.createTileTexture(imageBitmap);
             this.textureCache.set(hash, texture);
+            
+            // bitmap passed off to the GPU, can be closed now
+            imageBitmap.close();
             this.onTextureLoaded?.();
         } catch (error) {
             console.warn(`Failed to load tile ${hash}:`, error);
@@ -109,15 +121,24 @@ export class TileStreamer {
         }
     }
 
-    private async fetchTileByHash(hash: string): Promise<HTMLImageElement> {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = `/data/tile/${hash}`;
-        });
+    // Stream in the hash bitmap for texture creation
+    private async fetchTileByHash(hash: string): Promise<ImageBitmap> {
+        const response = await fetch(`/data/tile/${hash}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch tile ${hash}: ${response.statusText}`);
+        }
+        
+        try {
+            const data = await response.blob();
+            const imageBitmap = await createImageBitmap(data, {
+                imageOrientation: 'none',
+                premultiplyAlpha: 'none',
+                colorSpaceConversion: 'none'
+            });
+            return imageBitmap;
+        } catch (error) {
+            throw new Error(`Failed to create ImageBitmap for tile ${hash}: ${error}`);
+        }
     }
 
     private processQueuedLoads(): void {
@@ -133,42 +154,18 @@ export class TileStreamer {
         }
     }
 
-    private getAvailableTiles(requests: TileRequest[]): LoadedTile[] {
-        const available: LoadedTile[] = [];
-
-        for (const request of requests) {
-            const texture = this.textureCache.get(request.hash);
-            if (texture) {
-                available.push({
-                    hash: request.hash,
-                    texture,
-                    worldX: request.worldX,
-                    worldY: request.worldY,
-                    lodLevel: request.lodLevel,
-                    layerId: request.layerId
-                });
-            }
-        }
-
-        return available;
-    }
-
-    markResident(hash: string): void {
-        this.residentHashes.add(hash);
-    }
-
     private evictLRU(): void {
         const candidates = Array.from(this.tileLastUsed.entries())
             .filter(([hash]) => !this.residentHashes.has(hash))
             .sort((a, b) => a[1] - b[1]); // Oldest first
 
-        for (const [hash] of candidates.slice(0, 20)) { // 20 oldest
+        const evictCount = Math.min(5, candidates.length);
+        for (const [hash] of candidates.slice(0, evictCount)) {
             const texture = this.textureCache.get(hash);
             if (texture) {
                 this.gl.deleteTexture(texture);
                 this.textureCache.delete(hash);
                 this.tileLastUsed.delete(hash);
-                this.tileLodLevels.delete(hash);
             }
         }
     }
@@ -177,26 +174,38 @@ export class TileStreamer {
         return {
             cachedTextures: this.textureCache.size,
             currentLoads: this.currentLoads,
-            residentTiles: this.residentHashes.size
+            residentTiles: this.residentHashes.size,
+            pendingQueue: this.pendingQueue.length
         };
     }
 
-    private createTileTexture(image: HTMLImageElement, lodLevel: number): WebGLTexture {
+    private createTileTexture(imageBitmap: ImageBitmap): WebGLTexture {
         const texture = this.gl.createTexture()!;
-
         this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-        
-        // LOD0 tiles are always opaque, LOD1+ tiles may have transparency given holes from missing components
-        if (lodLevel === 0) {
-            this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGB8, image.width, image.height);
-            this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGB, this.gl.UNSIGNED_BYTE, image);
-        } else {
-            this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA8, image.width, image.height);
-            this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
-        }
 
-        // LODS already get filtered when they're downscaled, applying a second linear filter looks questionable?
-        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+        // todo: texture compression, it's gonna require some extra work given all the device specific stuff going on:
+        // https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Compressed_texture_formats
+        // specifically we need to look up the extension list that might vary per device
+
+        // todo: removed the hash to LOD map from the streamer as it shouldn't care about that...
+        // but I need to think more about how to better partition LOD0 RGB vs LOD1+ RGBA
+
+        // LOD0 tiles are always opaque, LOD1+ tiles may have transparency given holes from missing components
+        //if (lodLevel === 0) {
+        //    this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGB8, imageBitmap.width, imageBitmap.height);
+        //    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGB, this.gl.UNSIGNED_BYTE, imageBitmap);
+        //} else {
+        //    this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA8, imageBitmap.width, imageBitmap.height);
+        //    this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, imageBitmap);
+        //}
+
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA8, imageBitmap.width, imageBitmap.height);
+        this.gl.texSubImage2D(this.gl.TEXTURE_2D, 0, 0, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, imageBitmap); 
+
+        // Intentionally LINEAR for min/NEAREST for mag, this is good at least at LOD0 as it's important to retain the
+        // nearest-neighbour for seeing specific pixels, but linear reduces the pixel shimmer when zooming out.
+        // Maybe this shouldn't apply to LOD1+?
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);

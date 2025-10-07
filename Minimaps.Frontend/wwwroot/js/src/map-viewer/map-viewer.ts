@@ -4,8 +4,10 @@ import { BuildVersion } from './build-version.js';
 import { CameraController } from './camera-controller.js';
 import { LayerManager } from './layer-manager.js';
 import { TileStreamer, TileRequest } from './tile-streamer.js';
-import { TileLayer } from './layers/tile-layer.js';
-import { isTileLayer } from './layers/layers.js';
+import { TileLayerImpl, TileLayerOptions } from './layers/tile-layer.js';
+import { isTileLayer, TileLayer } from './layers/layers.js';
+import { RenderContext } from "./layers/layers.js";
+import { RenderQueue } from "./render-queue.js";
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -62,37 +64,29 @@ export async function MapViewerInit() {
     };
 }
 
-interface TileLayerOptions {
-    id?: string;
-    visible?: boolean;
-    opacity?: number;
-    zIndex?: number;
-    lodLevel?: number;
-    //parentLayer?: TileLayer | undefined;
-}
-
 export class MapViewer {
     private canvas: HTMLCanvasElement;
     private renderer: Renderer;
     private cameraController: CameraController;
     private animationId?: number;
     private gl: WebGL2RenderingContext;
-    private lastTileRequest = 0;
     private needsRender = true;
     private layerManager: LayerManager;
     private tileStreamer: TileStreamer;
-    private pendingRequests: TileRequest[] = []; // Store the last frame requests
 
     private footerOverlay: HTMLElement | null = null;
     private lastDebugUpdate = 0;
     private readonly DEBUG_UPDATE_THROTTLE = 250; // ms
-    private currentLoadedTiles: any[] = [];
+
+    private renderQueue: RenderQueue;
+    private lastFrameTime: number = 0;
 
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
         this.gl = this.canvas.getContext('webgl2')!;
         if (!this.gl) throw new Error('WebGL2 not supported');
 
+        this.renderQueue = new RenderQueue();
         this.renderer = new Renderer(this.canvas);
         this.resizeCanvas();
 
@@ -100,20 +94,18 @@ export class MapViewer {
         this.tileStreamer = new TileStreamer(this.gl);
         this.tileStreamer.setTextureLoadedCallback(() => {
             // new texture becoming available in the streamer rerenders 
-            this.updateCurrentLoadedTiles(); // todo: clean up reconciling the desired tile list with what's available
             this.scheduleRender();
         });
 
         this.cameraController = new CameraController({
             centerX: 32,
             centerY: 32,
-            zoom: 1
+            zoom: 30
         });
         this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
         this.cameraController.onCameraMoved((_) => {
             this.updateDebugOverlay();
             this.scheduleRender();
-            this.requestVisibleTiles();
         });
 
         this.footerOverlay = document.getElementById('map-footer-overlay');
@@ -128,82 +120,41 @@ export class MapViewer {
         const versionString = typeof options.version === 'string' ? options.version : options.version.encodedValueString;
         this.addTileLayer(options.mapId, versionString, {
             id: 'main',
-            zIndex: 0
+            zIndex: 0,
+            residentLodLevel: 4,
+            debugSkipLODs: []
+        });
+        this.addTileLayer(2962, versionString, {
+            id: 'test',
+            zIndex: 2,
+            residentLodLevel: 4,
+            debugSkipLODs: []
         });
     }
 
-    public addTileLayer(mapId: number, version: string, options: Partial<TileLayerOptions> = {}): TileLayer {
-        const layer = new TileLayer({
+    public addTileLayer(mapId: number, version: string, options: Omit<Partial<TileLayerOptions>, 'tileStreamer'> = {}): TileLayer {
+        const layer = new TileLayerImpl({
             id: options.id || `layer-${mapId}-${version}-${Date.now()}`,
             mapId,
             version,
+            tileStreamer: this.tileStreamer,
             visible: options.visible ?? true,
             opacity: options.opacity ?? 1.0,
             zIndex: options.zIndex ?? 0,
             lodLevel: options.lodLevel ?? 0,
-            //parentLayer: options.parentLayer ?? undefined
+            residentLodLevel: options.residentLodLevel ?? 5, // Default LOD5 as resident
+            ...(options.debugSkipLODs && { debugSkipLODs: options.debugSkipLODs }),
         });
 
         this.layerManager.addLayer(layer);
 
-        // keep a baseline LOD level in memory for LOD fallback
-        const loadingPromise = layer.getLoadingPromise();
-        if (loadingPromise) {
-            loadingPromise.then(() => {
-                this.initializeBaseTiles(layer);
-            }).catch(error => {
-                console.error(`Failed to load fallback tiles for layer ${layer.id}:`, error);
-            });
-        }
-
-        this.requestVisibleTiles();
+        this.scheduleRender();
         return layer;
     }
 
     public removeTileLayer(layerId: string): void {
         this.layerManager.removeLayer(layerId);
-        this.requestVisibleTiles();
-    }
-
-    private initializeBaseTiles(layer: TileLayer): void {
-        // todo: configuring, LOD5?
-        const composition = layer.getComposition();
-        if (composition) {
-            const lod5Data = composition.getLODData(5);
-            if (lod5Data) {
-                for (const [hash] of lod5Data) {
-                    this.tileStreamer.markResident(hash);
-                }
-            }
-        }
-    }
-
-    private requestVisibleTiles(): void {
-        const now = Date.now();
-        if (now - this.lastTileRequest < 100) {
-            return;
-        }
-
-        this.lastTileRequest = now;
-
-        const camera = this.cameraController.getPos();
-        const canvasSize = {
-            width: this.canvas.width,
-            height: this.canvas.height
-        };
-
-        const allRequests = [];
-        const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
-        for (const layer of tileLayers) {
-            if (layer.isLoaded()) {
-                const layerRequests = layer.calculateVisibleTiles(camera, canvasSize);
-                allRequests.push(...layerRequests);
-            }
-        }
-
-        // pass latest request data to the texture streamer
-        this.pendingRequests = allRequests;
-        this.currentLoadedTiles = this.tileStreamer.processFrameRequirements(allRequests);
+        this.scheduleRender();
     }
 
     private updateDebugOverlay(): void {
@@ -215,11 +166,20 @@ export class MapViewer {
         }
         this.lastDebugUpdate = now;
 
+        const camera = this.cameraController.getPos();
+        const canvasSize = {
+            width: this.canvas.width,
+            height: this.canvas.height
+        };
+
         let debugText = ``;
         const stats = this.tileStreamer.getStats();
         debugText += `Textures: ${stats.cachedTextures} cached, ${stats.currentLoads} loading`;
         if (stats.residentTiles > 0) {
             debugText += ` (${stats.residentTiles} resident)`;
+        }
+        if (stats.pendingQueue > 0) {
+            debugText += ` [${stats.pendingQueue} queued]`;
         }
         
         const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
@@ -232,6 +192,15 @@ export class MapViewer {
         if (errorLayers.length > 0) {
             debugText += ` (${errorLayers.length} errors)`;
         }
+
+        const pixelsPerTile = 512 / camera.zoom;
+        const biasedZoom = camera.zoom / this.renderer.lodBias;
+        const optimalLOD = Math.max(0, Math.floor(Math.log2(biasedZoom)));
+        debugText += ` | Zoom: ${camera.zoom.toFixed(2)}x`;
+        if (this.renderer.lodBias !== 1.0) {
+            debugText += ` (bias: ${this.renderer.lodBias}x, actual: ${biasedZoom.toFixed(2)}x)`;
+        }
+        debugText += ` (${pixelsPerTile.toFixed(0)}px/tile, LOD${Math.min(6, optimalLOD)})`;
 
         const debugContent = this.footerOverlay.querySelector('.debug-tilemap');
         if (debugContent) {
@@ -269,26 +238,30 @@ export class MapViewer {
     }
 
     private doRender(): void {
+        const currentTime = performance.now();
+        const deltaTime = currentTime - this.lastFrameTime;
+        this.lastFrameTime = currentTime;
         const camera = this.cameraController.getPos();
 
-        // todo: think about layer handling, keying
-        const tilesToRender = this.currentLoadedTiles.map(tile => ({
-            tileKey: `${tile.worldX}-${tile.worldY}-${tile.lodLevel}`,
-            texture: tile.texture,
-            x: tile.worldX,
-            y: tile.worldY,
-            zoom: tile.lodLevel
-        }));
-        this.renderer.render(camera, tilesToRender);
-        this.needsRender = false;
-    }
+        const canvasSize = {
+            width: this.canvas.width,
+            height: this.canvas.height
+        };
+        const renderContext: RenderContext = {
+            camera,
+            canvasSize,
+            deltaTime,
+            lodBias: this.renderer.lodBias // todo: move, user config?
+        };
 
-    private updateCurrentLoadedTiles(): void {
-        // todo: streamer cleanup
-        if (this.pendingRequests.length > 0) {
-            const loadedTiles = this.tileStreamer.processFrameRequirements(this.pendingRequests);
-            this.currentLoadedTiles = loadedTiles;
+        this.renderQueue.clear();
+        const visibleLayers = this.layerManager.getVisibleLayers();
+        for (const layer of visibleLayers) {
+            layer.queueRenderCommands(this.renderQueue, renderContext);
         }
+
+        this.renderer.renderQueue(camera, this.renderQueue);
+        this.needsRender = false;
     }
 
     dispose(): void {

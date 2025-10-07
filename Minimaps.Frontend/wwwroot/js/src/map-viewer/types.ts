@@ -1,11 +1,6 @@
 import { CompositionDto } from "./backend-types.js";
 import { BuildVersion } from "./build-version.js";
 
-export interface TileCoord {
-    x: number;
-    y: number;
-}
-
 export interface CameraPosition {
     centerX: number; // X tile coord, 0-64 // todo: -32 to 32
     centerY: number; // Y tile coord, 0-64
@@ -32,16 +27,16 @@ export class MinimapComposition {
             }
         }
 
-        // for now, only process LOD 0
-        if (data.lod && data.lod["0"]) {
-            const lod0 = data.lod["0"];
-            for (const [hash, coordinates] of Object.entries(lod0)) {
-                // Each hash maps to an array of coordinate strings
-                for (const coord of coordinates) {
-                    this._compositionMap.set(coord, hash);
-                }
-            }
-        }
+        // todo: build cache map
+        //if (data.lod && data.lod["0"]) {
+        //    const lod0 = data.lod["0"];
+        //    for (const [hash, coordinates] of Object.entries(lod0)) {
+        //        // Each hash maps to an array of coordinate strings
+        //        for (const coord of coordinates) {
+        //            this._compositionMap.set(coord, hash);
+        //        }
+        //    }
+        //}
     }
 
     static fromData(data: CompositionDto): MinimapComposition {
@@ -60,7 +55,8 @@ export class MinimapComposition {
         return this._missingTilesSet;
     }
 
-    // todo...
+    // todo... just a dirty copy of data for now, 
+    // but composition is immutable data and we can do better
     getLODData(lodLevel: number): ReadonlyMap<string, string[]> | null {
         const lodData = this.data.lod?.[lodLevel.toString()];
         if (!lodData) return null;

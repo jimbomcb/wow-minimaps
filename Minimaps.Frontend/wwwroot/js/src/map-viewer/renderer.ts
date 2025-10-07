@@ -1,4 +1,5 @@
-﻿import { CameraPosition } from "./types.js";
+﻿import { RenderQueue, RenderCommand, TileRenderCommand } from "./render-queue.js";
+import { CameraPosition } from "./types.js";
 
 export class Renderer {
     private gl: WebGL2RenderingContext;
@@ -14,6 +15,15 @@ export class Renderer {
     private gridPositionAttribute!: number;
     private gridTransformUniform!: WebGLUniformLocation;
     private gridColorUniform!: WebGLUniformLocation;
+    
+    /**
+     * LOD bias, multiplies zoom level before calculating LOD.
+     * Mainly tunable to tweak the trnsition levels without blowing out video memory...
+     * I'm seeing that transitioning directly at 1.0 bias is a bit more noticable,
+     * trying 10% tradeoff
+     * - Values > 1.0 delay LOD transitions, < 1.0 accelerate LOD transitions
+     */
+    public lodBias: number = 1.05;
     
     constructor(canvas: HTMLCanvasElement) {
         const gl = canvas.getContext('webgl2');
@@ -193,40 +203,53 @@ export class Renderer {
         this.gl.vertexAttribPointer(this.texCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
     }
 
-    render(position: CameraPosition, loadedTiles?: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>): void {
+    renderQueue(position: CameraPosition, renderQueue: RenderQueue): void {
         this.gl.viewport(0, 0, this.gl.canvas.width, this.gl.canvas.height);
         this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-        
+
         this.renderGrid(position);
-        
-        if (loadedTiles && loadedTiles.length > 0) {
-            this.renderLoadedTiles(loadedTiles, position);
+
+        // Batch & issue commands, todo:
+        // Do we care about preserving the order of render commands
+        // or do we just make it implicit in z indexing...
+
+        const commands = renderQueue.getCommands();
+        const commandsByType = new Map<string, RenderCommand[]>();
+
+        for (const command of commands) {
+            if (!commandsByType.has(command.type)) {
+                commandsByType.set(command.type, []);
+            }
+            commandsByType.get(command.type)!.push(command);
         }
+
+        const tileCommands = commandsByType.get('tile') as TileRenderCommand[] || [];
+        this.renderTileCommands(tileCommands, position);
+
+        // todo: text overlay
     }
 
-    private renderLoadedTiles(loadedTiles: Array<{ tileKey: string, texture: WebGLTexture, x: number, y: number, zoom: number }>, position: CameraPosition): void {
+    private renderTileCommands(commands: TileRenderCommand[], position: CameraPosition): void {
+        if (commands.length === 0) return;
+
         this.gl.useProgram(this.program);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
         this.gl.enableVertexAttribArray(this.positionAttribute);
         this.gl.vertexAttribPointer(this.positionAttribute, 2, this.gl.FLOAT, false, 16, 0);
         this.gl.enableVertexAttribArray(this.texCoordAttribute);
         this.gl.vertexAttribPointer(this.texCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
-        
-        for (const tileData of loadedTiles) {
-            const tileSize = Math.pow(2, tileData.zoom);
-            this.renderTileWithTexture(tileData.x, tileData.y, tileSize, tileData.texture, position);
-        }
-    }
 
-    private renderTileWithTexture(x: number, y: number, tileSize: number, texture: WebGLTexture, position: CameraPosition): void {
-        const transform = this.createTileTransform(x, y, tileSize, position);
-        
-        this.gl.activeTexture(this.gl.TEXTURE0);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-        this.gl.uniform1i(this.textureUniform, 0);
-        this.gl.uniform1f(this.opacityUniform, 1.0);
-        this.gl.uniformMatrix3fv(this.transformUniform, false, transform);
-        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        for (const command of commands) {
+            const tileSize = Math.pow(2, command.lodLevel);
+            const transform = this.createTileTransform(command.worldX, command.worldY, tileSize, position);
+
+            this.gl.activeTexture(this.gl.TEXTURE0);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, command.texture);
+            this.gl.uniform1i(this.textureUniform, 0);
+            this.gl.uniform1f(this.opacityUniform, command.opacity);
+            this.gl.uniformMatrix3fv(this.transformUniform, false, transform);
+            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        }
     }
 
     private createTileTransform(worldX: number, worldY: number, tileSize: number, position: CameraPosition): Float32Array {
