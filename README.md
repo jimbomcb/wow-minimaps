@@ -1,8 +1,10 @@
 # Minimap Explorer
 
-<img width="711" height="496" alt="image" src="https://github.com/user-attachments/assets/8d274a32-7102-404e-80f3-0357d90aaadf" />
-
 Automatic discovery and analysis of per-build WoW minimap data.
+
+<img width="2560" height="1271" alt="image" src="https://github.com/user-attachments/assets/30f9ec24-f997-4103-b7d5-0862816db478" />
+
+*Viewing the Atal'Aman map, the parent map gets rendered in the background for context*
 
 Not yet deployed.
 
