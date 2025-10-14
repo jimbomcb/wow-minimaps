@@ -554,6 +554,7 @@ internal class ScanMapsService :
         // Phase 1 produce: LOD0 tiles
         var tileErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var lod0Delta = tileDelta.Intersect(mapLOD0TileFDIDs.Keys);
+        //var lod0Delta = mapLOD0TileFDIDs.Keys;
         _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
         await Parallel.ForEachAsync(lod0Delta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -614,6 +615,7 @@ internal class ScanMapsService :
 
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);
+        //var lodDelta = mapLODTileComponents.Keys;
         _logger.LogInformation("Processing {Count} LOD1+ tiles", lodDelta.Count());
         await Parallel.ForEachAsync(lodDelta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -655,7 +657,11 @@ internal class ScanMapsService :
                         var targetY = (i / tilesPerSide) * lodTileStepSize;
 
                         using var sourceImage = await Image.LoadAsync<Bgra32>(sourceStream, token);
-                        using var resizedSource = sourceImage.Clone(ctx => ctx.Resize(lodTileStepSize, lodTileStepSize, KnownResamplers.RobidouxSharp)); // todo: filter?
+                        // Choosing Lanczos5, it's slow but given it's offline that's not a big deal
+                        // it seems to have the best balance of sharpness when downsampling from what I have tried.
+                        // Also seems to have the least visible jump when changing between a linear filtered LOD0 and
+                        // a downsampled LOD1 tile.
+                        using var resizedSource = sourceImage.Clone(ctx => ctx.Resize(lodTileStepSize, lodTileStepSize, KnownResamplers.Lanczos5));
                         outputImage.Mutate(ctx => ctx.DrawImage(resizedSource, new Point(targetX, targetY), 1.0f));
                     }
 
@@ -667,7 +673,6 @@ internal class ScanMapsService :
                         EntropyPasses = 10,
                         Quality = _serviceConfig.Compression.LOD.Quality
                     }, token);
-
 
                     outputStream.Position = 0;
                     await _tileStore.SaveAsync(lodTileHash, outputStream, "image/webp");
@@ -699,7 +704,7 @@ internal class ScanMapsService :
 
         // Push the minimap composition data now that all the tiles are registered
         // Batched super conservatively otherwise we often hit NpgsqlBufferWriter.ThrowOutOfMemory, probably need to up the connection string buffer?
-        const int COMPOSITION_BATCH_SIZE = 3;
+        const int COMPOSITION_BATCH_SIZE = 15;
         for (int i = 0; i < compositions.Count; i += COMPOSITION_BATCH_SIZE)
         {
             var batch = compositions.Skip(i).Take(COMPOSITION_BATCH_SIZE);
