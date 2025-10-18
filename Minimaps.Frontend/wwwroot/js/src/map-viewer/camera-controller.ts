@@ -4,6 +4,7 @@ import { CameraPosition } from './types.js';
 export class CameraController {
     private position: CameraPosition;
     private cameraMovedCallbacks: ((camera: CameraPosition) => void)[] = [];
+    private cameraReleasedCallbacks: ((camera: CameraPosition) => void)[] = [];
 
     private canvas: HTMLCanvasElement | null = null;
     private resizeObserver: ResizeObserver | null = null;
@@ -44,6 +45,10 @@ export class CameraController {
 
     onCameraMoved(callback: (camera: CameraPosition) => void): void {
         this.cameraMovedCallbacks.push(callback);
+    }
+
+    onCameraReleased(callback: (camera: CameraPosition) => void): void {
+        this.cameraReleasedCallbacks.push(callback);
     }
 
     private setupEventHandlers(): void {
@@ -97,7 +102,7 @@ export class CameraController {
     private handleMouseUp = (): void => {
         if (this.isDragging) {
             this.isDragging = false;
-            // todo: release - update url etc
+            this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
         }
     };
 
@@ -108,6 +113,7 @@ export class CameraController {
         const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
 
         this.zoomAt(zoomFactor, mousePos.x, mousePos.y);
+        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
     };
 
     private handleTouchStart = (e: TouchEvent): void => {
@@ -138,6 +144,7 @@ export class CameraController {
     private handleTouchEnd = (): void => {
         if (this.isDragging) {
             this.isDragging = false;
+            this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
         }
     };
 

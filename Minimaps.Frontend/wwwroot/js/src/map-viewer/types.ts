@@ -11,6 +11,7 @@ export interface MapViewerOptions {
     container: HTMLCanvasElement;
     mapId: number;
     version: BuildVersion | string;
+    initPosition?: Partial<CameraPosition>;
 }
 
 export class MinimapComposition {

@@ -8,6 +8,7 @@ import { TileLayerImpl, TileLayerOptions } from './layers/tile-layer.js';
 import { isTileLayer, TileLayer } from './layers/layers.js';
 import { RenderContext } from "./layers/layers.js";
 import { RenderQueue } from "./render-queue.js";
+import { CoordinateTranslator } from './coordinate-translator.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -23,10 +24,10 @@ export async function MapViewerInit() {
     }
 
     if (pathParts.length === 2) {
-        const newUrl = `/map/${pathParts[1]}/latest${window.location.search}${window.location.hash}`;
+        const newUrl = `/map/${pathParts[1]}/latest${window.location.hash}`;
         window.history.replaceState({}, '', newUrl);
     }
-
+        
     const mapIdStr = pathParts[1];
     if (!mapIdStr) {
         console.error("missing mapId in URL");
@@ -52,11 +53,31 @@ export async function MapViewerInit() {
         }
     }
     
+    // Parse from URL: /map/{mapId}/{version}/{x}/{y}/{zoom}
+    let initialCamera = {
+        centerX: 32,
+        centerY: 32,
+        zoom: 30
+    };
+
+    if (pathParts[3] !== undefined && pathParts[4] !== undefined) {
+        const wowX = parseFloat(pathParts[3]);
+        const wowY = parseFloat(pathParts[4]);
+        const internal = CoordinateTranslator.wowToInternal(wowX, wowY);
+        initialCamera.centerX = internal.x;
+        initialCamera.centerY = internal.y;
+    }
+    
+    if (pathParts[5] !== undefined) {
+        initialCamera.zoom = parseFloat(pathParts[5]);
+    }
+
     const versionString = typeof version === 'string' ? version : version.encodedValueString;
     const mapViewerInstance = new MapViewer({
         container: canvas,
         mapId: mapId,
-        version: versionString
+        version: versionString,
+        initPosition: initialCamera
     });
 
     return () => {
@@ -98,14 +119,17 @@ export class MapViewer {
         });
 
         this.cameraController = new CameraController({
-            centerX: 32,
-            centerY: 32,
-            zoom: 30
+            centerX: options.initPosition?.centerX ?? 32,
+            centerY: options.initPosition?.centerY ?? 32,
+            zoom: options.initPosition?.zoom ?? 30
         });
         this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
         this.cameraController.onCameraMoved((_) => {
             this.updateDebugOverlay();
             this.scheduleRender();
+        });
+        this.cameraController.onCameraReleased((camera) => {
+            this.updateURLWithCamera(camera);
         });
 
         this.footerOverlay = document.getElementById('map-footer-overlay');
@@ -124,12 +148,12 @@ export class MapViewer {
             residentLodLevel: 4,
             debugSkipLODs: []
         });
-        this.addTileLayer(2962, versionString, {
-            id: 'test',
-            zIndex: 2,
-            residentLodLevel: 4,
-            debugSkipLODs: []
-        });
+        //this.addTileLayer(2962, versionString, {
+        //    id: 'test',
+        //    zIndex: 2,
+        //    residentLodLevel: 4,
+        //    debugSkipLODs: []
+        //});
     }
 
     public addTileLayer(mapId: number, version: string, options: Omit<Partial<TileLayerOptions>, 'tileStreamer'> = {}): TileLayer {
@@ -262,6 +286,25 @@ export class MapViewer {
 
         this.renderer.renderQueue(camera, this.renderQueue);
         this.needsRender = false;
+    }
+
+    private updateURLWithCamera(camera: { centerX: number, centerY: number, zoom: number }): void {
+        const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
+        if (pathParts.length < 3) return; // Need at least /map/{mapId}/{version}
+        
+        const wowCoords = CoordinateTranslator.internalToWow(camera.centerX, camera.centerY);
+
+        // use a higher accuracy when we're zoomed beyond 1:1 pixel to base LOD0 texel
+        const accuracy = camera.zoom < 1.0 ? 2 : 0;
+        let xStr = wowCoords.x.toFixed(accuracy);
+        let yStr = wowCoords.y.toFixed(accuracy);
+        let zoomStr = camera.zoom.toFixed(4);
+        
+        const newPath = `/map/${pathParts[1]}/${pathParts[2]}/${xStr}/${yStr}/${zoomStr}`;
+        const url = new URL(window.location.href);
+        url.pathname = newPath;
+        url.search = '';
+        window.history.replaceState({}, '', url.toString());
     }
 
     dispose(): void {
