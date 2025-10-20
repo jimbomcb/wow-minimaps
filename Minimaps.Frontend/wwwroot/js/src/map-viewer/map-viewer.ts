@@ -123,6 +123,7 @@ export class MapViewer {
             centerY: options.initPosition?.centerY ?? 32,
             zoom: options.initPosition?.zoom ?? 30
         });
+
         this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
         this.cameraController.onCameraMoved((_) => {
             this.updateDebugOverlay();
@@ -191,10 +192,6 @@ export class MapViewer {
         this.lastDebugUpdate = now;
 
         const camera = this.cameraController.getPos();
-        const canvasSize = {
-            width: this.canvas.width,
-            height: this.canvas.height
-        };
 
         let debugText = ``;
         const stats = this.tileStreamer.getStats();
@@ -217,14 +214,9 @@ export class MapViewer {
             debugText += ` (${errorLayers.length} errors)`;
         }
 
-        const pixelsPerTile = 512 / camera.zoom;
         const biasedZoom = camera.zoom / this.renderer.lodBias;
         const optimalLOD = Math.max(0, Math.floor(Math.log2(biasedZoom)));
-        debugText += ` | Zoom: ${camera.zoom.toFixed(2)}x`;
-        if (this.renderer.lodBias !== 1.0) {
-            debugText += ` (bias: ${this.renderer.lodBias}x, actual: ${biasedZoom.toFixed(2)}x)`;
-        }
-        debugText += ` (${pixelsPerTile.toFixed(0)}px/tile, LOD${Math.min(6, optimalLOD)})`;
+        debugText += ` | LOD${Math.min(6, optimalLOD)}`;
 
         const debugContent = this.footerOverlay.querySelector('.debug-tilemap');
         if (debugContent) {
@@ -294,8 +286,17 @@ export class MapViewer {
         
         const wowCoords = CoordinateTranslator.internalToWow(camera.centerX, camera.centerY);
 
-        // use a higher accuracy when we're zoomed beyond 1:1 pixel to base LOD0 texel
-        const accuracy = camera.zoom < 1.0 ? 2 : 0;
+        let accuracy = 0;
+
+        // tuned these to try avoid pixel shifting when refreshing
+        if (camera.zoom <= .2) {
+            accuracy = 3;
+        } else if(camera.zoom <= 1.0) {
+            accuracy = 2;
+        } else  if (camera.zoom <= 1.5) {
+            accuracy = 1;
+        }
+
         let xStr = wowCoords.x.toFixed(accuracy);
         let yStr = wowCoords.y.toFixed(accuracy);
         let zoomStr = camera.zoom.toFixed(4);

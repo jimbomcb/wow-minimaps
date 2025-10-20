@@ -13,6 +13,12 @@ export class CameraController {
     private lastY = 0;
     private onResizeCallback: (() => void) | undefined = undefined;
 
+    private readonly zoomLevels = [
+        0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 
+        1.125, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 
+        12.0, 16.0, 20.0, 24.0, 32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0
+    ];
+
     constructor(initPos: CameraPosition) {
         this.position = initPos;
     }
@@ -110,9 +116,7 @@ export class CameraController {
         e.preventDefault();
 
         const mousePos = this.getCanvasMousePosition(e.clientX, e.clientY);
-        const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
-
-        this.zoomAt(zoomFactor, mousePos.x, mousePos.y);
+        this.zoomAt(e.deltaY < 0, mousePos.x, mousePos.y);
         this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
     };
 
@@ -160,24 +164,36 @@ export class CameraController {
         });
     }
 
-    private zoomAt(factor: number, mouseX?: number, mouseY?: number): void {
+    private zoomAt(zoomIn: boolean, mouseX?: number, mouseY?: number): void {
+        if (this.zoomLevels.length === 0) return;
+        
+        const currentIndex = this.zoomLevels.findIndex(level => level >= this.position.zoom);
+        let targetIndex: number;
+        if (zoomIn) {
+            targetIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+        } else {
+            targetIndex = currentIndex < this.zoomLevels.length - 1 ? currentIndex + 1 : this.zoomLevels.length - 1;
+        }
+        
+        const targetZoom = this.zoomLevels[targetIndex]!;
+        this.zoomToLevel(targetZoom, mouseX, mouseY);
+    }
+
+    private zoomToLevel(targetZoom: number, mouseX?: number, mouseY?: number): void {
         if (!this.canvas) return;
 
-        const newZoom = this.position.zoom * factor;
         if (mouseX !== undefined && mouseY !== undefined) {
-            // Mouse-centered zoom
             const worldMousePos = this.canvasToWorldPos(mouseX, mouseY);
-            const zoomRatio = newZoom / this.position.zoom;
-
+            const zoomRatio = targetZoom / this.position.zoom;
             this.setPos({
                 centerX: worldMousePos.x + (this.position.centerX - worldMousePos.x) * zoomRatio,
                 centerY: worldMousePos.y + (this.position.centerY - worldMousePos.y) * zoomRatio,
-                zoom: newZoom
+                zoom: targetZoom
             });
         } else {
             this.setPos({
                 ...this.position,
-                zoom: newZoom
+                zoom: targetZoom
             });
         }
     }
