@@ -300,6 +300,9 @@ export class MapViewer {
         let xStr = wowCoords.x.toFixed(accuracy);
         let yStr = wowCoords.y.toFixed(accuracy);
         let zoomStr = camera.zoom.toFixed(4);
+
+        // trim trailing zeros from zoom
+        zoomStr = zoomStr.replace(/\.?0+$/, '');
         
         const newPath = `/map/${pathParts[1]}/${pathParts[2]}/${xStr}/${yStr}/${zoomStr}`;
         const url = new URL(window.location.href);
