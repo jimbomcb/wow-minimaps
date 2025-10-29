@@ -34,6 +34,7 @@ export class CameraController {
             this.removeEventHandlers();
             this.canvas = null;
         }
+
         this.resizeObserver?.disconnect();
     }
 
@@ -63,13 +64,14 @@ export class CameraController {
         this.resizeObserver = new ResizeObserver(() => {
             this.onResizeCallback?.();
         });
+
         this.resizeObserver.observe(this.canvas);
 
         this.canvas.addEventListener('mousedown', this.handleMouseDown);
-        this.canvas.addEventListener('mousemove', this.handleMouseMove);
-        this.canvas.addEventListener('mouseup', this.handleMouseUp);
-        this.canvas.addEventListener('mouseleave', this.handleMouseUp);
         this.canvas.addEventListener('wheel', this.handleWheel);
+  
+        window.addEventListener('mousemove', this.handleMouseMove);
+        window.addEventListener('mouseup', this.handleMouseUp);
 
         // todo: validate
         this.canvas.addEventListener('touchstart', this.handleTouchStart);
@@ -79,14 +81,15 @@ export class CameraController {
 
     private removeEventHandlers(): void {
         if (!this.canvas) return;
+
         this.canvas.removeEventListener('mousedown', this.handleMouseDown);
-        this.canvas.removeEventListener('mousemove', this.handleMouseMove);
-        this.canvas.removeEventListener('mouseup', this.handleMouseUp);
-        this.canvas.removeEventListener('mouseleave', this.handleMouseUp);
         this.canvas.removeEventListener('wheel', this.handleWheel);
         this.canvas.removeEventListener('touchstart', this.handleTouchStart);
         this.canvas.removeEventListener('touchmove', this.handleTouchMove);
         this.canvas.removeEventListener('touchend', this.handleTouchEnd);
+        
+        window.removeEventListener('mousemove', this.handleMouseMove);
+        window.removeEventListener('mouseup', this.handleMouseUp);
     }
 
     private handleMouseDown = (e: MouseEvent): void => {
