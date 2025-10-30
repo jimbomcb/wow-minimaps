@@ -121,7 +121,7 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
     }
 
     public override bool Equals(object? obj) => Equals(obj as MinimapComposition);
-    public bool Equals(MinimapComposition? other) => other is not null && Hash == other.Hash;
+    public bool Equals(MinimapComposition? other) => other is not null && Hash.SequenceEqual(other.Hash);
     public override int GetHashCode() => Hash.GetHashCode();
     public static bool operator ==(MinimapComposition? left, MinimapComposition? right) => EqualityComparer<MinimapComposition>.Default.Equals(left, right);
     public static bool operator !=(MinimapComposition? left, MinimapComposition? right) => !(left == right);

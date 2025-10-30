@@ -5,68 +5,23 @@ namespace Minimaps.Shared.Types;
 
 /// <summary>
 /// Formats as {
-///     "_m": ["0,0", "0,1"], 
-///     "lods": {
+///     "m": ["0,0", "0,1"], 
+///     "lod": {
 ///         "0": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
 ///         "1": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
 ///     }
 /// }
 /// LOD 0 always exists, LOD1 through to LOD6 (1 tile) are optional
-/// It _could_ be packed more optimally by using the hash as the key given tiles can share hashes (water planes), 
-/// but the rich JSON support in Postgres allows for some interesting database-level map diffing with coord keys etc I want to try.
 /// </summary>
 public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 {
     public override MinimapComposition Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        throw new NotImplementedException("Not currently used");
-#if false
         if (reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException("Expected StartObject token");
 
-        var composition = new Dictionary<TileCoord, ContentHash>();
-        var missing = new HashSet<TileCoord>();
-
-        void ReadMissingTiles(HashSet<TileCoord> missing, ref Utf8JsonReader reader)
-        {
-            reader.Read();
-            if (reader.TokenType != JsonTokenType.StartArray)
-                throw new JsonException("Expected StartArray token for missing tiles");
-
-            while (reader.Read())
-            {
-                if (reader.TokenType == JsonTokenType.EndArray)
-                    break;
-                if (reader.TokenType != JsonTokenType.String)
-                    throw new JsonException("Expected string token for missing tile coordinate");
-                var missingCoordString = reader.GetString();
-                if (string.IsNullOrEmpty(missingCoordString))
-                    throw new JsonException("Missing tile coordinate string cannot be null or empty");
-                var parts = missingCoordString.Split(',');
-                if (parts.Length != 2)
-                    throw new JsonException($"Invalid coordinate format '{missingCoordString}'. Expected 'x,y'");
-                if (!int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y))
-                    throw new JsonException($"Invalid coordinate values in '{missingCoordString}'");
-                missing.Add(new(x, y));
-            }
-        }
-
-        void ReadTile(string coords, Dictionary<TileCoord, ContentHash> composition, ref Utf8JsonReader reader)
-        {
-            var parts = coords.Split(',');
-            if (parts.Length != 2)
-                throw new JsonException($"Invalid coordinate format '{coords}'. Expected 'x,y'");
-            if (!int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y))
-                throw new JsonException($"Invalid coordinate values in '{coords}'");
-            reader.Read();
-            if (reader.TokenType != JsonTokenType.String)
-                throw new JsonException("Expected string token for hash value");
-            var hash = reader.GetString();
-            if (string.IsNullOrEmpty(hash))
-                throw new JsonException("Hash value cannot be null or empty");
-
-            composition[new(x, y)] = new ContentHash(hash);
-        }
+        var lods = new Dictionary<int, CompositionLOD>();
+        var missingTiles = new HashSet<TileCoord>();
 
         while (reader.Read())
         {
@@ -74,20 +29,135 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
                 break;
 
             if (reader.TokenType != JsonTokenType.PropertyName)
-                throw new JsonException("Expected PropertyName");
+                throw new JsonException("Expected PropertyName token");
+
+            var propertyName = reader.GetString();
+
+            if (propertyName == "m")
+            {
+                ReadMissingTiles(ref reader, missingTiles);
+            }
+            else if (propertyName == "lod")
+            {
+                ReadLODs(ref reader, lods);
+            }
+            else
+            {
+                // Skip unknown properties
+                reader.Read();
+                reader.Skip();
+            }
+        }
+
+        return new MinimapComposition(lods, missingTiles);
+    }
+
+    private static void ReadMissingTiles(ref Utf8JsonReader reader, HashSet<TileCoord> missingTiles)
+    {
+        reader.Read();
+        if (reader.TokenType != JsonTokenType.StartArray)
+            throw new JsonException("Expected StartArray token for missing tiles");
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndArray)
+                break;
+
+            if (reader.TokenType != JsonTokenType.String)
+                throw new JsonException("Expected string token for missing tile coordinate");
 
             var coordString = reader.GetString();
             if (string.IsNullOrEmpty(coordString))
-                throw new JsonException("Coordinate string cannot be null or empty");
+                throw new JsonException("Missing tile coordinate string cannot be null or empty");
 
-            if (coordString == "_m")
-                ReadMissingTiles(missing, ref reader);
-            else
-                ReadTile(coordString, composition, ref reader);
+            var parts = coordString.Split(',');
+            if (parts.Length != 2)
+                throw new JsonException($"Invalid coordinate format '{coordString}'. Expected 'x,y'");
+
+            if (!int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y))
+                throw new JsonException($"Invalid coordinate values in '{coordString}'");
+
+            missingTiles.Add(new TileCoord(x, y));
+        }
+    }
+
+    private static void ReadLODs(ref Utf8JsonReader reader, Dictionary<int, CompositionLOD> lods)
+    {
+        reader.Read();
+        if (reader.TokenType != JsonTokenType.StartObject)
+            throw new JsonException("Expected StartObject token for LODs");
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+                break;
+
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                throw new JsonException("Expected PropertyName token for LOD level");
+
+            var lodLevelString = reader.GetString();
+            if (string.IsNullOrEmpty(lodLevelString))
+                throw new JsonException("LOD level string cannot be null or empty");
+
+            if (!int.TryParse(lodLevelString, out var lodLevel))
+                throw new JsonException($"Invalid LOD level '{lodLevelString}'");
+
+            var tiles = ReadLODTiles(ref reader);
+            lods[lodLevel] = new CompositionLOD(tiles);
+        }
+    }
+
+    private static Dictionary<TileCoord, ContentHash> ReadLODTiles(ref Utf8JsonReader reader)
+    {
+        reader.Read();
+        if (reader.TokenType != JsonTokenType.StartObject)
+            throw new JsonException("Expected StartObject token for LOD tiles");
+
+        var tiles = new Dictionary<TileCoord, ContentHash>();
+
+        while (reader.Read())
+        {
+            if (reader.TokenType == JsonTokenType.EndObject)
+                break;
+
+            if (reader.TokenType != JsonTokenType.PropertyName)
+                throw new JsonException("Expected PropertyName token for hash");
+
+            var hashString = reader.GetString();
+            if (string.IsNullOrEmpty(hashString))
+                throw new JsonException("Hash string cannot be null or empty");
+
+            var hash = new ContentHash(hashString);
+
+            // Read array of coordinates
+            reader.Read();
+            if (reader.TokenType != JsonTokenType.StartArray)
+                throw new JsonException("Expected StartArray token for coordinates");
+
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndArray)
+                    break;
+
+                if (reader.TokenType != JsonTokenType.String)
+                    throw new JsonException("Expected string token for coordinate");
+
+                var coordString = reader.GetString();
+                if (string.IsNullOrEmpty(coordString))
+                    throw new JsonException("Coordinate string cannot be null or empty");
+
+                var parts = coordString.Split(',');
+                if (parts.Length != 2)
+                    throw new JsonException($"Invalid coordinate format '{coordString}'. Expected 'x,y'");
+
+                if (!int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var y))
+                    throw new JsonException($"Invalid coordinate values in '{coordString}'");
+
+                tiles[new TileCoord(x, y)] = hash;
+            }
         }
 
-        return new MinimapComposition(composition, missing);
-#endif
+        return tiles;
     }
 
     public override void Write(Utf8JsonWriter writer, MinimapComposition value, JsonSerializerOptions options)
