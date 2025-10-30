@@ -26,12 +26,14 @@ internal class ProductDiscoveryService : IntervalBackgroundService
     private readonly Configuration _serviceConfig = new();
     private readonly ILogger<ProductDiscoveryService> _logger;
     private readonly NpgsqlDataSource _dataSource;
+    private readonly WebhookEventLog _eventLog;
 
     public ProductDiscoveryService(ILogger<ProductDiscoveryService> logger, WebhookEventLog eventLog, IConfiguration configuration, NpgsqlDataSource dataSource) :
         base(logger, TimeSpan.FromSeconds(30), eventLog)
     {
         _logger = logger;
         _dataSource = dataSource;
+        _eventLog = eventLog;
         configuration.GetSection("Services:ProductDiscovery").Bind(_serviceConfig);
     }
 
@@ -40,14 +42,14 @@ internal class ProductDiscoveryService : IntervalBackgroundService
         var ribbitClient = new RibbitClient(RibbitRegion.US);
         var tactSummary = await ribbitClient.SummaryAsync();
         var tactSequence = tactSummary.SequenceId; // todo: early-out if no change in sequence since last tick (also per-product?)
-        _logger.LogInformation("Processing summary seq #{SequenceId} with {ProductCount} products", tactSequence, tactSummary.Data.Count);
+        _logger.LogTrace("Processing summary seq #{SequenceId} with {ProductCount} products", tactSequence, tactSummary.Data.Count);
 
         var productList = tactSummary.Data
             .Where(x => x.Flags != "cdn") // TODO: As far as I can tell there's nothing meaningful to be gained from tracking this here?
             .Where(prod => _serviceConfig.Products.Any(wildcard => FileSystemName.MatchesSimpleExpression(wildcard, prod.Name)))
             .ToList();
 
-        _logger.LogInformation("Found {ProductCount} matching products to query", productList.Count);
+        _logger.LogTrace("Found {ProductCount} matching products to query", productList.Count);
         if (productList.Count == 0)
             return;
 
@@ -74,7 +76,7 @@ internal class ProductDiscoveryService : IntervalBackgroundService
             .SelectMany(vers => vers)
             .ToList();
 
-        _logger.LogInformation("Discovered {FoundTotal} unique versions across {Products} products",
+        _logger.LogTrace("Discovered {FoundTotal} unique versions across {Products} products",
             foundVersions.DistinctBy(x => x.Version.VersionsName).Count(),
             productList.Count);
 
@@ -83,132 +85,167 @@ internal class ProductDiscoveryService : IntervalBackgroundService
 
         try
         {
-            // we're given the raw list of per-region products like the TACT version server typically provides,
-            // group up the regions for each unique build_product entry
             var excludedProducts = _serviceConfig.ProductExclude.Keys.ToHashSet();
-            var products = foundVersions.Where(x => !excludedProducts.Contains(x.Product)).GroupBy(
-                k => (Version: BuildVersion.Parse(k.Version.VersionsName), k.Product, k.Version.BuildConfig, k.Version.CDNConfig, k.Version.ProductConfig),
-                v => v.Version.Region)
+            var productGroups = foundVersions
+                .Where(x => !excludedProducts.Contains(x.Product))
+                .GroupBy(
+                    k => (Version: BuildVersion.Parse(k.Version.VersionsName), k.Product),
+                    v => (BuildConfig: v.Version.BuildConfig, CDN: v.Version.CDNConfig, ProductConfig: v.Version.ProductConfig, Region: v.Version.Region))
                 .ToList();
 
             await using var conn = await _dataSource.OpenConnectionAsync(cancellationToken);
             await using var transaction = await conn.BeginTransactionAsync(cancellationToken);
-            await using var initBatch = new NpgsqlBatch(conn, transaction);
 
-            // Two groups of batch commands: 
-            // - Get the list of known regions for the products we see
-            // - Upsert build products for regions it wasn't seen in before
-            foreach (var group in products)
+            // Ensure all builds exist and log new ones
+            await using (var buildBatch = new NpgsqlBatch(conn, transaction))
             {
-                var command = initBatch.CreateBatchCommand();
-                command.CommandText = "SELECT config_regions FROM products WHERE build_id = @Version AND product = @Product" +
-                    " AND config_build = @ConfigBuild AND config_cdn = @ConfigCdn AND config_product = @ConfigProduct FOR UPDATE;";
-                command.Parameters.AddWithValue("Version", group.Key.Version);
-                command.Parameters.AddWithValue("Product", group.Key.Product);
-                command.Parameters.AddWithValue("ConfigBuild", group.Key.BuildConfig);
-                command.Parameters.AddWithValue("ConfigCdn", group.Key.CDNConfig);
-                command.Parameters.AddWithValue("ConfigProduct", group.Key.ProductConfig);
-                initBatch.BatchCommands.Add(command);
-            }
-
-            foreach (var version in products.Select(x => x.Key.Version).Distinct())
-            {
-                var command = initBatch.CreateBatchCommand();
-                command.CommandText = "INSERT INTO builds (id, version) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING;";
-                command.Parameters.AddWithValue(version);
-                command.Parameters.AddWithValue((string)version);
-                initBatch.BatchCommands.Add(command);
-            }
-
-            var existingRegionsMap = new Dictionary<(BuildVersion Version, string Product, string BuildConfig, string CDNConfig, string ProductConfig), string[]>();
-            using (var reader = await initBatch.ExecuteReaderAsync(cancellationToken))
-            {
-                foreach (var group in products)
+                foreach (var version in productGroups.Select(x => x.Key.Version).Distinct())
                 {
-                    string[] existingRegions = [];
+                    var command = buildBatch.CreateBatchCommand();
+                    command.CommandText = "INSERT INTO builds (id, version) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING RETURNING id;";
+                    command.Parameters.AddWithValue(version);
+                    command.Parameters.AddWithValue((string)version);
+                    buildBatch.BatchCommands.Add(command);
+                }
+
+                await using var reader = await buildBatch.ExecuteReaderAsync(cancellationToken);
+                foreach (var version in productGroups.Select(x => x.Key.Version).Distinct())
+                {
                     if (await reader.ReadAsync(cancellationToken))
                     {
-                        var regionsValue = reader.GetValue(0);
-                        if (regionsValue != DBNull.Value)
-                            existingRegions = (string[])regionsValue;
+                        var insertedId = reader.GetInt64(0);
+                        _eventLog.Post($"@everyone New build discovered: {version}");
                     }
-
-                    existingRegionsMap[group.Key] = existingRegions;
                     await reader.NextResultAsync(cancellationToken);
                 }
             }
 
-            var regionDeltaProducts = products.Where(x =>
-            {
-                var existingRegions = existingRegionsMap[x.Key];
-                return x.Any(r => !existingRegions.Contains(r));
-            }).ToList();
-            if (regionDeltaProducts.Count == 0)
-            {
-                _logger.LogTrace("No changes found between current DB state and new published products");
-                await transaction.CommitAsync(cancellationToken);
-                return;
-            }
+            var processedProducts = new Dictionary<Int64, (BuildVersion Version, string Product)>();
 
-            // batch upsert the products and get the new product IDs
-            var newProducts = new Dictionary<Int64, BuildVersion>();
-            await using (var insertBatch = new NpgsqlBatch(conn, transaction))
+            foreach (var group in productGroups)
             {
-                foreach (var group in regionDeltaProducts)
+                var productKey = group.Key;
+                var sources = group.ToList();
+
+                Int64 productId;
+                string[] existingRegions = [];
+
+                await using (var checkCmd = new NpgsqlCommand(
+                    "SELECT id, config_regions FROM products " +
+                    "WHERE build_id = @Version AND product = @Product " +
+                    "FOR UPDATE", conn, transaction))
                 {
-                    // TODO: Trigger webhooks, notifications of a new build
-                    var product = group.Key;
-                    var existingRegions = existingRegionsMap[product];
-                    var newRegions = group.Except(existingRegions);
+                    checkCmd.Parameters.AddWithValue("Version", productKey.Version);
+                    checkCmd.Parameters.AddWithValue("Product", productKey.Product);
 
-                    _logger.LogInformation("{Prod} {Version} - Adding regions: {Regions}", product.Product, product.Version,
-                        string.Join(", ", group.Except(existingRegions)));
-
-                    var command = insertBatch.CreateBatchCommand();
-                    command.CommandText = "INSERT INTO products (build_id, product, config_build, config_cdn, config_product, config_regions) " +
-                        "VALUES (@Version, @Product, @ConfigBuild, @ConfigCdn, @ConfigProduct, @ConfigRegions) " +
-                        "ON CONFLICT (build_id, product, config_build, config_cdn, config_product) " +
-                        "DO UPDATE SET config_regions = EXCLUDED.config_regions " +
-                        "RETURNING id;";
-                    command.Parameters.AddWithValue("Version", product.Version);
-                    command.Parameters.AddWithValue("Product", product.Product);
-                    command.Parameters.AddWithValue("ConfigBuild", product.BuildConfig);
-                    command.Parameters.AddWithValue("ConfigCdn", product.CDNConfig);
-                    command.Parameters.AddWithValue("ConfigProduct", product.ProductConfig);
-                    command.Parameters.AddWithValue("ConfigRegions", existingRegions.Concat(newRegions).ToArray());
-                    insertBatch.BatchCommands.Add(command);
+                    await using var reader = await checkCmd.ExecuteReaderAsync(cancellationToken);
+                    if (await reader.ReadAsync(cancellationToken))
+                    {
+                        productId = reader.GetInt64(0);
+                        var regionsValue = reader.GetValue(1);
+                        if (regionsValue != DBNull.Value)
+                            existingRegions = (string[])regionsValue;
+                    }
+                    else
+                    {
+                        productId = -1; // will be created
+                    }
                 }
 
-                using var insertBatchReader = await insertBatch.ExecuteReaderAsync(cancellationToken);
-                foreach (var group in regionDeltaProducts)
-                {
-                    if (!await insertBatchReader.ReadAsync(cancellationToken))
-                        throw new Exception("Failed to insert or get product ID for " + group.Key.Version);
+                // Collect all regions from all sources
+                var allRegions = sources.Select(x => x.Region).Distinct().ToHashSet();
+                var newRegions = allRegions.Except(existingRegions).ToArray();
 
-                    newProducts.Add(insertBatchReader.GetInt64(0), group.Key.Version);
-                    await insertBatchReader.NextResultAsync(cancellationToken);
+                bool isNewProduct = productId == -1;
+                bool hasNewRegions = newRegions.Length > 0;
+
+                if (isNewProduct || hasNewRegions)
+                {
+                    var combinedRegions = existingRegions.Concat(newRegions).ToArray();
+
+                    if (isNewProduct)
+                    {
+                        await using var insertCmd = new NpgsqlCommand(
+                            "INSERT INTO products (build_id, product, config_regions) " +
+                            "VALUES (@Version, @Product, @ConfigRegions) " +
+                            "RETURNING id", conn, transaction);
+                        insertCmd.Parameters.AddWithValue("Version", productKey.Version);
+                        insertCmd.Parameters.AddWithValue("Product", productKey.Product);
+                        insertCmd.Parameters.AddWithValue("ConfigRegions", combinedRegions);
+
+                        productId = (Int64)(await insertCmd.ExecuteScalarAsync(cancellationToken))!;
+
+                        _logger.LogInformation("{Prod} {Version} - New product discovered with regions: {Regions}",
+                            productKey.Product, productKey.Version, string.Join(", ", combinedRegions));
+                        _eventLog.Post($"@everyone New product discovered: {productKey.Product} {productKey.Version} with regions: {string.Join(", ", combinedRegions)}");
+                    }
+                    else
+                    {
+                        // Update existing product with new regions
+                        await using var updateCmd = new NpgsqlCommand(
+                            "UPDATE products SET config_regions = @ConfigRegions WHERE id = @ProductId", conn, transaction);
+                        updateCmd.Parameters.AddWithValue("ProductId", productId);
+                        updateCmd.Parameters.AddWithValue("ConfigRegions", combinedRegions);
+                        await updateCmd.ExecuteNonQueryAsync(cancellationToken);
+
+                        _logger.LogInformation("{Prod} {Version} - Adding regions: {Regions}",
+                            productKey.Product, productKey.Version, string.Join(", ", newRegions));
+                        _eventLog.Post($"@everyone {productKey.Product} {productKey.Version} - Adding regions: {string.Join(", ", newRegions)}");
+                    }
+
+                    processedProducts[productId] = (productKey.Version, productKey.Product);
+                }
+
+                // Track sources
+                var uniqueSources = sources
+                    .GroupBy(s => (s.BuildConfig, s.CDN, s.ProductConfig))
+                    .ToList();
+                foreach (var sourceGroup in uniqueSources)
+                {
+                    var config = sourceGroup.Key;
+                    var sourceRegions = sourceGroup.Select(s => s.Region).Distinct().ToArray();
+
+                    // Upsert the source
+                    await using var sourceCmd = new NpgsqlCommand(
+                        "INSERT INTO product_sources (product_id, config_build, config_cdn, config_product, config_regions, first_seen) " +
+                        "VALUES (@ProductId, @ConfigBuild, @ConfigCdn, @ConfigProduct, @ConfigRegions, timezone('utc', now())) " +
+                        "ON CONFLICT (product_id, config_build, config_cdn, config_product) " +
+                        "DO UPDATE SET config_regions = EXCLUDED.config_regions", conn, transaction);
+                    sourceCmd.Parameters.AddWithValue("ProductId", productId);
+                    sourceCmd.Parameters.AddWithValue("ConfigBuild", config.BuildConfig);
+                    sourceCmd.Parameters.AddWithValue("ConfigCdn", config.CDN);
+                    sourceCmd.Parameters.AddWithValue("ConfigProduct", config.ProductConfig);
+                    sourceCmd.Parameters.AddWithValue("ConfigRegions", sourceRegions);
+                    await sourceCmd.ExecuteNonQueryAsync(cancellationToken);
                 }
             }
 
-            // queue product scans for anything new
-
-            await using (var insertBatch = new NpgsqlBatch(conn, transaction))
+            // Queue product scans for new products
+            if (processedProducts.Count > 0)
             {
-                foreach (var prodId in newProducts)
+                await using var scanBatch = new NpgsqlBatch(conn, transaction);
+                foreach (var prodId in processedProducts.Keys)
                 {
-                    var command = insertBatch.CreateBatchCommand();
-                    command.CommandText = "INSERT INTO product_scans (product_id) VALUES ($1) ON CONFLICT (product_id) DO NOTHING;";
-                    command.Parameters.AddWithValue(prodId.Key);
-                    insertBatch.BatchCommands.Add(command);
+                    var command = scanBatch.CreateBatchCommand();
+                    command.CommandText = "INSERT INTO product_scans (product_id) VALUES ($1) ON CONFLICT (product_id) DO NOTHING RETURNING product_id;";
+                    command.Parameters.AddWithValue(prodId);
+                    scanBatch.BatchCommands.Add(command);
                 }
 
-                var newScans = await insertBatch.ExecuteNonQueryAsync(cancellationToken);
+                await using var reader = await scanBatch.ExecuteReaderAsync(cancellationToken);
+                foreach (var (prodId, (version, product)) in processedProducts)
+                {
+                    if (await reader.ReadAsync(cancellationToken))
+                    {
+                        var insertedProdId = reader.GetInt64(0);
+                        _eventLog.Post($"@everyone  New scan queued: {product} {version}");
+                    }
+                    await reader.NextResultAsync(cancellationToken);
+                }
             }
-
-            cancellationToken.ThrowIfCancellationRequested();
 
             await transaction.CommitAsync(cancellationToken);
-            _logger.LogInformation("Successfully processed {ProductCount} product versions", foundVersions.Count);
+            _logger.LogTrace("Successfully processed {ProductCount} product versions", foundVersions.Count);
         }
         catch (Exception ex)
         {

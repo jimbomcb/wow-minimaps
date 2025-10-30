@@ -6,9 +6,10 @@ namespace Minimaps.Database.Tables;
 #pragma warning disable IDE1006, CS8618
 
 /// <summary>
-/// Represents releases of build "product" versions, a new build pushed to retail, ptr, beta, etc.
+/// Represents a build version (1.2.3.456) for a product name/branch (retail, ptr, beta, etc.)
 /// Primary key: id
-/// Unique: (build_id, product, config_build, config_cdn, config_product)
+/// Unique: (build_id, product)
+/// The associated product sources are in the product_sources table.
 /// </summary>
 public class Product
 {
@@ -21,15 +22,12 @@ public class Product
     /// </summary>
     public string product { get; set; }
 
-    public string config_build { get; set; }
-    public string config_cdn { get; set; }
-    public string config_product { get; set; }
     /// <summary>
-    /// set of string region tags in which this cdn/build/product was seen
+    /// set of string region tags which this product has sources in
     /// </summary>
     public string[] config_regions { get; set; }
 
-    public Instant found { get; set; }
+    public Instant first_seen { get; set; }
 }
 
 #pragma warning restore IDE1006, CS8618

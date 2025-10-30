@@ -64,12 +64,14 @@ internal class ScanMapsService :
     private readonly ResourceLocService _resourceLocator;
     private readonly IDBDProvider _dbdProvider;
     private readonly IListFileService _listfile;
+    private readonly WebhookEventLog _eventLog;
 
     public ScanMapsService(ILogger<ScanMapsService> logger, WebhookEventLog eventLog, IConfiguration configuration,
         NpgsqlDataSource dataSource, ITileStore tileStore, BlizztrackFSService blizztrack, ResourceLocService resourceLocator, IListFileService listfile) :
         base(logger, TimeSpan.FromSeconds(2), eventLog)
     {
         _logger = logger;
+        _eventLog = eventLog;
         configuration.GetSection("Services:ScanMaps").Bind(_serviceConfig);
         _data = dataSource;
         _tileStore = tileStore;
@@ -159,12 +161,26 @@ internal class ScanMapsService :
             successCmd.CommandText += "WHERE product_id = @ProductId;";
 
             await successCmd.ExecuteNonQueryAsync(cancellationToken);
+
+            var successMessage = scanResult.Status switch
+            {
+                ProcessStatus.FullDecrypt => $"Scan completed: {scanResult.Product.Product} {build} - Fully decrypted ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedMaps => $"Scan completed: {scanResult.Product.Product} {build} - Partially decrypted ({scanResult.EncryptedMaps!.Count()} maps encrypted) ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedMapDB => $"Scan completed: {scanResult.Product.Product} {build} - Map DB encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedBuild => $"Scan completed: {scanResult.Product.Product} {build} - Build encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
+                _ => $"Scan completed: {scanResult.Product.Product} {build} ({timer.ElapsedMilliseconds}ms)"
+            };
+            _logger.LogInformation(successMessage);
+            _eventLog.Post(successMessage);
         }
         catch (BuildProcessException ex) when (_serviceConfig.CatchScanExceptions)
         {
             timer.Stop();
 
             _logger.LogWarning(ex, "Caught BuildProcessException: {Msg}", ex.Message);
+
+            var exceptionFirstLine = ex.InnerException?.Message.Split('\n').FirstOrDefault() ?? ex.Message.Split('\n').FirstOrDefault() ?? "Unknown error";
+            _eventLog.Post($"Scan failed: {ex.Product.Product} {ex.Version} - {exceptionFirstLine}");
 
             await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
                 "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
@@ -179,6 +195,9 @@ internal class ScanMapsService :
             timer.Stop();
 
             _logger.LogError(ex, "Caught unhandled exception");
+
+            var exceptionFirstLine = ex.Message.Split('\n').FirstOrDefault() ?? "Unknown error";
+            _eventLog.Post($"Scan failed: {build} - {exceptionFirstLine}");
 
             await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
                 "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
@@ -198,50 +217,57 @@ internal class ScanMapsService :
         // todo cancellation pass
         _logger.BeginScope($"ScanBuild:{productId}:{version}");
         _logger.LogInformation("Scanning maps for build {BuildVer} product {ProductId}", version, productId);
+        _eventLog.Post($"Scan started: {productId}:{version}");
 
         // todo: transition to DB stored tact keys + service that updates & requeues prior encrypted builds/maps when discovering new keys
         var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
         foreach (var entry in await tactKeysTask)
             TACTKeyService.SetKey(entry.KeyName, entry.KeyValue);
 
-        // Find the list of BuildProducts for this specific build, we might need to try a few I think?
-        // Some builds are region specific.
+        // Attempt the list of sources in time descending order
         await using var conn = await _data.OpenConnectionAsync();
-        var products = new List<BuildProductDto>();
-        await using (var scanProds = new NpgsqlCommand("SELECT product, config_build, config_cdn, config_product, config_regions " +
-            "FROM products WHERE id = $1;", conn))
+        var sources = new List<BuildProductDto>();
+        await using (var scanProds = new NpgsqlCommand(
+        "SELECT ps.config_build, ps.config_cdn, ps.config_product, ps.config_regions, p.product FROM product_sources ps " +
+        "JOIN products p ON p.id = ps.product_id " +
+        "WHERE ps.product_id = $1 " +
+        "ORDER BY ps.first_seen DESC", conn))
         {
             scanProds.Parameters.AddWithValue(productId);
             await using var reader = await scanProds.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
-                var regions = reader.GetFieldValue<string[]>(4);
-                products.Add(new(productId, reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), [.. regions]));
+                var regions = reader.GetFieldValue<string[]>(3);
+                sources.Add(new(productId, reader.GetString(4), reader.GetString(0), reader.GetString(1), reader.GetString(2), [.. regions]));
             }
         }
 
-        // shouldn't happen, build scans are created at the same time as build product discovery
-        if (products.Count == 0)
-            throw new Exception("No product configurations found for build");
+        // shouldn't happen, product sources are created at the same time as products
+        if (sources.Count == 0)
+            throw new Exception("No product sources found for product");
 
-        _logger.LogDebug("Found {Count} product configurations", products.Count);
+        _logger.LogDebug("Found {Count} sources for this product", sources.Count);
 
-        // TODO: Figure out if we can get multiple build configurations for a single specific build
-        // I know that a single version can be seen on multiple branches (ie the PTR then main), but 
-        // as far as I can tell there's no point in trying another configuration if we 've already found one that works
-
-        // TODO: We definitely should attempt other products if we get an encrypted build or map database, 
-        // maybe a build is encrypted on a vendor branch and we would want to try again if it's on an unencrypted branch
-
-        var firstConfig = products.First();
-        try
+        // Try each source until one works
+        Exception? lastException = null;
+        foreach (var source in sources)
         {
-            return await ProcessBuild(conn, version, firstConfig, cancellation);
+            try
+            {
+                _logger.LogInformation("Trying source: build={Build} cdn={Cdn} product={Product}",
+                    source.BuildConfig[..8], source.CDNConfig[..8], source.ProductConfig[..8]);
+                return await ProcessBuild(conn, version, source, cancellation);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed with source build={Build} cdn={Cdn}, will try next",
+                   source.BuildConfig[..8], source.CDNConfig[..8]);
+                lastException = ex;
+            }
         }
-        catch (Exception ex)
-        {
-            throw new BuildProcessException(version, firstConfig, ex);
-        }
+
+        // All sources failed
+        throw new BuildProcessException(version, sources.First(), lastException ?? new Exception("All sources failed"));
     }
 
     private enum ProcessStatus
@@ -497,7 +523,8 @@ internal class ScanMapsService :
         }
 
         _logger.LogInformation("{DeltaCount}/{TotalCount} ({Pct}%) tiles to upload", tileDelta.Count, tileHashSet.Count, ((float)tileDelta.Count / tileHashSet.Count) * 100.0f);
-
+        _eventLog.Post($"{product.Product} {version} - Tiles: {tileDelta.Count}/{tileHashSet.Count} ({((float)tileDelta.Count / tileHashSet.Count) * 100.0f:F1}%) new");
+        
         // Configure channels:
         // - Global consumer consumes hash + metadata of geenrated tiles, batch registers with DB
         // - Phase 1 Producer: Produce all LOD0 tiles
