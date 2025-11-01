@@ -1,4 +1,5 @@
 ﻿using Minimaps.Shared;
+using Minimaps.Shared.Types;
 
 namespace Minimaps.Database.Tables;
 
@@ -26,8 +27,15 @@ internal class Map
     /// </summary>
     public string name { get; set; }
 
-    public BuildVersion first_version { get; set; }
-    public BuildVersion last_version { get; set; }
+    /// <summary>
+    /// The first build version this map was seen in the game data
+    /// </summary>
+    public BuildVersion first_seen { get; set; }
+
+    /// <summary>
+    /// The last build version this map was seen in the game data
+    /// </summary>
+    public BuildVersion last_seen { get; set; }
 
     /// <summary>
     /// JSONB object consisting of: 
@@ -44,6 +52,16 @@ internal class Map
     /// Virtual generated column from coalesce(json->CosmeticParentMapID, json->ParentMapID, null)
     /// </summary>
     public int? parent { get; set; }
+
+    /// <summary>
+    /// The first build that a minimap was found for this map
+    /// </summary>
+    public BuildVersion? first_minimap { get; set; }
+
+    /// <summary>
+    /// The last build that a minimap was found for this map
+    /// </summary>
+    public BuildVersion? last_minimap { get; set; }
 }
 
 #pragma warning restore IDE1006, CS8618

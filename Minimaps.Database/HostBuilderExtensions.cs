@@ -11,6 +11,7 @@ public static class HostBuilderExtensions
     {
         builder.AddNpgsqlDataSource("minimaps-database", configureDataSourceBuilder: x =>
         {
+            x.EnableDynamicJson();
             x.UseNodaTime();
             x.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory());
             x.MapEnum<ScanState>();
