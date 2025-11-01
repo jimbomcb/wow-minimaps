@@ -24,6 +24,18 @@ public class BuildVersionConverter : JsonConverter<BuildVersion>
                 throw new JsonException($"Invalid BuildVersion string: {versionIntString}");
             }
         }
+        else if (reader.TokenType == JsonTokenType.PropertyName)
+        {
+            var versionIntString = reader.GetString();
+            if (long.TryParse(versionIntString, out var versionLong))
+            {
+                return new BuildVersion(versionLong);
+            }
+            else
+            {
+                throw new JsonException($"Invalid BuildVersion string: {versionIntString}");
+            }
+        }
 
         throw new JsonException($"Unexpected type for BuildVersion: {reader.TokenType}");
     }

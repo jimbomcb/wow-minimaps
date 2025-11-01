@@ -326,15 +326,15 @@ internal class ScanMapsService :
 
                 // upsert the map entry, merge maps, prioritize data of the most recent build we see
                 var command = mapBatch.CreateBatchCommand();
-                command.CommandText = "INSERT INTO maps (id, json, directory, name, name_history, first_version, last_version) " +
+                command.CommandText = "INSERT INTO maps (id, json, directory, name, name_history, first_seen, last_seen) " +
                     "VALUES (@Id, @Json::JSONB, @Directory, @Name, jsonb_build_object(@BuildVersion::TEXT, @Name), @BuildVersion, @BuildVersion) " +
                     "ON CONFLICT (id) DO UPDATE SET " +
-                        "json = CASE WHEN EXCLUDED.last_version > maps.last_version THEN EXCLUDED.json ELSE maps.json END, " +
-                        "directory = CASE WHEN EXCLUDED.last_version > maps.last_version THEN EXCLUDED.directory ELSE maps.directory END, " +
-                        "name = CASE WHEN EXCLUDED.last_version > maps.last_version THEN EXCLUDED.name ELSE maps.name END, " +
+                        "json = CASE WHEN EXCLUDED.last_seen > maps.last_seen THEN EXCLUDED.json ELSE maps.json END, " +
+                        "directory = CASE WHEN EXCLUDED.last_seen > maps.last_seen THEN EXCLUDED.directory ELSE maps.directory END, " +
+                        "name = CASE WHEN EXCLUDED.last_seen > maps.last_seen THEN EXCLUDED.name ELSE maps.name END, " +
                         "name_history = maps.name_history || EXCLUDED.name_history, " +
-                        "first_version = LEAST(maps.first_version, EXCLUDED.first_version), " +
-                        "last_version = GREATEST(maps.last_version, EXCLUDED.last_version)";
+                        "first_seen = LEAST(maps.first_seen, EXCLUDED.first_seen), " +
+                        "last_seen = GREATEST(maps.last_seen, EXCLUDED.last_seen)";
                 command.Parameters.AddWithValue("Id", row.ID);
                 command.Parameters.AddWithValue("Json", mapJson);
                 command.Parameters.AddWithValue("Directory", mapDir);
@@ -778,6 +778,15 @@ internal class ScanMapsService :
                 cmdBuildMaps.Parameters.AddWithValue((short)comp.Value.GetLOD(0)!.Tiles.Count);
                 cmdBuildMaps.Parameters.AddWithValue(comp.Value.Hash);
                 npgsqlBatch.BatchCommands.Add(cmdBuildMaps);
+
+                var cmdUpdateMapBuildIds = npgsqlBatch.CreateBatchCommand();
+                cmdUpdateMapBuildIds.CommandText = "UPDATE maps SET " +
+                    "first_minimap = LEAST(COALESCE(first_minimap, @BuildId), @BuildId), " +
+                    "last_minimap = GREATEST(COALESCE(last_minimap, @BuildId), @BuildId) " +
+                    "WHERE id = @MapId";
+                cmdUpdateMapBuildIds.Parameters.AddWithValue("BuildId", version);
+                cmdUpdateMapBuildIds.Parameters.AddWithValue("MapId", comp.Key);
+                npgsqlBatch.BatchCommands.Add(cmdUpdateMapBuildIds);
             }
 
             await npgsqlBatch.ExecuteNonQueryAsync(cancellation);
