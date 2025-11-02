@@ -58,7 +58,7 @@ export class TileLayerImpl implements TileLayer {
         const residentData = this.composition.getLODData(this.residentLodLevel);
         if (residentData) {
             for (const [hash] of residentData) {
-                this.tileStreamer.markResident(hash);
+                this.tileStreamer.markResident(hash, this.residentLodLevel);
                 this.residentHashes.push(hash);
             }
             console.log(`Marked ${residentData.size} resident for layer ${this.id} LOD${this.residentLodLevel}`);

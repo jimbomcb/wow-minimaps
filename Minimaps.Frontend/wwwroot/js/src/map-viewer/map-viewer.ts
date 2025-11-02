@@ -343,6 +343,7 @@ export class MapViewer {
         if (stats.pendingQueue > 0) {
             debugText += ` [${stats.pendingQueue} queued]`;
         }
+        debugText += ` | GPU ${stats.gpuMemoryMB}MB`;
 
         const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
         const loadedLayers = tileLayers.filter(layer => layer.isLoaded());
