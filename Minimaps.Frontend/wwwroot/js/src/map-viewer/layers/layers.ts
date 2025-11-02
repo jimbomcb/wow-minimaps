@@ -18,6 +18,7 @@ export interface BaseLayer {
     zIndex: number;
 
     queueRenderCommands(renderQueue: RenderQueue, context: RenderContext): void;
+    dispose?(): void;
 }
 
 // owns a composition of map tiles at specific LODs, pushes tile render commands based on desired LODing
@@ -34,6 +35,7 @@ export interface TileLayer extends BaseLayer {
     getComposition(): MinimapComposition | null;
     getLoadingPromise(): Promise<MinimapComposition> | null;
     calculateVisibleTiles(camera: any, canvasSize: { width: number, height: number }): any[];
+    dispose(): void;
 }
 
 export type Layer = TileLayer;

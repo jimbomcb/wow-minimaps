@@ -1,4 +1,5 @@
 import { CameraPosition } from './types.js';
+import type { CompositionBounds } from './types.js';
 
 // Manage camera control, input layer
 export class CameraController {
@@ -48,6 +49,44 @@ export class CameraController {
 
         this.position = newPos;
         this.cameraMovedCallbacks.forEach(callback => callback(this.position));
+    }
+
+    fitToBounds(bounds: CompositionBounds, marginPercent: number = 10): void {
+        if (!this.canvas) {
+            // no canvas? 
+            return;
+        }
+
+        const marginFactor = 1 + (marginPercent / 100) * 2;
+        const paddedWidth = bounds.width * marginFactor;
+        const paddedHeight = bounds.height * marginFactor;
+
+        const zoomX = (paddedWidth * 512) / this.canvas.width;
+        const zoomY = (paddedHeight * 512) / this.canvas.height;
+        const targetZoom = Math.max(zoomX, zoomY);
+
+        this.setPos({
+            centerX: bounds.centerX,
+            centerY: bounds.centerY,
+            zoom: this.findNearestZoomLevel(targetZoom)
+        });
+
+        // Trigger camera released to update URL
+        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+    }
+
+    // Find the nearest snapped zoom level (preferring to zoom out slightly if needed)
+    private findNearestZoomLevel(targetZoom: number): number {
+        if (this.zoomLevels.length === 0) return targetZoom;
+
+        const fitIndex = this.zoomLevels.findIndex(level => level >= targetZoom);
+      
+        if (fitIndex === -1) {
+            // larger than all predefined levels, use the largest
+            return this.zoomLevels[this.zoomLevels.length - 1]!
+        }
+
+        return this.zoomLevels[fitIndex]!
     }
 
     onCameraMoved(callback: (camera: CameraPosition) => void): void {

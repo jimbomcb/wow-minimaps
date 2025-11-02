@@ -1,4 +1,4 @@
-﻿import { RenderQueue, RenderCommand, TileRenderCommand } from "./render-queue.js";
+import { RenderQueue, RenderCommand, TileRenderCommand } from "./render-queue.js";
 import { CameraPosition } from "./types.js";
 
 export class Renderer {
@@ -12,6 +12,7 @@ export class Renderer {
     private transformUniform!: WebGLUniformLocation;
     private textureUniform!: WebGLUniformLocation;
     private opacityUniform!: WebGLUniformLocation;
+    private monochromeUniform!: WebGLUniformLocation;
     private gridPositionAttribute!: number;
     private gridTransformUniform!: WebGLUniformLocation;
     private gridColorUniform!: WebGLUniformLocation;
@@ -68,12 +69,20 @@ export class Renderer {
             in vec2 v_texCoord;
             uniform sampler2D u_texture;
             uniform float u_opacity;
-            
+            uniform bool u_monochrome;
+      
             out vec4 fragColor;
             
             void main() {
                 vec4 texColor = texture(u_texture, v_texCoord);
-                fragColor = vec4(texColor.rgb, texColor.a * u_opacity);
+       
+                if (u_monochrome) {
+                    // luminance calc
+                    float gray = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
+                    fragColor = vec4(vec3(gray), texColor.a * u_opacity);
+                } else {
+                    fragColor = vec4(texColor.rgb, texColor.a * u_opacity);
+                }
             }
         `);
 
@@ -186,6 +195,7 @@ export class Renderer {
         this.transformUniform = this.gl.getUniformLocation(this.program, 'u_transform')!;
         this.textureUniform = this.gl.getUniformLocation(this.program, 'u_texture')!;
         this.opacityUniform = this.gl.getUniformLocation(this.program, 'u_opacity')!;
+        this.monochromeUniform = this.gl.getUniformLocation(this.program, 'u_monochrome')!;
 
         this.gridPositionAttribute = this.gl.getAttribLocation(this.gridProgram, 'a_position');
         this.gridTransformUniform = this.gl.getUniformLocation(this.gridProgram, 'u_transform')!;
@@ -247,6 +257,7 @@ export class Renderer {
             this.gl.bindTexture(this.gl.TEXTURE_2D, command.texture);
             this.gl.uniform1i(this.textureUniform, 0);
             this.gl.uniform1f(this.opacityUniform, command.opacity);
+            this.gl.uniform1i(this.monochromeUniform, command.monochrome ? 1 : 0);
             this.gl.uniformMatrix3fv(this.transformUniform, false, transform);
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }

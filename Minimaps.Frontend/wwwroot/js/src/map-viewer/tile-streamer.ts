@@ -1,4 +1,4 @@
-﻿export interface TileRequest {
+export interface TileRequest {
     hash: string;
     worldX: number;
     worldY: number;
@@ -95,7 +95,7 @@ export class TileStreamer {
         // todo: think about how I want to handle tex memory eviction, loading in ALL LOD0 
         // tiles on EK results in ~1GB of video memory, not ideal...
         // For now, allow more tiles since resident tiles help with LOD fallback
-        if (this.textureCache.size > 125) {
+        if (this.textureCache.size > 250) {
             this.evictLRU();
         }
 

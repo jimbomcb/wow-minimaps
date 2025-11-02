@@ -6,15 +6,15 @@ import { TileStreamer } from '../tile-streamer.js';
 
 export interface TileLayerOptions {
     id: string;
-    mapId: number;
-    version: string;
-    tileStreamer: TileStreamer; // Now required
+    composition: MinimapComposition;
+    tileStreamer: TileStreamer;
     visible?: boolean;
     opacity?: number;
     zIndex?: number;
     lodLevel?: number;
     residentLodLevel?: number;
     debugSkipLODs?: number[];
+    monochrome?: boolean;
 }
 
 interface ViewportBounds {
@@ -30,92 +30,55 @@ export class TileLayerImpl implements TileLayer {
     public visible: boolean;
     public opacity: number;
     public zIndex: number;
-    public readonly mapId: number;
-    public readonly version: string;
     public readonly lodLevel: number;
     public readonly residentLodLevel: number;
+    public monochrome: boolean;
     private readonly debugSkipLODs: Set<number>;
     private readonly tileStreamer: TileStreamer;
+    private residentHashes: string[] = []; // Track hashes we marked as resident
 
-    public composition: MinimapComposition | null = null;
-    private loadingPromise: Promise<MinimapComposition> | null = null;
-    private loadError: Error | null = null;
+    public composition: MinimapComposition;
 
     constructor(options: TileLayerOptions) {
         this.id = options.id;
-        this.mapId = options.mapId;
-        this.version = options.version;
+        this.composition = options.composition;
         this.tileStreamer = options.tileStreamer;
         this.visible = options.visible ?? true;
         this.opacity = options.opacity ?? 1.0;
         this.zIndex = options.zIndex ?? 0;
         this.lodLevel = options.lodLevel ?? 0;
         this.residentLodLevel = options.residentLodLevel ?? 5;
+        this.monochrome = options.monochrome ?? false;
         this.debugSkipLODs = new Set(options.debugSkipLODs ?? []);
         
-        this.loadComposition();
-    }
-
-    private async loadComposition(): Promise<void> {
-        if (this.loadingPromise) return;
-
-        this.loadingPromise = this.fetchComposition();
-        try {
-            this.composition = await this.loadingPromise;
-            this.loadError = null;
-            this.markResidentTiles();
-        } catch (error) {
-            this.loadError = error as Error;
-            console.error(`Failed to load composition for layer ${this.id}:`, error);
-        }
+        this.markResidentTiles();
     }
 
     private markResidentTiles(): void {
-        if (!this.composition) return;
-
         const residentData = this.composition.getLODData(this.residentLodLevel);
         if (residentData) {
             for (const [hash] of residentData) {
                 this.tileStreamer.markResident(hash);
+                this.residentHashes.push(hash);
             }
             console.log(`Marked ${residentData.size} resident for layer ${this.id} LOD${this.residentLodLevel}`);
         }
     }
 
-    private async fetchComposition(): Promise<MinimapComposition> {
-        // Fetch map versions
-        const mapVersReq = await fetch(`/data/versions/${this.mapId}`);
-        if (!mapVersReq.ok) {
-            throw new Error(`Failed to load map versions: ${mapVersReq.statusText}`);
+    /**
+     * Dispose of this layer and clean up resources
+     */
+    dispose(): void {
+        // Unmark all resident tiles we marked
+        for (const hash of this.residentHashes) {
+            this.tileStreamer.unmarkResident(hash);
         }
-
-        const mapVers = await mapVersReq.json() as { versions: Record<string, string> };
-
-        let hash: string;
-        if (this.version === 'latest') {
-            const vers = Object.values(mapVers.versions);
-            if (vers.length === 0) {
-                throw new Error(`No versions available for map ${this.mapId}`);
-            }
-            hash = vers.at(-1)!;
-        } else {
-            hash = mapVers.versions[this.version] ?? '';
-            if (!hash) {
-                throw new Error(`Version ${this.version} not found for map ${this.mapId}`);
-            }
-        }
-
-        // Fetch composition
-        const response = await fetch(`/data/comp/${hash}`);
-        if (!response.ok) {
-            throw new Error(`Failed to load map composition: ${response.statusText}`);
-        }
-
-        return MinimapComposition.fromData(await response.json());
+        console.log(`Unmarked ${this.residentHashes.length} resident tiles for layer ${this.id}`);
+        this.residentHashes = [];
     }
 
     queueRenderCommands(renderQueue: RenderQueue, context: RenderContext): void {
-        if (!this.visible || !this.isLoaded()) {
+        if (!this.visible) {
             return;
         }
 
@@ -157,7 +120,8 @@ export class TileLayerImpl implements TileLayer {
                     texture: loadedTile.texture,
                     worldX: tileRequest.worldX,
                     worldY: tileRequest.worldY,
-                    lodLevel: tileRequest.lodLevel
+                    lodLevel: tileRequest.lodLevel,
+                    monochrome: this.monochrome
                 };
                 renderQueue.push(command);
             }
@@ -173,19 +137,19 @@ export class TileLayerImpl implements TileLayer {
     }
 
     public isLoaded(): boolean {
-        return this.composition !== null;
+        return true; // Always loaded since composition is provided, todo: cleanup...
     }
     
     public isLoading(): boolean {
-        return this.loadingPromise !== null && this.composition === null && this.loadError === null;
+        return false; // Always loaded since composition is provided, todo: cleanup...
     }
 
     public hasError(): boolean {
-        return this.loadError !== null;
+        return false; // Always loaded since composition is provided, todo: cleanup...
     }
 
     public getError(): Error | null {
-        return this.loadError;
+        return null; // Always loaded since composition is provided, todo: cleanup...
     }
 
     public getComposition(): MinimapComposition | null {
@@ -193,7 +157,7 @@ export class TileLayerImpl implements TileLayer {
     }
 
     public getLoadingPromise(): Promise<MinimapComposition> | null {
-        return this.loadingPromise;
+        return null; // Always loaded since composition is provided, todo: cleanup...
     }
 
     // Calculate what tiles this layer needs for the current frame (kept for compatibility)

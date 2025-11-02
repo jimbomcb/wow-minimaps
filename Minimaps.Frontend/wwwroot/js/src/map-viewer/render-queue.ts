@@ -1,4 +1,4 @@
-﻿import { RenderContext } from "./layers/layers.js";
+import { RenderContext } from "./layers/layers.js";
 
 export interface BaseRenderCommand {
     readonly layerId: string;
@@ -12,6 +12,7 @@ export interface TileRenderCommand extends BaseRenderCommand {
     readonly worldX: number;
     readonly worldY: number;
     readonly lodLevel: number;
+    readonly monochrome: boolean;
 }
 
 export type RenderCommand = TileRenderCommand; // | other types... text render? lines?
