@@ -24,6 +24,7 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
 
     public byte[] Hash => _hash ??= CalculateHash();
     public IReadOnlyCollection<TileCoord> MissingTiles => _missingTiles;
+    public int TileSize { get; set; } = -1;
 
     public MinimapComposition(IReadOnlyDictionary<int, CompositionLOD> lods, IReadOnlySet<TileCoord> missingTiles)
     {

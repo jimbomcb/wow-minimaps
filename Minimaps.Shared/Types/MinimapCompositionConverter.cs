@@ -22,6 +22,7 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 
         var lods = new Dictionary<int, CompositionLOD>();
         var missingTiles = new HashSet<TileCoord>();
+        var tileSize = -1;
 
         while (reader.Read())
         {
@@ -41,6 +42,13 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             {
                 ReadLODs(ref reader, lods);
             }
+            else if (propertyName == "tileSize")
+            {
+                reader.Read();
+                if (reader.TokenType != JsonTokenType.Number)
+                    throw new JsonException("Expected Number token for tileSize");
+                tileSize = reader.GetInt32();
+            }
             else
             {
                 // Skip unknown properties
@@ -49,7 +57,10 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             }
         }
 
-        return new MinimapComposition(lods, missingTiles);
+        return new MinimapComposition(lods, missingTiles)
+        {
+            TileSize = tileSize
+        };
     }
 
     private static void ReadMissingTiles(ref Utf8JsonReader reader, HashSet<TileCoord> missingTiles)
@@ -174,6 +185,11 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
                 writer.WriteStringValue(missingCoordString);
             }
             writer.WriteEndArray();
+        }
+
+        if (value.TileSize >= 0)
+        {
+            writer.WriteNumber("tileSize", value.TileSize);
         }
 
         writer.WritePropertyName("lod");

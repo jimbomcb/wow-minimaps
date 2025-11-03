@@ -29,17 +29,18 @@ export class MinimapComposition {
     private _compositionMap: Map<string, string>;
     private _missingTilesSet: Set<string>;
     private _bounds: CompositionBounds | null = null;
+    private _tileSize: number;
 
     constructor(private data: CompositionDto) {
         this._compositionMap = new Map<string, string>();
         this._missingTilesSet = new Set<string>();
+        this._tileSize = data.tileSize ?? 512;
 
         if (data.m && Array.isArray(data.m)) {
             for (const coord of data.m) {
                 this._missingTilesSet.add(coord);
             }
         }
-
         // Calculate bounds from all tiles (including missing tiles)
         this._bounds = this.calculateBounds();
 
@@ -64,6 +65,10 @@ export class MinimapComposition {
 
     get bounds(): CompositionBounds | null {
         return this._bounds;
+    }
+
+    get tileSize(): number {
+        return this._tileSize;
     }
 
     private calculateBounds(): CompositionBounds | null {

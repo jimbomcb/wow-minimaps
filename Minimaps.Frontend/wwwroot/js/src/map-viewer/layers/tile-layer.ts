@@ -85,7 +85,7 @@ export class TileLayerImpl implements TileLayer {
         // Basic initial approach, just render ALL loaded tiles that are visible, in LOD order
         // Higher LOD tiles render first, then progressively smaller higher resolution tiles render on top
         
-        const optimalLOD = this.calculateOptimalLOD(context.camera.zoom, context.lodBias);
+        const optimalLOD = this.calculateOptimalLOD(context.camera.zoom, this.composition.tileSize, context.lodBias);
         const bounds = this.calculateViewportBounds(context.camera, context.canvasSize);
         const allTileRequests: TileRequest[] = [];
 
@@ -164,7 +164,7 @@ export class TileLayerImpl implements TileLayer {
     calculateVisibleTiles(camera: CameraPosition, canvasSize: { width: number, height: number }, lodBias?: number): TileRequest[] {
         if (!this.visible || !this.composition) return [];
 
-        const optimalLOD = this.calculateOptimalLOD(camera.zoom, lodBias);
+        const optimalLOD = this.calculateOptimalLOD(camera.zoom, this.composition.tileSize, lodBias);
         const bounds = this.calculateViewportBounds(camera, canvasSize);
         return this.calculateVisibleTilesAtLOD(optimalLOD, bounds, camera);
     }
@@ -206,13 +206,21 @@ export class TileLayerImpl implements TileLayer {
         return requests;
     }
 
-    private calculateOptimalLOD(zoom: number, lodBias: number = 1.0): number {
+    private calculateOptimalLOD(zoom: number, tileSize: number, lodBias: number = 1.0): number {
         // Built around the fact that we're dealing with a 64x64 grid, and we render the tiles around a 512x512 tilesize
         // With zoom = 1.0, displayed tile size is 1:1 texels to pixels, so LOD0 is optimal
         // 2.0 = 2:1 LOD0 texels per pixel so use LOD1 at 2x2 (2^1 = 2)
         // 4.0 = 4:1 LOD0 texels per pixel so use LOD2 at 4x4 (2^2 = 4)
         // Up to LOD6 where it covers 2^6 = 64 tiles, the 1x1 tile LOD covers the whole map
-        const biasedZoom = zoom / lodBias;
+        //
+        // Adjust for non-512 tile sizes:
+        // 256px tiles at zoom=1.0 are effectively showing 0.5:1 texel:pixel ratio
+        // So we multiply zoom by (tileSize/512) to get the effective zoom for LOD calculation,
+        // this means 256px tiles will select a higher LOD to compensate for lower source resolution
+        const sizeMultiplier = tileSize / 512.0;
+        const effectiveZoom = zoom * sizeMultiplier;
+   
+        const biasedZoom = effectiveZoom / lodBias;
         const baseLOD = Math.max(0, Math.floor(Math.log2(biasedZoom)));
         return Math.max(this.lodLevel, Math.min(6, baseLOD));
     }

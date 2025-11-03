@@ -729,6 +729,34 @@ internal class ScanMapsService :
         if (tileErrors.Count > 0)
             throw new AggregateException("Tile processing failed", tileErrors.Select(x => x.Value));
 
+        // We've gathered the size of existing tiles and stored the size of any new tiles, build the tile size comp data
+        foreach (var comp in compositions.Values)
+        {
+            // For now i'll use the tile size mode of LOD0, either this or MAX(size) I think...
+            var sizeCounts = new Dictionary<int, int>();
+            var lod0 = comp.GetLOD(0);
+
+            if (lod0.Tiles.Count == 0)
+            {
+                comp.TileSize = -1;
+                continue;
+            }
+
+            foreach (var tileHash in lod0!.Tiles.Values)
+            {
+                if (!tileHashSize.TryGetValue(tileHash, out int tileSize))
+                    throw new Exception("Tile hash missing size info during composition finalization");
+                if (!sizeCounts.ContainsKey(tileSize))
+                    sizeCounts[tileSize] = 0;
+                sizeCounts[tileSize]++;
+            }
+
+            if (sizeCounts.Count > 1)
+                _logger.LogWarning("Mixed size map: " + string.Join(", ", sizeCounts.Select(x => $"{x.Key}px={x.Value}")));
+
+            comp.TileSize = sizeCounts.OrderByDescending(x => x.Value).First().Key;
+        }
+
         // Push the minimap composition data now that all the tiles are registered
         // Batched super conservatively otherwise we often hit NpgsqlBufferWriter.ThrowOutOfMemory, probably need to up the connection string buffer?
         const int COMPOSITION_BATCH_SIZE = 15;
@@ -741,7 +769,7 @@ internal class ScanMapsService :
             {
                 var cmdAddComp = npgsqlBatch.CreateBatchCommand();
                 cmdAddComp.CommandText = "INSERT INTO compositions (hash, composition, tiles, extents) VALUES ($1, $2::JSONB, $3, $4::JSONB) " +
-                    "ON CONFLICT (hash) DO NOTHING";
+                    "ON CONFLICT (hash) DO UPDATE SET composition = EXCLUDED.composition, tiles = EXCLUDED.tiles, extents = EXCLUDED.extents";
                 cmdAddComp.Parameters.AddWithValue(comp.Value.Hash);
                 cmdAddComp.Parameters.AddWithValue(JsonSerializer.Serialize(comp.Value));
                 cmdAddComp.Parameters.AddWithValue(comp.Value.GetLOD(0)!.Tiles.Count);

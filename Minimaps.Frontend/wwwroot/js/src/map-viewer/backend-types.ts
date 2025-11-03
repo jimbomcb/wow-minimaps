@@ -1,5 +1,6 @@
 export interface CompositionDto {
     m?: string[];
+    tileSize?: number;
 
     lod: {
         [lodLevel: string]: {
