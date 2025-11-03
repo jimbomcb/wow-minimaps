@@ -33,6 +33,9 @@ export class TileStreamer {
     private onTextureLoaded?: () => void;
     private totalGpuBytes: number = 0;
 
+    // todo: scale based on canvas size
+    private gpuMemoryBudget: number = 200 * 1024 * 1024;
+
     constructor(gl: WebGL2RenderingContext) {
         this.gl = gl;
     }
@@ -102,11 +105,9 @@ export class TileStreamer {
             return;
         }
 
-        // todo: think about how I want to handle tex memory eviction, loading in ALL LOD0 
-        // tiles on EK results in ~1GB of video memory, not ideal...
-        // For now, allow more tiles since resident tiles help with LOD fallback
-        if (this.textureCache.size > 250) {
-            this.evictLRU();
+        if (this.totalGpuBytes > this.gpuMemoryBudget) {
+            // Trigger eviction to 90%
+            this.evictToBudget(this.gpuMemoryBudget * 0.9);
         }
 
         this.currentLoads++;
@@ -165,21 +166,32 @@ export class TileStreamer {
         }
     }
 
-    private evictLRU(): void {
+    private evictToBudget(targetMemory : number): void {
+        if (this.totalGpuBytes <= targetMemory) {
+            return;
+        }
+
+        // Get all non-resident tiles sorted by last used time (oldest first)
         const candidates = Array.from(this.tileLastUsed.entries())
             .filter(([hash]) => !this.residentHashes.has(hash))
-            .sort((a, b) => a[1] - b[1]); // Oldest first
+            .sort((a, b) => a[1] - b[1]);
 
-        // todo: instead of fixed target count, calculate an expected memory budget we want to maintain
-        // this is similar to something they do/did with Google Maps based on screen size
-        const evictCount = Math.min(25, candidates.length);
-        for (const [hash] of candidates.slice(0, evictCount)) {
+        let bytesFreed = 0;
+        let tilesEvicted = 0;
+
+        for (const [hash] of candidates) {
+            if (this.totalGpuBytes - bytesFreed <= targetMemory) {
+                break;
+            }
+
             const info = this.textureCache.get(hash);
             if (info) {
                 this.gl.deleteTexture(info.texture);
                 this.totalGpuBytes -= info.memoryBytes;
+                bytesFreed += info.memoryBytes;
                 this.textureCache.delete(hash);
                 this.tileLastUsed.delete(hash);
+                tilesEvicted++;
             }
         }
     }
@@ -195,7 +207,7 @@ export class TileStreamer {
                 bytesPerPixel = 3;
                 break;
             default:
-                console.warn(`Unknown texture formatZ ${format}, assuming 4bpp`);
+                console.warn(`Unknown texture format ${format}, assuming 4bpp`);
         }
 
         return pixelCount * bytesPerPixel;
@@ -208,7 +220,9 @@ export class TileStreamer {
             residentTiles: this.residentHashes.size,
             pendingQueue: this.pendingQueue.length,
             gpuMemoryBytes: this.totalGpuBytes,
-            gpuMemoryMB: (this.totalGpuBytes / (1024 * 1024)).toFixed(2)
+            gpuMemoryMB: (this.totalGpuBytes / (1024 * 1024)).toFixed(2),
+            gpuMemoryBudgetMB: (this.gpuMemoryBudget / (1024 * 1024)).toFixed(0),
+            gpuMemoryUsagePercent: ((this.totalGpuBytes / this.gpuMemoryBudget) * 100).toFixed(1)
         };
     }
 
