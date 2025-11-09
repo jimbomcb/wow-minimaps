@@ -28,9 +28,9 @@ public class ADTReader : IDisposable
         _reader = new BinaryReader(_baseStream);
     }
 
-    public List<(MCNKChunkInfo Info, uint ChunkSize)> ReadAllMCNKChunksWithSizes()
+    public List<MCNKChunkInfo> ReadMCNKChunks()
     {
-        var chunks = new List<(MCNKChunkInfo, uint)>();
+        var chunks = new List<MCNKChunkInfo>();
         _baseStream.Position = 0;
 
         while (_baseStream.Position < _baseStream.Length)
@@ -41,7 +41,7 @@ public class ADTReader : IDisposable
             if (header.Ident == "MCNK")
             {
                 var mcnkInfo = ParseMCNKChunk(startPos, header.Size);
-                chunks.Add((mcnkInfo, header.Size));
+                chunks.Add(mcnkInfo);
             }
 
             // next chunk

@@ -4,9 +4,15 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Minimaps.CLI.Commands;
 using System.CommandLine;
-using System.Reflection;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables()
+    .AddUserSecrets<Program>(optional: true);
+
 builder.AddServiceDefaults();
 builder.Services.AddSingleton<IConfiguration>(builder.Configuration);
 
@@ -23,7 +29,8 @@ var loggerFactory = host.Services.GetRequiredService<ILoggerFactory>();
 var rootCommand = new RootCommand("Minimaps.CLI")
 {
     GenerateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
-    MigrateCommand.Create(builder.Configuration, loggerFactory, cts.Token)
+    MigrateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
+    ExploreAdtCommand.Create(builder.Configuration, loggerFactory, cts.Token),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();

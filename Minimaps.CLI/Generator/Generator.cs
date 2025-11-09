@@ -72,7 +72,7 @@ internal class Generator
         _buildInstance.Load();
 
         // Load TACT keys before we begin referencing TACT data
-        foreach(var entry in await loadKeyTask)
+        foreach (var entry in await loadKeyTask)
         {
             KeyService.SetKey(entry.KeyName, entry.KeyValue);
         }

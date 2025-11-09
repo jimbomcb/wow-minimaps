@@ -15,6 +15,18 @@
     "Run Service Worker": {
       "commandName": "Project",
       "commandLineArgs": "service"
+    },
+    "Debug Heightmap EK 32,32": {
+      "commandName": "Project",
+      "commandLineArgs": "generate-heightmaps --map-id 0 --tile-x-start 32 --tile-y-start 32 --tile-x-end 32 --tile-y-end 32 --product wow --build-config 0a613ab3d004dd2b19c9c62637c9599a --cdn-config 20d8c0c2f193328ec144b3ecac49e574 --product-config 53020d32e1a25648c8e1eafd5771935f --output ./heightmaps"
+    },
+    "Debug Heightmap EK 32-33": {
+      "commandName": "Project",
+      "commandLineArgs": "generate-heightmaps --map-id 0 --tile-x-start 32 --tile-y-start 32 --tile-x-end 33 --tile-y-end 33 --product wow --build-config 0a613ab3d004dd2b19c9c62637c9599a --cdn-config 20d8c0c2f193328ec144b3ecac49e574 --product-config 53020d32e1a25648c8e1eafd5771935f --output ./heightmaps"
+    },
+    "Debig Heightmap Kalimdor 32,32": {
+      "commandName": "Project",
+      "commandLineArgs": "generate-heightmaps --map-id 1 --tile-x-start 32 --tile-y-start 32 --tile-x-end 32 --tile-y-end 32 --product wow --build-config 0a613ab3d004dd2b19c9c62637c9599a --cdn-config 20d8c0c2f193328ec144b3ecac49e574 --product-config 53020d32e1a25648c8e1eafd5771935f --output ./heightmaps"
     }
   }
 }

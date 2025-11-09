@@ -6,23 +6,26 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>Minimaps.CLI</RootNamespace>
-    <UserSecretsId></UserSecretsId>
+    <UserSecretsId>93a3c80e-8e07-40c5-ba9a-5e3a2c22ac75</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\External\BLPSharp\BLPSharp\BLPSharp.csproj" />
     <ProjectReference Include="..\External\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\External\TACTSharp\TACTSharp\TACTSharp.csproj" />
+    <ProjectReference Include="..\External\Blizztrack\Blizztrack.Framework\Blizztrack.Framework.csproj" />
     <ProjectReference Include="..\Minimaps.Database\Minimaps.Database.csproj" />
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
+    <ProjectReference Include="..\Minimaps.Services\Minimaps.Services.csproj" />
     <ProjectReference Include="..\Minimaps.Aspire.ServiceDefaults\Minimaps.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.0.9" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0-*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-*" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0-*" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0-*" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="System.CommandLine" Version="2.0.0-rc.1.25451.107" />
 	  
