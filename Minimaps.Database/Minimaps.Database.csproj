@@ -10,7 +10,7 @@
     <PackageReference Include="FluentMigrator" Version="7.1.0" />
     <PackageReference Include="Npgsql" Version="9.0.4" />
     <PackageReference Include="Npgsql.NodaTime" Version="9.0.4" />
-    <PackageReference Include="Aspire.Npgsql" Version="9.5.2" />
+    <PackageReference Include="Aspire.Npgsql" Version="13.0.0" />
   </ItemGroup>
 
   <ItemGroup>

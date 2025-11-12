@@ -486,5 +486,5 @@ $RECYCLE.BIN/
 # Project
 /Temp/
 /Minimaps.Frontend/wwwroot/js/dist
-/heightmaps
-/cache
+/Minimaps.CLI/cache
+/Minimaps.CLI/heightmaps/map_1220
