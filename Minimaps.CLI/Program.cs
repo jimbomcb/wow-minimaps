@@ -8,6 +8,7 @@ using System.CommandLine;
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Configuration
+    .SetBasePath(AppContext.BaseDirectory)
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables()
@@ -31,6 +32,7 @@ var rootCommand = new RootCommand("Minimaps.CLI")
     GenerateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
     MigrateCommand.Create(builder.Configuration, loggerFactory, cts.Token),
     ExploreAdtCommand.Create(builder.Configuration, loggerFactory, cts.Token),
+    SyncTilesCommand.Create(builder.Configuration, loggerFactory, cts.Token),
 };
 
 return await rootCommand.Parse(args).InvokeAsync();
