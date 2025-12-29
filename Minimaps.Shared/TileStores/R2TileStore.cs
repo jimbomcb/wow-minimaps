@@ -18,9 +18,10 @@ public class R2TileStore : ITileStore, IDisposable
         _bucketName = configuration["R2TileStore:BucketName"] ?? throw new ArgumentNullException("R2TileStore:BucketName");
 
         if (string.IsNullOrEmpty(serviceUrl) || string.IsNullOrEmpty(accessKey) || string.IsNullOrEmpty(secretKey))
-        {
             throw new ArgumentException("R2TileStore configuration is missing ServiceUrl, AccessKey, or SecretKey");
-        }
+
+        if (serviceUrl.Contains(_bucketName))
+            throw new ArgumentException("R2TileStore:ServiceUrl should not contain the bucket name; it should be in the BucketName setting.");
 
         var config = new AmazonS3Config
         {
@@ -35,17 +36,24 @@ public class R2TileStore : ITileStore, IDisposable
         if (hash == default)
             throw new ArgumentException("Invalid MD5 hash", nameof(hash));
 
+        // todo: caching
+
         var key = GetKey(hash);
-        
-        var request = new ListObjectsV2Request
+        var request = new GetObjectMetadataRequest
         {
             BucketName = _bucketName,
-            Prefix = key,
-            MaxKeys = 1
+            Key = key
         };
 
-        var response = await _s3Client.ListObjectsV2Async(request);
-        return response.S3Objects.Count > 0;
+        try
+        {
+            var response = await _s3Client.GetObjectMetadataAsync(request);
+            return true;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return false;
+        }
     }
 
     public async Task<Stream> GetAsync(ContentHash hash)
@@ -85,10 +93,44 @@ public class R2TileStore : ITileStore, IDisposable
             Key = key,
             InputStream = stream,
             ContentType = contentType,
-            AutoCloseStream = false
+            AutoCloseStream = false,
+            // Not supported on R2, see https://developers.cloudflare.com/r2/examples/aws/aws-sdk-net/#upload-and-retrieve-objects
+            DisablePayloadSigning = true,
+            DisableDefaultChecksumValidation = true
         };
 
         await _s3Client.PutObjectAsync(putRequest);
+    }
+
+    // Temp 
+    public async Task<HashSet<ContentHash>> GetAllHashesAsync(CancellationToken cancellationToken = default)
+    {
+        var hashes = new HashSet<ContentHash>();
+        var request = new ListObjectsV2Request
+        {
+            BucketName = _bucketName
+        };
+
+        ListObjectsV2Response response;
+        do
+        {
+            response = await _s3Client.ListObjectsV2Async(request, cancellationToken);
+            foreach (var obj in response.S3Objects)
+            {
+                // Key format: "xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                var parts = obj.Key.Split('/');
+                if (parts.Length == 2 && parts[1].Length == 32)
+                {
+                    if (ContentHash.TryParse(parts[1], out var hash))
+                    {
+                        hashes.Add(hash);
+                    }
+                }
+            }
+            request.ContinuationToken = response.NextContinuationToken;
+        } while (response.IsTruncated);
+
+        return hashes;
     }
 
     private string GetKey(ContentHash hash)

@@ -26,7 +26,15 @@ builder.Services.AddHostedService<ProductDiscoveryService>();
 builder.Services.AddSingleton<ResourceLocService>();
 builder.Services.AddSingleton<BlizztrackFSService>();
 
-builder.Services.AddSingleton<ITileStore, LocalTileStore>();
+var tileStoreProvider = builder.Configuration["TileStoreProvider"];
+if (string.Equals(tileStoreProvider, "R2", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ITileStore, R2TileStore>();
+}
+else
+{
+    builder.Services.AddSingleton<ITileStore, LocalTileStore>();
+}
 
 var host = builder.Build();
 await host.RunAsync();
