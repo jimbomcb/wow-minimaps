@@ -32,12 +32,17 @@ export class TileStreamer {
     private gl: WebGL2RenderingContext;
     private onTextureLoaded?: () => void;
     private totalGpuBytes: number = 0;
+    private tileBaseUrl: string;
 
     // todo: scale based on canvas size
     private gpuMemoryBudget: number = 200 * 1024 * 1024;
 
-    constructor(gl: WebGL2RenderingContext) {
+    constructor(gl: WebGL2RenderingContext, tileBaseUrl: string) {
         this.gl = gl;
+        this.tileBaseUrl = tileBaseUrl;
+        if (!this.tileBaseUrl.endsWith('/')) {
+            this.tileBaseUrl += '/';
+        }
     }
 
     setTextureLoadedCallback(callback: () => void): void {
@@ -135,7 +140,7 @@ export class TileStreamer {
 
     // Stream in the hash bitmap for texture creation
     private async fetchTileByHash(hash: string): Promise<ImageBitmap> {
-        const response = await fetch(`/data/tile/${hash}`);
+        const response = await fetch(`${this.tileBaseUrl}${hash}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch tile ${hash}: ${response.statusText}`);
         }

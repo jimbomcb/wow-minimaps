@@ -20,6 +20,8 @@ export async function MapViewerInit() {
         return;
     }
 
+    const tileBaseUrl = canvas.dataset['tileBaseUrl'] || '/data/tile/';
+
     const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
     if (pathParts.length < 2 || pathParts[0] !== 'map') {
         console.error("invalid URL format, expected /map/{mapId}/{version}");
@@ -80,13 +82,15 @@ export async function MapViewerInit() {
                 centerX: internal.x,
                 centerY: internal.y,
                 zoom: zoom
-            }
+            },
+            tileBaseUrl: tileBaseUrl
         });
     } else {
         mapViewerInstance = new MapViewer({
             container: canvas,
             mapId: mapId,
-            version: version
+            version: version,
+            tileBaseUrl: tileBaseUrl
         });
     }
 
@@ -117,12 +121,14 @@ export class MapViewer {
     private currentMapId: number;
     private currentVersion: BuildVersion | 'latest'; // The version used internally
     private requestedVersion: BuildVersion | 'latest'; // The version originally requested (for URL display)
+    private tileBaseUrl: string;
 
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
         this.currentMapId = options.mapId;
         this.currentVersion = options.version;
         this.requestedVersion = options.version;
+        this.tileBaseUrl = options.tileBaseUrl;
 
         // Track if we have initial position from URL
         const hasInitialPosition = options.initPosition !== undefined &&
@@ -137,7 +143,7 @@ export class MapViewer {
         this.resizeCanvas();
 
         this.layerManager = new LayerManager();
-        this.tileStreamer = new TileStreamer(this.gl);
+        this.tileStreamer = new TileStreamer(this.gl, this.tileBaseUrl);
         this.tileStreamer.setTextureLoadedCallback(() => {
             this.scheduleRender();
         });

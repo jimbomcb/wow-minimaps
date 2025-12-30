@@ -12,6 +12,7 @@ export interface MapViewerOptions {
     mapId: number;
     version: BuildVersion | 'latest';
     initPosition?: Partial<CameraPosition>;
+    tileBaseUrl: string;
 }
 
 export interface CompositionBounds {

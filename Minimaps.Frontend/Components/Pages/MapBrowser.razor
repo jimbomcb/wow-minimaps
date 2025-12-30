@@ -1,11 +1,12 @@
 @page "/map/{MapId:int}/{Version?}/{X?}/{Y?}/{Z?}"
 @using Minimaps.Frontend.Components.Layout
+@inject IConfiguration Configuration
 @layout Empty
 
 <div data-page-module="/js/dist/map-viewer.js" data-page-init="MapViewerInit"></div>
 
 <div class="map-viewport">
-    <canvas id="map-canvas"></canvas>
+    <canvas id="map-canvas" data-tile-base-url="@TileBaseUrl"></canvas>
 
     <div id="map-control-panel" class="map-controls">
         <div class="control-header">
@@ -46,4 +47,6 @@
     [Parameter] public string? X { get; set; }
     [Parameter] public string? Y { get; set; }
     [Parameter] public string? Z { get; set; }
+
+    private string TileBaseUrl => Configuration["TileBaseUrl"] ?? "/data/tile/";
 }
