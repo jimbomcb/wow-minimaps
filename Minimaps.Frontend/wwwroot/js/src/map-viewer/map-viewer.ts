@@ -23,22 +23,21 @@ export async function MapViewerInit() {
     const tileBaseUrl = canvas.dataset['tileBaseUrl'] || '/data/tile/';
 
     const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
-    if (pathParts.length < 2 || pathParts[0] !== 'map') {
+    if (pathParts.length < 1 || pathParts[0] !== 'map') {
         console.error("invalid URL format, expected /map/{mapId}/{version}");
         return;
     }
 
-    if (pathParts.length === 2) {
-        const newUrl = `/map/${pathParts[1]}/latest${window.location.hash}`;
-        window.history.replaceState({}, '', newUrl);
+    let mapId = 0;
+    if (pathParts.length >= 2) {
+        mapId = parseInt(pathParts[1]!, 10);
     }
 
-    const mapIdStr = pathParts[1];
-    if (!mapIdStr) {
-        console.error("missing mapId in URL");
-        return;
+    // Append /latest if no specified version
+    if (pathParts.length === 2) {
+        const newUrl = `/map/${mapId}/latest${window.location.hash}`;
+        window.history.replaceState({}, '', newUrl);
     }
-    const mapId = parseInt(mapIdStr, 10);
 
     // Parse out the version, we only either take a string formatted BuildVersion (1.2.3.456 OR a string with the value "latest")
     let version: BuildVersion | 'latest' = 'latest';

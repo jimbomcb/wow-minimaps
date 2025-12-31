@@ -1,4 +1,4 @@
-@page "/map/{MapId:int}/{Version?}/{X?}/{Y?}/{Z?}"
+@page "/map/{MapId:int?}/{Version?}/{X?}/{Y?}/{Z?}"
 @using Minimaps.Frontend.Components.Layout
 @inject IConfiguration Configuration
 @layout Empty
@@ -42,7 +42,7 @@
 </div>
 
 @code {
-    [Parameter] public int MapId { get; set; }
+    [Parameter] public int? MapId { get; set; } = 0;
     [Parameter] public string? Version { get; set; }
     [Parameter] public string? X { get; set; }
     [Parameter] public string? Y { get; set; }
