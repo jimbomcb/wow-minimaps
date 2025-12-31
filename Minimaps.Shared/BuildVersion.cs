@@ -43,7 +43,7 @@ public readonly struct BuildVersion : IComparable<BuildVersion>, IEquatable<Buil
             throw new ArgumentOutOfRangeException(nameof(major), $"Major must be between 0 and {MajorMask}");
         if (minor < 0 || minor > MinorMask)
             throw new ArgumentOutOfRangeException(nameof(minor), $"Minor must be between 0 and {MinorMask}");
-        if (build < 0 || build > BuildMask)
+        if (build < 0 || (long)build > BuildMask)
             throw new ArgumentOutOfRangeException(nameof(build), $"Build must be between 0 and {BuildMask}");
 
         _value = ((long)expansion << ExpansionShift) |

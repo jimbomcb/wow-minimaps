@@ -22,15 +22,15 @@
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.1.66" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0-*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-*" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0-*" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0-*" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
-    <PackageReference Include="System.CommandLine" Version="2.0.0-rc.1.25451.107" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="System.CommandLine" Version="2.0.1" />
 	  
-    <PackageReference Include="FluentMigrator.Runner" Version="7.1.0" />
-    <PackageReference Include="FluentMigrator.Runner.Postgres" Version="7.1.0" />
+    <PackageReference Include="FluentMigrator.Runner" Version="7.2.0" />
+    <PackageReference Include="FluentMigrator.Runner.Postgres" Version="7.2.0" />
   </ItemGroup>
 
   <ItemGroup>

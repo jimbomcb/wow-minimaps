@@ -102,7 +102,7 @@ public class R2TileStore : ITileStore, IDisposable
         await _s3Client.PutObjectAsync(putRequest);
     }
 
-    // Temp 
+    // Only used for accelerating tile-sync, not used in production
     public async Task<HashSet<ContentHash>> GetAllHashesAsync(CancellationToken cancellationToken = default)
     {
         var hashes = new HashSet<ContentHash>();
@@ -128,7 +128,7 @@ public class R2TileStore : ITileStore, IDisposable
                 }
             }
             request.ContinuationToken = response.NextContinuationToken;
-        } while (response.IsTruncated);
+        } while (response.IsTruncated.Value);
 
         return hashes;
     }

@@ -51,7 +51,9 @@ public static class SyncTilesCommand
         logger.LogInformation("Fetching tile list from database...");
 
         var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+#pragma warning disable NPG9001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
         dataSourceBuilder.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory());
+#pragma warning restore NPG9001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
         await using var dataSource = dataSourceBuilder.Build();
 
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
