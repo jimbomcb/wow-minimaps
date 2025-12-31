@@ -35,15 +35,16 @@ jobs:
         with:
           submodules: true
       - name: Connect
-        uses: tailscale/github-action@v2
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
+          ping: do-frontend-01.tail6250e.ts.net
+          version: latest
       - name: Connection Status
         run: |
           tailscale status
-          ping -c 3 do-frontend-01.tail6250e.ts.net
       - name: Log in
         run: |
           echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login do-frontend-01.tail6250e.ts.net:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
