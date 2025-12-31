@@ -24,3 +24,38 @@ jobs:
         run: dotnet build --no-restore
       - name: Test
         run: dotnet test --no-build --verbosity normal
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Connect
+        uses: tailscale/github-action@v2
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Connection Status
+        run: |
+          tailscale status
+          ping -c 3 do-frontend-01
+      - name: Log in
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login do-frontend-01:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+      
+      - name: Build and push Frontend image
+        run: |
+          docker build -t do-frontend-01:5000/frontend:${{ github.sha }} -t do-frontend-01:5000/frontend:latest -f Frontend/Dockerfile .
+          docker push do-frontend-01:5000/frontend:${{ github.sha }}
+          docker push do-frontend-01:5000/frontend:latest
+      
+      - name: Build and push Service image
+        run: |
+          docker build -t do-frontend-01:5000/service:${{ github.sha }} -t do-frontend-01:5000/service:latest -f Service/Dockerfile .
+          docker push do-frontend-01:5000/service:${{ github.sha }}
+          docker push do-frontend-01:5000/service:latest
