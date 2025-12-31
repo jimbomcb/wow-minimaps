@@ -1,12 +1,12 @@
 name: Build and Deploy
-
 on:
-  push:
-    branches: [ main ]
-
-env:
-  REGISTRY: do-frontend-01.tail6250e.ts.net:5000
-  
+  workflow_dispatch:
+    inputs:
+      build_label:
+        description: 'Build label'
+        required: true
+        type: string
+      
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,33 +24,31 @@ jobs:
         run: dotnet build --no-restore
       - name: Test
         run: dotnet test --no-build --verbosity normal
-
+        
   build-and-push:
     needs: test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
+    runs-on: ubuntu-latest    
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
-      - name: Connect
+          submodules: true          
+      - name: Networking
         uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: do-frontend-01.tail6250e.ts.net
-          version: latest
-      - name: Connection Status
+          version: latest          
+      - name: Log in to Registry
         run: |
-          tailscale status
-      - name: Log in
-        run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login do-frontend-01.tail6250e.ts.net:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-      
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login do-frontend-01.tail6250e.ts.net:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin      
       - name: Build and push Frontend image
         run: |
-          docker build -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }} -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:latest -f Minimaps.Frontend/Dockerfile .
+          docker build -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }} \
+                       -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ inputs.build_label }} \
+                       -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:latest \
+                       -f Minimaps.Frontend/Dockerfile .
           docker push do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }}
+          docker push do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ inputs.build_label }}
           docker push do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:latest
