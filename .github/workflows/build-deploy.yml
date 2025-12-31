@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 env:
-  REGISTRY: 100.105.230.77:5000
+  REGISTRY: do-frontend-01.tail6250e.ts.net:5000
   
 jobs:
   test:
@@ -43,19 +43,13 @@ jobs:
       - name: Connection Status
         run: |
           tailscale status
-          ping -c 3 100.105.230.77
+          ping -c 3 do-frontend-01.tail6250e.ts.net
       - name: Log in
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login 100.105.230.77:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login do-frontend-01.tail6250e.ts.net:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
       
       - name: Build and push Frontend image
         run: |
-          docker build -t 100.105.230.77:5000/frontend:${{ github.sha }} -t 100.105.230.77:5000/frontend:latest -f Frontend/Dockerfile .
-          docker push 100.105.230.77:5000/frontend:${{ github.sha }}
-          docker push 100.105.230.77:5000/frontend:latest
-      
-      - name: Build and push Service image
-        run: |
-          docker build -t 100.105.230.77:5000/service:${{ github.sha }} -t 100.105.230.77:5000/service:latest -f Service/Dockerfile .
-          docker push 100.105.230.77:5000/service:${{ github.sha }}
-          docker push 100.105.230.77:5000/service:latest
+          docker build -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }} -t do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:latest -f Minimaps.Frontend/Dockerfile .
+          docker push do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }}
+          docker push do-frontend-01.tail6250e.ts.net:5000/wow-minimaps-frontend:latest
