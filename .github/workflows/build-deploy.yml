@@ -42,13 +42,13 @@ jobs:
           version: latest          
       - name: Log in to Registry
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login docker-registry.tail6250e.ts.net:5000 -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin      
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login docker-registry.tail6250e.ts.net -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin      
       - name: Build and push Frontend image
         run: |
-          docker build -t docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }} \
-                       -t docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ inputs.build_label }} \
-                       -t docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:latest \
+          docker build -t docker-registry.tail6250e.ts.net/wow-minimaps-frontend:${{ github.sha }} \
+                       -t docker-registry.tail6250e.ts.net/wow-minimaps-frontend:${{ inputs.build_label }} \
+                       -t docker-registry.tail6250e.ts.net/wow-minimaps-frontend:latest \
                        -f Minimaps.Frontend/Dockerfile .
-          docker push docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ github.sha }}
-          docker push docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:${{ inputs.build_label }}
-          docker push docker-registry.tail6250e.ts.net:5000/wow-minimaps-frontend:latest
+          docker push docker-registry.tail6250e.ts.net/wow-minimaps-frontend:${{ github.sha }}
+          docker push docker-registry.tail6250e.ts.net/wow-minimaps-frontend:${{ inputs.build_label }}
+          docker push docker-registry.tail6250e.ts.net/wow-minimaps-frontend:latest
