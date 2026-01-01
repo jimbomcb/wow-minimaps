@@ -15,7 +15,8 @@ builder.Services.AddControllers();
 var tileStoreProvider = builder.Configuration["TileStoreProvider"];
 if (string.Equals(tileStoreProvider, "R2", StringComparison.OrdinalIgnoreCase))
 {
-    //builder.Services.AddSingleton<ITileStore, R2TileStore>(); // Not necessary, served direct from tile store CDN 
+    builder.Services.AddSingleton<ITileStore, R2TileStore>(); // Not used (yet), served direct from tile store CDN.
+                                                              // Might store some proxied static data in the future. 
 }
 else
 {
