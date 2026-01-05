@@ -27,7 +27,7 @@ export class TileStreamer {
     private tileLastUsed = new Map<string, number>(); // hash -> timestamp
     private residentHashes = new Set<string>(); // LOD5+ tiles that never get evicted
     private pendingQueue: PendingLoad[] = []; // Tiles waiting to be loaded
-    private maxConcurrentLoads = 6;
+    private maxConcurrentLoads = 12;
     private currentLoads = 0;
     private gl: WebGL2RenderingContext;
     private onTextureLoaded?: () => void;
