@@ -14,6 +14,9 @@ export class CameraController {
     private lastY = 0;
     private onResizeCallback: (() => void) | undefined = undefined;
 
+    private isPinching = false;
+    private lastPinchDistance = 0;
+
     private readonly zoomLevels = [
         0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 
         1.125, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 
@@ -106,9 +109,12 @@ export class CameraController {
 
         this.resizeObserver.observe(this.canvas);
 
+        this.canvas.tabIndex = 0;
+
         this.canvas.addEventListener('mousedown', this.handleMouseDown);
         this.canvas.addEventListener('wheel', this.handleWheel);
-  
+        this.canvas.addEventListener('keydown', this.handleKeyDown);
+
         window.addEventListener('mousemove', this.handleMouseMove);
         window.addEventListener('mouseup', this.handleMouseUp);
 
@@ -123,10 +129,11 @@ export class CameraController {
 
         this.canvas.removeEventListener('mousedown', this.handleMouseDown);
         this.canvas.removeEventListener('wheel', this.handleWheel);
+        this.canvas.removeEventListener('keydown', this.handleKeyDown);
         this.canvas.removeEventListener('touchstart', this.handleTouchStart);
         this.canvas.removeEventListener('touchmove', this.handleTouchMove);
         this.canvas.removeEventListener('touchend', this.handleTouchEnd);
-        
+
         window.removeEventListener('mousemove', this.handleMouseMove);
         window.removeEventListener('mouseup', this.handleMouseUp);
     }
@@ -162,11 +169,32 @@ export class CameraController {
         this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
     };
 
+    private handleKeyDown = (e: KeyboardEvent): void => {
+        let dx = 0, dy = 0;
+        switch (e.key) {
+            case 'ArrowUp': dy = 1; break;
+            case 'ArrowDown': dy = -1; break;
+            case 'ArrowLeft': dx = 1; break;
+            case 'ArrowRight': dx = -1; break;
+            default: return;
+        }
+        e.preventDefault();
+        const amount = e.ctrlKey ? 1 : e.shiftKey ? 512 : 128;
+        this.pan(dx * amount, dy * amount);
+        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+    };
+
+
     private handleTouchStart = (e: TouchEvent): void => {
-        if (e.touches.length === 1) {
+        if (e.touches.length === 2) {
+            this.isDragging = false;
+            this.isPinching = true;
+            this.lastPinchDistance = this.getTouchDistance(e.touches);
+        } else if (e.touches.length === 1) {
             const touch = e.touches.item(0);
             if (!touch) return;
             this.isDragging = true;
+            this.isPinching = false;
             this.lastX = touch.clientX;
             this.lastY = touch.clientY;
         }
@@ -175,7 +203,19 @@ export class CameraController {
     private handleTouchMove = (e: TouchEvent): void => {
         e.preventDefault();
 
-        if (e.touches.length === 1 && this.isDragging) {
+        if (e.touches.length === 2 && this.isPinching) {
+            console.log("Pinchzoom active");
+            const newDistance = this.getTouchDistance(e.touches);
+            const midpoint = this.getTouchMidpoint(e.touches);
+            const canvasPos = this.getCanvasMousePosition(midpoint.x, midpoint.y);
+
+            const scale = newDistance / this.lastPinchDistance;
+            const newZoom = this.position.zoom / scale;
+            const clampedZoom = Math.max(this.zoomLevels[0]!, Math.min(this.zoomLevels[this.zoomLevels.length - 1]!, newZoom));
+
+            this.zoomToLevel(clampedZoom, canvasPos.x, canvasPos.y);
+            this.lastPinchDistance = newDistance;
+        } else if (e.touches.length === 1 && this.isDragging) {
             const touch = e.touches.item(0);
             if (!touch) return;
             const deltaX = touch.clientX - this.lastX;
@@ -187,12 +227,43 @@ export class CameraController {
         }
     };
 
-    private handleTouchEnd = (): void => {
-        if (this.isDragging) {
-            this.isDragging = false;
-            this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+    private handleTouchEnd = (e: TouchEvent): void => {
+        if (e.touches.length === 0) {
+            if (this.isDragging || this.isPinching) {
+                this.isDragging = false;
+                this.isPinching = false;
+                this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+            }
+        } else if (e.touches.length === 1 && this.isPinching) {
+            // 2 touch to 1, switch to pan
+            this.isPinching = false;
+            this.isDragging = true;
+            const touch = e.touches.item(0);
+            if (touch) {
+                this.lastX = touch.clientX;
+                this.lastY = touch.clientY;
+            }
         }
     };
+
+    // sqrt dist between fingers (assuming 2 touching)
+    private getTouchDistance(touches: TouchList): number {
+        const t0 = touches.item(0)!;
+        const t1 = touches.item(1)!;
+        const dx = t1.clientX - t0.clientX;
+        const dy = t1.clientY - t0.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // midpoint (assuming 2 touching)
+    private getTouchMidpoint(touches: TouchList): { x: number; y: number } {
+        const t0 = touches.item(0)!;
+        const t1 = touches.item(1)!;
+        return {
+            x: (t0.clientX + t1.clientX) / 2,
+            y: (t0.clientY + t1.clientY) / 2
+        };
+    }
 
     private pan(deltaX: number, deltaY: number): void {
         const unitsPerPixel = this.position.zoom / 512;
