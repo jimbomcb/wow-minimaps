@@ -1,12 +1,15 @@
 @page "/map/{MapId:int?}/{Version?}/{X?}/{Y?}/{Z?}"
 @using Minimaps.Frontend.Components.Layout
 @inject IConfiguration Configuration
+@inject IWebHostEnvironment Environment
 @layout Empty
 
 <div data-page-module="/js/dist/map-viewer.js" data-page-init="MapViewerInit"></div>
 
 <div class="map-viewport">
-    <canvas id="map-canvas" data-tile-base-url="@TileBaseUrl"></canvas>
+    <canvas id="map-canvas" data-tile-base-url="@TileBaseUrl" data-debug-enabled="@DebugEnabled.ToString().ToLower()"></canvas>
+
+    <div id="debug-panel-container"></div>
 
     <div id="map-control-panel" class="map-controls">
         <div class="control-header">
@@ -36,8 +39,7 @@
     </div>
 
     <div id="map-footer-overlay" class="footer-overlay">
-        <span class="debug-tilemap"></span>
-        <span>| <a href="https://github.com/jimbomcb/wow-minimaps">Minimap Explorer</a> By John McBroom | Map Data © Blizzard Entertainment</span>
+        <a href="https://github.com/jimbomcb/wow-minimaps">Minimap Explorer</a> By John McBroom | Map Data Â© Blizzard Entertainment
     </div>
 </div>
 
@@ -49,4 +51,7 @@
     [Parameter] public string? Z { get; set; }
 
     private string TileBaseUrl => Configuration["TileBaseUrl"] ?? "/data/tile/";
+
+    // nothing in here that matters, just internal dev shit like the texture streamer states, debug viz.
+    private bool DebugEnabled => Environment.IsDevelopment() && (Configuration.GetValue<bool?>("DebugPanel:Enabled") ?? true);
 }

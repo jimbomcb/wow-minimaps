@@ -25,3 +25,57 @@
     font-family: monospace;
     font-size: 12px;
 }
+
+/* Debug Panel */
+::deep .debug-panel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.8);
+    font-family: monospace;
+    font-size: 12px;
+    color: white;
+}
+
+::deep .debug-panel-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+::deep .debug-panel-toggle {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+}
+
+::deep .debug-panel details {
+    margin: 4px 0;
+}
+
+::deep .debug-panel summary {
+    cursor: pointer;
+    padding: 2px 0;
+}
+
+::deep .debug-section-content {
+    padding-left: 12px;
+}
+
+::deep .debug-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+::deep .debug-label {
+    color: #888;
+}
+
+::deep .debug-value {
+    color: #8cf;
+}
+

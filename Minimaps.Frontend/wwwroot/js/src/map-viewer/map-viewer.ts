@@ -12,6 +12,7 @@ import { CoordinateTranslator } from './coordinate-translator.js';
 import { ControlPanel } from './control-panel.js';
 import { MapDataManager } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
+import { DebugPanel } from './debug-panel.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -109,10 +110,7 @@ export class MapViewer {
     private tileStreamer: TileStreamer;
     private controlPanel: ControlPanel;
     private mapDataManager: MapDataManager;
-
-    private footerOverlay: HTMLElement | null = null;
-    private lastDebugUpdate = 0;
-    private readonly DEBUG_UPDATE_THROTTLE = 250; // ms
+    private debugPanel: DebugPanel | null = null;
 
     private renderQueue: RenderQueue;
     private lastFrameTime: number = 0;
@@ -157,17 +155,11 @@ export class MapViewer {
 
         this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
         this.cameraController.onCameraMoved((_) => {
-            this.updateDebugOverlay();
             this.scheduleRender();
         });
         this.cameraController.onCameraReleased((_) => {
             this.updateURL();
         });
-
-        this.footerOverlay = document.getElementById('map-footer-overlay');
-        if (this.footerOverlay) {
-            this.updateDebugOverlay();
-        }
 
         // Initialize control panel
         this.controlPanel = new ControlPanel({
@@ -177,6 +169,16 @@ export class MapViewer {
             onMapChange: (mapId) => this.handleMapChange(mapId),
             onVersionChange: (version) => this.handleVersionChange(version)
         });
+
+        const debugContainer = document.getElementById('debug-panel-container');
+        if (debugContainer) {
+            this.debugPanel = new DebugPanel({
+                container: debugContainer,
+                enabled: this.canvas.dataset['debugEnabled'] === 'true'
+            });
+            this.debugPanel.setTileStreamer(this.tileStreamer);
+            this.debugPanel.setCameraController(this.cameraController);
+        }
 
         this.startRenderLoop();
 
@@ -328,51 +330,6 @@ export class MapViewer {
         window.history.replaceState({}, '', url.toString());
     }
 
-    private updateDebugOverlay(): void {
-        if (!this.footerOverlay) return;
-
-        const now = Date.now();
-        if (now - this.lastDebugUpdate < this.DEBUG_UPDATE_THROTTLE) {
-            return;
-        }
-        this.lastDebugUpdate = now;
-
-        const camera = this.cameraController.getPos();
-
-        let debugText = ``;
-        const stats = this.tileStreamer.getStats();
-        debugText += `Textures: ${stats.cachedTextures} cached, ${stats.currentLoads} loading`;
-        if (stats.residentTiles > 0) {
-            debugText += ` (${stats.residentTiles} resident)`;
-        }
-        if (stats.pendingQueue > 0) {
-            debugText += ` [${stats.pendingQueue} queued]`;
-        }
-        debugText += ` | GPU ${stats.gpuMemoryMB}/${stats.gpuMemoryBudgetMB}MB`;
-
-        const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
-        const loadedLayers = tileLayers.filter(layer => layer.isLoaded());
-        const errorLayers = tileLayers.filter(layer => layer.hasError());
-
-        if (tileLayers.length > 1) {
-            debugText += ` | Layers: ${loadedLayers.length}/${tileLayers.length}`;
-        }
-        if (errorLayers.length > 0) {
-            debugText += ` (${errorLayers.length} errors)`;
-        }
-
-        const biasedZoom = camera.zoom / this.renderer.lodBias;
-        const optimalLOD = Math.max(0, Math.floor(Math.log2(biasedZoom)));
-        debugText += ` | LOD${Math.min(6, optimalLOD)}`;
-
-        const debugContent = this.footerOverlay.querySelector('.debug-tilemap');
-        if (debugContent) {
-            debugContent.textContent = debugText;
-        } else {
-            this.footerOverlay.textContent = debugText;
-        }
-    }
-
     private resizeCanvas(): void {
         const displayWidth = this.canvas.clientWidth;
         const displayHeight = this.canvas.clientHeight;
@@ -390,7 +347,6 @@ export class MapViewer {
             if (this.needsRender) {
                 this.doRender();
             }
-            this.updateDebugOverlay();
             this.animationId = requestAnimationFrame(render);
         };
         render();
@@ -433,6 +389,7 @@ export class MapViewer {
         }
         this.cameraController.detachCanvas();
         this.controlPanel.dispose();
+        this.debugPanel?.dispose();
         this.mapDataManager.clearCache();
     }
 }
