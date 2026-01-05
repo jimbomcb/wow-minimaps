@@ -73,7 +73,7 @@ export class TileLayerImpl implements TileLayer {
         for (const hash of this.residentHashes) {
             this.tileStreamer.unmarkResident(hash);
         }
-        console.log(`Unmarked ${this.residentHashes.length} resident tiles for layer ${this.id}`);
+        //console.log(`Unmarked ${this.residentHashes.length} resident tiles for layer ${this.id}`);
         this.residentHashes = [];
     }
 
@@ -181,11 +181,10 @@ export class TileLayerImpl implements TileLayer {
             for (const coord of coordinates) {
                 const [x, y] = coord.split(',').map(Number) as [number, number];                
                 if (x !== undefined && y !== undefined && this.isTileInBounds(x, y, lodLevel, bounds)) {
-                    // todo: getting unwieldy with too many sources, think about how to better handle
-                    // goal is to assign prio so that we load in the most important tiles first
-                    // So the top level tiles, in the middle of the screen ideally...
-                    // But we do prio the resident layer over all else, to minimise the black frames loading at the start
-                    const distanceFromCenter = Math.sqrt(Math.pow(x - camera.centerX, 2) + Math.pow(y - camera.centerY, 2));
+                    // Prioritise tiles centers closest to camera center
+                    const tileCenterX = x + Math.pow(2, lodLevel) / 2;
+                    const tileCenterY = y + Math.pow(2, lodLevel) / 2;
+                    const distanceFromCenter = Math.sqrt(Math.pow(tileCenterX - camera.centerX, 2) + Math.pow(tileCenterY - camera.centerY, 2));
                     const distancePriority = Math.max(0, 1000 - distanceFromCenter * 10);
                     const layerPriorityBoost = this.zIndex * 10000;
                     const lodPriority = lodLevel === this.residentLodLevel ? 50000 : (6 - lodLevel) * 1000;
