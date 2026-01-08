@@ -491,3 +491,4 @@ $RECYCLE.BIN/
 /Minimaps.CLI/comp
 /*.md
 !/README.md
+.vscode/
