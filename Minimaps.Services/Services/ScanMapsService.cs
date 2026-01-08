@@ -791,13 +791,6 @@ internal class ScanMapsService :
                 }
                 npgsqlBatch.BatchCommands.Add(cmdAddComp);
 
-                var cmdProdCompJunction = npgsqlBatch.CreateBatchCommand();
-                cmdProdCompJunction.CommandText = "INSERT INTO product_compositions (composition_hash, product_id) VALUES($1, $2) " +
-                    "ON CONFLICT (composition_hash, product_id) DO NOTHING";
-                cmdProdCompJunction.Parameters.AddWithValue(comp.Value.Hash);
-                cmdProdCompJunction.Parameters.AddWithValue(product.Id);
-                npgsqlBatch.BatchCommands.Add(cmdProdCompJunction);
-
                 var cmdBuildMaps = npgsqlBatch.CreateBatchCommand();
                 cmdBuildMaps.CommandText = "INSERT INTO build_maps (build_id, map_id, tiles, composition_hash) VALUES ($1, $2, $3, $4) " +
                     "ON CONFLICT (build_id, map_id) DO UPDATE SET tiles = EXCLUDED.tiles, composition_hash = EXCLUDED.composition_hash";
