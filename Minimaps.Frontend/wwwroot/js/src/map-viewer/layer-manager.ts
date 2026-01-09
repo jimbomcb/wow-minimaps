@@ -1,4 +1,4 @@
-import { Layer } from './layers/layers.js';
+import type { Layer } from './layers/layers.js';
 
 // The map viewer owns a layer manager of layers,
 // layers can be tile layers for map data, or other kinds of data layers for markup.

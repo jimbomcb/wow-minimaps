@@ -1,5 +1,5 @@
-import { TileStreamer } from './tile-streamer.js';
-import { CameraController } from './camera-controller.js';
+import type { TileStreamer } from './tile-streamer.js';
+import type { CameraController } from './camera-controller.js';
 
 export interface DebugPanelOptions {
     container: HTMLElement;

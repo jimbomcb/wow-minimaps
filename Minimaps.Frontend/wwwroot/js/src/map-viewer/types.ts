@@ -1,5 +1,5 @@
-import { CompositionDto } from './backend-types.js';
-import { BuildVersion } from './build-version.js';
+import type { CompositionDto } from './backend-types.js';
+import type { BuildVersion } from './build-version.js';
 
 export interface CameraPosition {
     centerX: number; // X tile coord, 0-64 // todo: -32 to 32

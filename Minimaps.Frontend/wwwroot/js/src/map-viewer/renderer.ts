@@ -1,6 +1,6 @@
-import { RenderQueue, RenderCommand, TileRenderCommand } from './render-queue.js';
-import { CameraPosition } from './types.js';
-import { FlashQuad, ChangeType } from './flash-overlay.js';
+import type { RenderQueue, RenderCommand, TileRenderCommand } from './render-queue.js';
+import type { CameraPosition } from './types.js';
+import type { FlashQuad, ChangeType } from './flash-overlay.js';
 
 export class Renderer {
     private gl: WebGL2RenderingContext;

@@ -1,4 +1,4 @@
-import { MapDataManager, MapInfo } from './map-data-manager.js';
+import type { MapDataManager, MapInfo } from './map-data-manager.js';
 import { BuildVersion } from './build-version.js';
 
 export interface VersionInfo {

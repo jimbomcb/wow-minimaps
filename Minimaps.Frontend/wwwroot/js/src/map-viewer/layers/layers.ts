@@ -1,6 +1,6 @@
-import { CameraPosition, MinimapComposition } from '../types.js';
-import { RenderQueue } from '../render-queue.js';
-import { TileRequest } from '../tile-streamer.js';
+import type { CameraPosition, MinimapComposition } from '../types.js';
+import type { RenderQueue } from '../render-queue.js';
+import type { TileRequest } from '../tile-streamer.js';
 
 export interface RenderContext {
     camera: CameraPosition;

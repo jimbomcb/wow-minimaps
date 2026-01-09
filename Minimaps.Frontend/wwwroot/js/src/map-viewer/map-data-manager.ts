@@ -1,6 +1,6 @@
 import { MinimapComposition } from './types.js';
 import { BuildVersion } from './build-version.js';
-import { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto } from './backend-types.js';
+import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto } from './backend-types.js';
 
 export interface MapInfo {
     mapId: number;

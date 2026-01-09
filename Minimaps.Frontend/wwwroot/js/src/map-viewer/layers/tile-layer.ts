@@ -1,8 +1,8 @@
-import { TileLayer, RenderContext } from './layers.js';
-import { MinimapComposition, CameraPosition } from '../types.js';
-import { TileRequest } from '../tile-streamer.js';
-import { RenderQueue, TileRenderCommand } from '../render-queue.js';
-import { TileStreamer } from '../tile-streamer.js';
+import type { TileLayer, RenderContext } from './layers.js';
+import type { MinimapComposition, CameraPosition } from '../types.js';
+import type { TileRequest } from '../tile-streamer.js';
+import type { RenderQueue, TileRenderCommand } from '../render-queue.js';
+import type { TileStreamer } from '../tile-streamer.js';
 
 export interface TileLayerOptions {
     id: string;

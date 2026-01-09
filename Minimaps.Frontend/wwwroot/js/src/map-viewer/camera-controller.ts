@@ -1,4 +1,4 @@
-import { CameraPosition } from './types.js';
+import type { CameraPosition } from './types.js';
 import type { CompositionBounds } from './types.js';
 
 // Manage camera control, input layer
