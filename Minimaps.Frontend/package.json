@@ -6,12 +6,16 @@
   "devDependencies": {
     "@eslint/js": "^9.18.0",
     "eslint": "^9.18.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.7.4",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.20.0"
   },
   "scripts": {
     "lint": "eslint \"wwwroot/js/src/**/*.ts\"",
     "lint:fix": "eslint \"wwwroot/js/src/**/*.ts\" --fix",
+    "format": "prettier --write \"wwwroot/js/src/**/*.ts\"",
+    "format:check": "prettier --check \"wwwroot/js/src/**/*.ts\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "John McBroom"
