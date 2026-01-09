@@ -24,5 +24,9 @@
     <ProjectReference Include="..\Minimaps.Shared\Minimaps.Shared.csproj" />
   </ItemGroup>
 
+  <Target Name="ESLint" BeforeTargets="CompileTypeScript">
+    <Exec Command="npx eslint wwwroot/js/src/**/*.ts" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
 </Project>
 
