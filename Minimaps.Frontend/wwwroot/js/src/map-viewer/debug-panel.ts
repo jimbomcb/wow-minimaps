@@ -21,6 +21,8 @@ export class DebugPanel {
     private tileStreamerContent: HTMLElement | null = null;
     private cameraContent: HTMLElement | null = null;
 
+    public showFrameTicker: boolean = false; // per-frame debug quad
+
     constructor(options: DebugPanelOptions) {
         this.container = options.container;
         this.enabled = options.enabled;
@@ -39,7 +41,14 @@ export class DebugPanel {
                 <span>Debug</span>
                 <button class="debug-panel-toggle">−</button>
             </div>
-            <div class="debug-panel-content"></div>
+            <div class="debug-panel-content">
+                <div class="debug-row">
+                    <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                        <input type="checkbox" id="debug-frame-ticker" />
+                        <span>Show frame ticks</span>
+                    </label>
+                </div>
+            </div>
         `;
 
         const toggleBtn = this.panelElement.querySelector('.debug-panel-toggle') as HTMLButtonElement;
@@ -49,6 +58,12 @@ export class DebugPanel {
             if (content) content.style.display = this.visible ? 'block' : 'none';
             toggleBtn.textContent = this.visible ? '−' : '+';
         });
+
+        const frameTickerCheckbox = this.panelElement.querySelector('#debug-frame-ticker') as HTMLInputElement;
+        frameTickerCheckbox.addEventListener('change', () => {
+            this.showFrameTicker = frameTickerCheckbox.checked;
+        });
+
         this.container.appendChild(this.panelElement);
     }
 
