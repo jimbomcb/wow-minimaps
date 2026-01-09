@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <Target Name="ESLint" BeforeTargets="CompileTypeScript">
-    <Exec Command="npx eslint wwwroot/js/src/**/*.ts" WorkingDirectory="$(MSBuildProjectDirectory)" />
+    <Exec Command="npx eslint &quot;wwwroot/js/src/**/*.ts&quot;" WorkingDirectory="$(MSBuildProjectDirectory)" />
   </Target>
 
 </Project>

@@ -1,8 +1,9 @@
-import { MinimapComposition } from "../types.js";
+import { CameraPosition, MinimapComposition } from "../types.js";
 import { RenderQueue } from "../render-queue.js";
+import { TileRequest } from "../tile-streamer.js";
 
 export interface RenderContext {
-    camera: any;
+    camera: CameraPosition;
     canvasSize: { width: number, height: number };
     deltaTime: number;
     lodBias: number;
@@ -34,7 +35,7 @@ export interface TileLayer extends BaseLayer {
     getError(): Error | null;
     getComposition(): MinimapComposition | null;
     getLoadingPromise(): Promise<MinimapComposition> | null;
-    calculateVisibleTiles(camera: any, canvasSize: { width: number, height: number }): any[];
+    calculateVisibleTiles(camera: CameraPosition, canvasSize: { width: number, height: number }): TileRequest[];
     dispose(): void;
 }
 

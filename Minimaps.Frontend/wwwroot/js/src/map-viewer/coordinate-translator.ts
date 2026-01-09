@@ -1,9 +1,9 @@
 // Translate coords between WoW's X+ North Y+ West's 533.333 yard chunks 
 // and the 0-64 coordinates used in our viewer.
 export class CoordinateTranslator {
-    private static readonly WOW_MIN = -17066.666666666666;
-    private static readonly WOW_MAX = 17066.666666666666;
-    private static readonly WOW_SIZE = 34133.333333333333;
+    private static readonly WOW_MIN = -17066.6666666667;
+    private static readonly WOW_MAX = 17066.6666666667;
+    private static readonly WOW_SIZE = 34133.3333333333;
     private static readonly TILE_COUNT = 64;
     private static readonly TILE_SIZE = CoordinateTranslator.WOW_SIZE / CoordinateTranslator.TILE_COUNT;
 
