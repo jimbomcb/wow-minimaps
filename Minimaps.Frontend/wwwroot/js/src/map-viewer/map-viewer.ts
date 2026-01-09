@@ -13,6 +13,7 @@ import { ControlPanel } from './control-panel.js';
 import { MapDataManager } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
 import { DebugPanel } from './debug-panel.js';
+import { FlashOverlay } from './flash-overlay.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -120,6 +121,9 @@ export class MapViewer {
     private requestedVersion: BuildVersion | 'latest'; // The version originally requested (for URL display)
     private tileBaseUrl: string;
 
+    private flashOverlay: FlashOverlay;
+    private currentComposition: MinimapComposition | null = null;
+
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
         this.currentMapId = options.mapId;
@@ -132,7 +136,7 @@ export class MapViewer {
             options.initPosition.centerX !== undefined &&
             options.initPosition.centerY !== undefined;
 
-        this.gl = this.canvas.getContext('webgl2')!;
+        this.gl = this.canvas.getContext('webgl2', { stencil: true })!;
         if (!this.gl) throw new Error('WebGL2 not supported');
 
         this.renderQueue = new RenderQueue();
@@ -146,6 +150,7 @@ export class MapViewer {
         });
 
         this.mapDataManager = new MapDataManager();
+        this.flashOverlay = new FlashOverlay();
 
         this.cameraController = new CameraController({
             centerX: options.initPosition?.centerX ?? 32,
@@ -187,11 +192,14 @@ export class MapViewer {
 
     /**
      * Load a map and its compositions, creating the necessary tile layers
+     * @param showFlash Whether to show flash effect for changed tiles (only for version changes on same map)
      */
-    private async loadMap(mapId: number, version: BuildVersion | 'latest', autoZoom: boolean = false): Promise<void> {
+    private async loadMap(mapId: number, version: BuildVersion | 'latest', autoZoom: boolean = false, showFlash: boolean = false): Promise<void> {
         try {
             const versionStr = version === 'latest' ? 'latest' : version.toString();
             console.log(`Loading map ${mapId} version ${versionStr}...`);
+
+            const oldComposition = showFlash ? this.currentComposition : null;
 
             const mapData = await this.mapDataManager.loadMapData(mapId, version);
 
@@ -229,6 +237,18 @@ export class MapViewer {
                     debugSkipLODs: []
                 }
             );
+
+            // Composition diff flash
+            this.currentComposition = mapData.composition;
+            if (oldComposition) {
+                const changes = MinimapComposition.diff(oldComposition, mapData.composition);
+                const totalChanges = changes.added.size + changes.modified.size + changes.removed.size;
+                if (totalChanges > 0) {
+                    //console.log(`Flash: ${changes.added.size} added, ${changes.modified.size} modified, ${changes.removed.size} removed`);
+                    this.flashOverlay.clear();
+                    this.flashOverlay.triggerFlash(changes);
+                }
+            }
 
             this.controlPanel.setCurrentMap(mapId);
 
@@ -282,6 +302,7 @@ export class MapViewer {
         console.log(`Map changed to: ${mapId}`);
         this.currentMapId = mapId;
         this.requestedVersion = this.currentVersion;
+        this.flashOverlay.clear();
 
         // Reload the map with the new map, auto-zoom to fit
         this.loadMap(mapId, this.currentVersion, true).then(() => {
@@ -296,8 +317,8 @@ export class MapViewer {
         this.currentVersion = version;
         this.requestedVersion = version;
 
-        // Reload with new version, don't reposition
-        this.loadMap(this.currentMapId, version).then(() => {
+        // Reload with new version, don't reposition, show flash for changed tiles
+        this.loadMap(this.currentMapId, version, false, true).then(() => {
             this.updateURL();
         });
         this.scheduleRender();
@@ -358,7 +379,7 @@ export class MapViewer {
 
     private doRender(): void {
         const currentTime = performance.now();
-        const deltaTime = currentTime - this.lastFrameTime;
+        const deltaTime = Math.min(currentTime - this.lastFrameTime, 50);
         this.lastFrameTime = currentTime;
         const camera = this.cameraController.getPos();
 
@@ -380,7 +401,21 @@ export class MapViewer {
         }
 
         this.renderer.renderQueue(camera, this.renderQueue);
-        this.needsRender = false;
+
+        // render flash overlay
+        const flashActive = this.flashOverlay.update(deltaTime);
+        if (this.flashOverlay.hasActiveFlashes()) {
+            const flashes = this.flashOverlay.getActiveFlashes();
+            this.renderer.renderFlashOverlay(flashes, camera);
+        }
+
+        // debug frame ticker
+        if (this.debugPanel?.showFrameTicker) {
+            this.renderer.renderFrameTicker();
+        }
+
+        // re-render until flash done
+        this.needsRender = flashActive;
     }
 
     dispose(): void {

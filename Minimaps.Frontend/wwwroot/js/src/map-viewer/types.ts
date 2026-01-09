@@ -27,13 +27,13 @@ export interface CompositionBounds {
 }
 
 export class MinimapComposition {
-    private _compositionMap: Map<string, string>;
+    private _coordToHash: Map<string, string>;
     private _missingTilesSet: Set<string>;
     private _bounds: CompositionBounds | null = null;
     private _tileSize: number;
 
     constructor(private data: CompositionDto) {
-        this._compositionMap = new Map<string, string>();
+        this._coordToHash = new Map<string, string>();
         this._missingTilesSet = new Set<string>();
         this._tileSize = data.tileSize ?? 512;
 
@@ -42,10 +42,9 @@ export class MinimapComposition {
                 this._missingTilesSet.add(coord);
             }
         }
-        // Calculate bounds from all tiles (including missing tiles)
-        this._bounds = this.calculateBounds();
 
-        // todo: build cache map
+        // Build coord -> hash lookup and calculate bounds
+        this._bounds = this.buildCacheAndBounds();
     }
 
     static fromData(data: CompositionDto): MinimapComposition {
@@ -53,11 +52,11 @@ export class MinimapComposition {
     }
 
     get totalTiles(): number {
-        return this._compositionMap.size + this._missingTilesSet.size;
+        return this._coordToHash.size + this._missingTilesSet.size;
     }
 
-    get composition(): ReadonlyMap<string, string> {
-        return this._compositionMap;
+    get coordToHash(): ReadonlyMap<string, string> {
+        return this._coordToHash;
     }
 
     get missingTiles(): ReadonlySet<string> {
@@ -72,7 +71,7 @@ export class MinimapComposition {
         return this._tileSize;
     }
 
-    private calculateBounds(): CompositionBounds | null {
+    private buildCacheAndBounds(): CompositionBounds | null {
         let minX = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let minY = Number.POSITIVE_INFINITY;
@@ -80,15 +79,16 @@ export class MinimapComposition {
         let foundAny = false;
 
         const lod0Data = this.data.lod?.['0'];
-
         if (!lod0Data)
-            throw new Error("Composition data missing LOD 0 data for bounds calculation"); // Compositions should always have LOD0...
+            throw new Error("Composition data missing base tile data");
 
-        for (const coordinates of Object.values(lod0Data)) {
+        // Build coord->hash map and calculate bounds in single pass
+        for (const [hash, coordinates] of Object.entries(lod0Data)) {
             for (const coord of coordinates) {
+                this._coordToHash.set(coord, hash);
+
                 const [x, y] = coord.split(',').map(Number);
                 if (x !== undefined && y !== undefined && !isNaN(x) && !isNaN(y)) {
-                    // occupies x to x+1, y to y+1
                     minX = Math.min(minX, x);
                     maxX = Math.max(maxX, x + 1);
                     minY = Math.min(minY, y);
@@ -110,28 +110,19 @@ export class MinimapComposition {
             }
         }
 
-        if (!foundAny) {
-            return null;
-        }
+        if (!foundAny) return null;
 
         const width = maxX - minX;
         const height = maxY - minY;
-        const centerX = minX + width / 2;
-        const centerY = minY + height / 2;
-
         return {
-            minX,
-            maxX,
-            minY,
-            maxY,
-            centerX,
-            centerY,
-            width,
-            height
+            minX, maxX, minY, maxY,
+            centerX: minX + width / 2,
+            centerY: minY + height / 2,
+            width, height
         };
     }
 
-    // todo... just a dirty copy of data for now, 
+    // todo... just a dirty copy of data for now,
     // but composition is immutable data and we can do better
     getLODData(lodLevel: number): ReadonlyMap<string, string[]> | null {
         const lodData = this.data.lod?.[lodLevel.toString()];
@@ -142,5 +133,36 @@ export class MinimapComposition {
             result.set(hash, [...coordinates]); // copy
         }
         return result;
+    }
+
+    // Compare two compositions, return changed tile coords grouped by change type
+    static diff(oldComp: MinimapComposition, newComp: MinimapComposition): {
+        added: Set<string>;
+        modified: Set<string>;
+        removed: Set<string>;
+    } {
+        const added = new Set<string>();
+        const modified = new Set<string>();
+        const removed = new Set<string>();
+
+        const oldCoords = oldComp.coordToHash;
+        const newCoords = newComp.coordToHash;
+
+        for (const [coord, oldHash] of oldCoords) {
+            const newHash = newCoords.get(coord);
+            if (newHash === undefined) {
+                removed.add(coord);
+            } else if (newHash !== oldHash) {
+                modified.add(coord);
+            }
+        }
+
+        for (const coord of newCoords.keys()) {
+            if (!oldCoords.has(coord)) {
+                added.add(coord);
+            }
+        }
+
+        return { added, modified, removed };
     }
 }
