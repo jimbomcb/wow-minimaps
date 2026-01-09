@@ -5,6 +5,7 @@ export interface VersionInfo {
     version: BuildVersion;
     displayName: string;
     compositionHash: string;
+    products: string[];
 }
 
 export interface ControlPanelOptions {
@@ -328,20 +329,17 @@ export class ControlPanel {
 
     private async loadVersionsForMap(mapId: number): Promise<void> {
         try {
-            const versionMap = await this.mapDataManager.getVersionsForMap(mapId);
-
-            this.availableVersions = [];
+            const versions = await this.mapDataManager.getVersionsForMap(mapId);
 
             // BuildVersion descending sort
-            const sortedVersions = Array.from(versionMap.entries()).sort((a, b) => b[0].compareTo(a[0]));
+            versions.sort((a, b) => b.version.compareTo(a.version));
 
-            for (const [version, compositionHash] of sortedVersions) {
-                this.availableVersions.push({
-                    version: version,
-                    displayName: version.toString(),
-                    compositionHash: compositionHash
-                });
-            }
+            this.availableVersions = versions.map(v => ({
+                version: v.version,
+                displayName: v.version.toString(),
+                compositionHash: v.compositionHash,
+                products: v.products
+            }));
 
             this.updateVersionSelector();
         } catch (error) {
@@ -364,21 +362,21 @@ export class ControlPanel {
             if (i > 0) {
                 const prevVersion = this.availableVersions[i - 1];
                 if (prevVersion && versionInfo.compositionHash === prevVersion.compositionHash) {
-                    prefix = '  = ';
-                } else {
-                    prefix = '';
+                    prefix = '= ';
                 }
-            } else {
-                prefix = '';
             }
+
+            // Format: "1.2.3.456 (wow, wow_beta)"
+            const productsStr = versionInfo.products.length > 0 ? ` (${versionInfo.products.join(', ')})` : '';
+            const versionDisplay = `${prefix}${versionInfo.displayName}${productsStr}`;
 
             // Add bullet point if this is the current version
             const isCurrentVersion = this.currentVersion !== 'latest' && versionInfo.version.equals(this.currentVersion);
             if (isCurrentVersion) {
-                option.textContent = `● ${prefix}${versionInfo.displayName}`;
+                option.textContent = `● ${versionDisplay}`;
                 option.selected = true;
             } else {
-                option.textContent = `  ${prefix}${versionInfo.displayName}`;
+                option.textContent = `  ${versionDisplay}`;
             }
 
             this.versionSelect.appendChild(option);

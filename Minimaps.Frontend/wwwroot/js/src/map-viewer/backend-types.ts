@@ -10,7 +10,12 @@ export interface CompositionDto {
 }
 
 export interface MapVersionsDto {
-    versions: Record<string, string>; // version encoded value (string) -> composition hash
+    versions: Record<string, MapVersionEntryDto>; // version encoded value (string) -> version entry
+}
+
+export interface MapVersionEntryDto {
+    compositionHash: string;
+    products: string[]; // product names in release order (wow, wow_beta, etc)
 }
 
 export interface MapListDto {

@@ -15,21 +15,28 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     public async Task<ActionResult<MapVersionsDto>> GetMapVersions(int mapId)
     {
         await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = new NpgsqlCommand("SELECT build_id, composition_hash FROM build_maps WHERE map_id = $1 AND composition_hash IS NOT NULL ORDER BY build_id ASC", conn); // TODO:INDEX
+        await using var cmd = new NpgsqlCommand(@"
+            SELECT bm.build_id, bm.composition_hash, array_agg(p.product ORDER BY p.first_seen) as products
+            FROM build_maps bm
+            JOIN products p ON p.build_id = bm.build_id
+            WHERE bm.map_id = $1 AND bm.composition_hash IS NOT NULL
+            GROUP BY bm.build_id, bm.composition_hash
+            ORDER BY bm.build_id ASC", conn);
         cmd.Parameters.AddWithValue(mapId);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
             return NotFound("no_versions");
 
-        var buildHashes = new Dictionary<BuildVersion, ContentHash>();
+        var versions = new Dictionary<BuildVersion, MapVersionEntryDto>();
         do
         {
             var buildVer = reader.GetFieldValue<BuildVersion>(0);
             var compHash = reader.GetFieldValue<ContentHash>(1);
-            buildHashes[buildVer] = compHash;
+            var products = reader.GetFieldValue<string[]>(2);
+            versions[buildVer] = new MapVersionEntryDto(compHash, products);
         } while (await reader.ReadAsync());
-        return new MapVersionsDto(buildHashes);
+        return new MapVersionsDto(versions);
     }
 
     [HttpGet("maps")]

@@ -1,6 +1,6 @@
 import { MinimapComposition } from './types.js';
 import { BuildVersion } from './build-version.js';
-import { MapVersionsDto, CompositionDto, MapListDto } from './backend-types.js';
+import { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto } from './backend-types.js';
 
 export interface MapInfo {
     mapId: number;
@@ -16,6 +16,7 @@ export interface MapInfo {
 export interface MapVersionInfo {
     version: BuildVersion;
     compositionHash: string;
+    products: string[];
 }
 
 export interface LoadedMapData {
@@ -35,7 +36,7 @@ export class MapDataManager {
     private mapsCache: Map<number, MapInfo> | null = null;
     private mapsLoadingPromise: Promise<void> | null = null;
 
-    private versionCache = new Map<number, Map<string, string>>(); // mapId -> (encodedVersionString -> comp hash)
+    private versionCache = new Map<number, Map<string, MapVersionEntryDto>>(); // mapId -> (encodedVersionString -> version entry)
     private versionLoadingPromises = new Map<number, Promise<void>>();
 
     private compositionCache = new Map<string, MinimapComposition>(); // comp hash -> composition
@@ -147,17 +148,18 @@ export class MapDataManager {
                 throw new Error(`Failed to determine latest version for map ${mapId}`);
             }
 
-            compositionHash = versionMap.get(latestKey) ?? '';
-            if (!compositionHash) {
+            const latestEntry = versionMap.get(latestKey);
+            if (!latestEntry) {
                 throw new Error(`Composition hash not found for latest version of map ${mapId}`);
             }
 
+            compositionHash = latestEntry.compositionHash;
             resolvedVersion = new BuildVersion(BigInt(latestKey));
         } else {
             const versionKey = version.encodedValueString;
-            compositionHash = versionMap.get(versionKey) ?? '';
+            const entry = versionMap.get(versionKey);
 
-            if (!compositionHash) {
+            if (!entry) {
                 // Version doesn't exist for this map, find closest
                 console.log(`Map ${mapId} not found in version ${version.toString()}, searching for closest version...`);
                 const closest = this.findClosestVersion(version, versionMap);
@@ -171,6 +173,7 @@ export class MapDataManager {
                     throw new Error(`No suitable version found for map ${mapId} near ${version.toString()}`);
                 }
             } else {
+                compositionHash = entry.compositionHash;
                 resolvedVersion = version;
             }
         }
@@ -232,9 +235,9 @@ export class MapDataManager {
 
             const data = await response.json() as MapVersionsDto;
 
-            const versionMap = new Map<string, string>();
-            for (const [encodedStr, compHash] of Object.entries(data.versions)) {
-                versionMap.set(encodedStr, compHash);
+            const versionMap = new Map<string, MapVersionEntryDto>();
+            for (const [encodedStr, entry] of Object.entries(data.versions)) {
+                versionMap.set(encodedStr, entry);
             }
 
             this.versionCache.set(mapId, versionMap);
@@ -245,17 +248,20 @@ export class MapDataManager {
         }
     }
 
-    async getVersionsForMap(mapId: number): Promise<Map<BuildVersion, string>> {
+    async getVersionsForMap(mapId: number): Promise<MapVersionInfo[]> {
         await this.loadVersionsForMap(mapId);
-        const stringMap = this.versionCache.get(mapId);
-        if (!stringMap) {
-            return new Map();
+        const entryMap = this.versionCache.get(mapId);
+        if (!entryMap) {
+            return [];
         }
 
-        const result = new Map<BuildVersion, string>();
-        for (const [encodedStr, compHash] of stringMap.entries()) {
-            const version = new BuildVersion(BigInt(encodedStr));
-            result.set(version, compHash);
+        const result: MapVersionInfo[] = [];
+        for (const [encodedStr, entry] of entryMap.entries()) {
+            result.push({
+                version: new BuildVersion(BigInt(encodedStr)),
+                compositionHash: entry.compositionHash,
+                products: entry.products
+            });
         }
         return result;
     }
@@ -305,15 +311,15 @@ export class MapDataManager {
         this.compositionLoadingPromises.clear();
     }
 
-    private findClosestVersion(requestedVersion: BuildVersion, versionMap: Map<string, string>): { version: BuildVersion; hash: string } | null {
+    private findClosestVersion(requestedVersion: BuildVersion, versionMap: Map<string, MapVersionEntryDto>): { version: BuildVersion; hash: string } | null {
         if (versionMap.size === 0) return null;
 
         const requestedValue = requestedVersion.encodedValue;
-        const versions = Array.from(versionMap.entries()).map(([encodedStr, hash]) => {
+        const versions = Array.from(versionMap.entries()).map(([encodedStr, entry]) => {
             const version = new BuildVersion(BigInt(encodedStr));
             return {
                 version,
-                hash,
+                hash: entry.compositionHash,
                 distance: this.calculateVersionDistance(requestedValue, version.encodedValue)
             };
         });
