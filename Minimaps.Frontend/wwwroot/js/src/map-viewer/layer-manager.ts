@@ -1,4 +1,4 @@
-import { Layer } from "./layers/layers.js";
+import { Layer } from './layers/layers.js';
 
 // The map viewer owns a layer manager of layers,
 // layers can be tile layers for map data, or other kinds of data layers for markup.
@@ -13,13 +13,11 @@ export class LayerManager {
 
     removeLayer(layerId: string): void {
         this.layers.delete(layerId);
-        this.renderOrder = this.renderOrder.filter(id => id !== layerId);
+        this.renderOrder = this.renderOrder.filter((id) => id !== layerId);
     }
 
     getVisibleLayers(): Layer[] {
-        return this.renderOrder
-            .map(id => this.layers.get(id))
-            .filter(layer => layer?.visible) as Layer[];
+        return this.renderOrder.map((id) => this.layers.get(id)).filter((layer) => layer?.visible) as Layer[];
     }
 
     // Generic layer filtering
@@ -35,6 +33,6 @@ export class LayerManager {
     private updateRenderOrder(): void {
         this.renderOrder = Array.from(this.layers.values())
             .sort((a, b) => a.zIndex - b.zIndex)
-            .map(layer => layer.id);
+            .map((layer) => layer.id);
     }
 }

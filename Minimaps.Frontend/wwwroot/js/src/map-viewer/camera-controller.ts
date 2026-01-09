@@ -18,9 +18,8 @@ export class CameraController {
     private lastPinchDistance = 0;
 
     private readonly zoomLevels = [
-        0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 
-        1.125, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 
-        12.0, 16.0, 20.0, 24.0, 32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0
+        0.03125, 0.0625, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1.0, 1.125, 1.25, 1.5, 1.75, 2.0, 2.5,
+        3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0, 32.0, 48.0, 64.0, 96.0, 128.0, 192.0, 256.0,
     ];
 
     constructor(initPos: CameraPosition) {
@@ -47,16 +46,15 @@ export class CameraController {
     }
 
     setPos(newPos: CameraPosition): void {
-        if (this.equal(this.position, newPos))
-            return;
+        if (this.equal(this.position, newPos)) return;
 
         this.position = newPos;
-        this.cameraMovedCallbacks.forEach(callback => callback(this.position));
+        this.cameraMovedCallbacks.forEach((callback) => callback(this.position));
     }
 
     fitToBounds(bounds: CompositionBounds, marginPercent: number = 10): void {
         if (!this.canvas) {
-            // no canvas? 
+            // no canvas?
             return;
         }
 
@@ -71,25 +69,25 @@ export class CameraController {
         this.setPos({
             centerX: bounds.centerX,
             centerY: bounds.centerY,
-            zoom: this.findNearestZoomLevel(targetZoom)
+            zoom: this.findNearestZoomLevel(targetZoom),
         });
 
         // Trigger camera released to update URL
-        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+        this.cameraReleasedCallbacks.forEach((callback) => callback(this.position));
     }
 
     // Find the nearest snapped zoom level (preferring to zoom out slightly if needed)
     private findNearestZoomLevel(targetZoom: number): number {
         if (this.zoomLevels.length === 0) return targetZoom;
 
-        const fitIndex = this.zoomLevels.findIndex(level => level >= targetZoom);
-      
+        const fitIndex = this.zoomLevels.findIndex((level) => level >= targetZoom);
+
         if (fitIndex === -1) {
             // larger than all predefined levels, use the largest
-            return this.zoomLevels[this.zoomLevels.length - 1]!
+            return this.zoomLevels[this.zoomLevels.length - 1]!;
         }
 
-        return this.zoomLevels[fitIndex]!
+        return this.zoomLevels[fitIndex]!;
     }
 
     onCameraMoved(callback: (camera: CameraPosition) => void): void {
@@ -157,7 +155,7 @@ export class CameraController {
     private handleMouseUp = (): void => {
         if (this.isDragging) {
             this.isDragging = false;
-            this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+            this.cameraReleasedCallbacks.forEach((callback) => callback(this.position));
         }
     };
 
@@ -166,24 +164,33 @@ export class CameraController {
 
         const mousePos = this.getCanvasMousePosition(e.clientX, e.clientY);
         this.zoomAt(e.deltaY < 0, mousePos.x, mousePos.y);
-        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+        this.cameraReleasedCallbacks.forEach((callback) => callback(this.position));
     };
 
     private handleKeyDown = (e: KeyboardEvent): void => {
-        let dx = 0, dy = 0;
+        let dx = 0,
+            dy = 0;
         switch (e.key) {
-            case 'ArrowUp': dy = 1; break;
-            case 'ArrowDown': dy = -1; break;
-            case 'ArrowLeft': dx = 1; break;
-            case 'ArrowRight': dx = -1; break;
-            default: return;
+            case 'ArrowUp':
+                dy = 1;
+                break;
+            case 'ArrowDown':
+                dy = -1;
+                break;
+            case 'ArrowLeft':
+                dx = 1;
+                break;
+            case 'ArrowRight':
+                dx = -1;
+                break;
+            default:
+                return;
         }
         e.preventDefault();
         const amount = e.ctrlKey ? 1 : e.shiftKey ? 512 : 128;
         this.pan(dx * amount, dy * amount);
-        this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+        this.cameraReleasedCallbacks.forEach((callback) => callback(this.position));
     };
-
 
     private handleTouchStart = (e: TouchEvent): void => {
         if (e.touches.length === 2) {
@@ -204,14 +211,17 @@ export class CameraController {
         e.preventDefault();
 
         if (e.touches.length === 2 && this.isPinching) {
-            console.log("Pinchzoom active");
+            console.log('Pinchzoom active');
             const newDistance = this.getTouchDistance(e.touches);
             const midpoint = this.getTouchMidpoint(e.touches);
             const canvasPos = this.getCanvasMousePosition(midpoint.x, midpoint.y);
 
             const scale = newDistance / this.lastPinchDistance;
             const newZoom = this.position.zoom / scale;
-            const clampedZoom = Math.max(this.zoomLevels[0]!, Math.min(this.zoomLevels[this.zoomLevels.length - 1]!, newZoom));
+            const clampedZoom = Math.max(
+                this.zoomLevels[0]!,
+                Math.min(this.zoomLevels[this.zoomLevels.length - 1]!, newZoom)
+            );
 
             this.zoomToLevel(clampedZoom, canvasPos.x, canvasPos.y);
             this.lastPinchDistance = newDistance;
@@ -232,7 +242,7 @@ export class CameraController {
             if (this.isDragging || this.isPinching) {
                 this.isDragging = false;
                 this.isPinching = false;
-                this.cameraReleasedCallbacks.forEach(callback => callback(this.position));
+                this.cameraReleasedCallbacks.forEach((callback) => callback(this.position));
             }
         } else if (e.touches.length === 1 && this.isPinching) {
             // 2 touch to 1, switch to pan
@@ -261,7 +271,7 @@ export class CameraController {
         const t1 = touches.item(1)!;
         return {
             x: (t0.clientX + t1.clientX) / 2,
-            y: (t0.clientY + t1.clientY) / 2
+            y: (t0.clientY + t1.clientY) / 2,
         };
     }
 
@@ -273,21 +283,21 @@ export class CameraController {
         this.setPos({
             ...this.position,
             centerX: this.position.centerX - worldDeltaX,
-            centerY: this.position.centerY - worldDeltaY
+            centerY: this.position.centerY - worldDeltaY,
         });
     }
 
     private zoomAt(zoomIn: boolean, mouseX?: number, mouseY?: number): void {
         if (this.zoomLevels.length === 0) return;
-        
-        const currentIndex = this.zoomLevels.findIndex(level => level >= this.position.zoom);
+
+        const currentIndex = this.zoomLevels.findIndex((level) => level >= this.position.zoom);
         let targetIndex: number;
         if (zoomIn) {
             targetIndex = currentIndex > 0 ? currentIndex - 1 : 0;
         } else {
             targetIndex = currentIndex < this.zoomLevels.length - 1 ? currentIndex + 1 : this.zoomLevels.length - 1;
         }
-        
+
         const targetZoom = this.zoomLevels[targetIndex]!;
         this.zoomToLevel(targetZoom, mouseX, mouseY);
     }
@@ -301,41 +311,43 @@ export class CameraController {
             this.setPos({
                 centerX: worldMousePos.x + (this.position.centerX - worldMousePos.x) * zoomRatio,
                 centerY: worldMousePos.y + (this.position.centerY - worldMousePos.y) * zoomRatio,
-                zoom: targetZoom
+                zoom: targetZoom,
             });
         } else {
             this.setPos({
                 ...this.position,
-                zoom: targetZoom
+                zoom: targetZoom,
             });
         }
     }
 
-    private getCanvasMousePosition(clientX: number, clientY: number): { x: number, y: number } {
+    private getCanvasMousePosition(clientX: number, clientY: number): { x: number; y: number } {
         if (!this.canvas) return { x: 0, y: 0 };
         const rect = this.canvas.getBoundingClientRect();
         return {
             x: clientX - rect.left,
-            y: clientY - rect.top
+            y: clientY - rect.top,
         };
     }
 
     private equal(a: CameraPosition, b: CameraPosition): boolean {
         const epsilon = 0.0001;
-        return Math.abs(a.centerX - b.centerX) < epsilon &&
+        return (
+            Math.abs(a.centerX - b.centerX) < epsilon &&
             Math.abs(a.centerY - b.centerY) < epsilon &&
-            Math.abs(a.zoom - b.zoom) < epsilon;
+            Math.abs(a.zoom - b.zoom) < epsilon
+        );
     }
 
-    private canvasToWorldPos(canvasX: number, canvasY: number): { x: number, y: number } {
+    private canvasToWorldPos(canvasX: number, canvasY: number): { x: number; y: number } {
         if (!this.canvas) return { x: 0, y: 0 };
 
         const offsetX = canvasX - this.canvas.width / 2;
         const offsetY = canvasY - this.canvas.height / 2;
 
         const unitsPerPixel = this.position.zoom / 512;
-        const worldX = this.position.centerX + (offsetX * unitsPerPixel);
-        const worldY = this.position.centerY + (offsetY * unitsPerPixel);
+        const worldX = this.position.centerX + offsetX * unitsPerPixel;
+        const worldY = this.position.centerY + offsetY * unitsPerPixel;
 
         return { x: worldX, y: worldY };
     }

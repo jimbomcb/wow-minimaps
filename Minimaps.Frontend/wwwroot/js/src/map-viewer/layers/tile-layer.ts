@@ -50,7 +50,7 @@ export class TileLayerImpl implements TileLayer {
         this.residentLodLevel = options.residentLodLevel ?? 5;
         this.monochrome = options.monochrome ?? false;
         this.debugSkipLODs = new Set(options.debugSkipLODs ?? []);
-        
+
         this.markResidentTiles();
     }
 
@@ -84,20 +84,20 @@ export class TileLayerImpl implements TileLayer {
 
         // Basic initial approach, just render ALL loaded tiles that are visible, in LOD order
         // Higher LOD tiles render first, then progressively smaller higher resolution tiles render on top
-        
+
         const optimalLOD = this.calculateOptimalLOD(context.camera.zoom, this.composition.tileSize, context.lodBias);
         const bounds = this.calculateViewportBounds(context.camera, context.canvasSize);
         const allTileRequests: TileRequest[] = [];
 
         // we no longer load the LOD levels beyond the resident LOD level, so clamp
         const effectiveOptimalLOD = Math.min(optimalLOD, this.residentLodLevel);
-        
+
         for (let lodLevel = this.residentLodLevel; lodLevel >= effectiveOptimalLOD; lodLevel--) {
             // temp debug skipping
             if (this.debugSkipLODs.has(lodLevel)) {
                 continue;
             }
-            
+
             const lodRequests = this.calculateVisibleTilesAtLOD(lodLevel, bounds, context.camera);
             allTileRequests.push(...lodRequests);
         }
@@ -121,14 +121,18 @@ export class TileLayerImpl implements TileLayer {
                     worldX: tileRequest.worldX,
                     worldY: tileRequest.worldY,
                     lodLevel: tileRequest.lodLevel,
-                    monochrome: this.monochrome
+                    monochrome: this.monochrome,
                 };
                 renderQueue.push(command);
             }
         }
     }
 
-    private calculateVisibleTilesAtLOD(lodLevel: number, bounds: ViewportBounds, camera: CameraPosition): TileRequest[] {
+    private calculateVisibleTilesAtLOD(
+        lodLevel: number,
+        bounds: ViewportBounds,
+        camera: CameraPosition
+    ): TileRequest[] {
         if (!this.composition) return [];
 
         const lodData = this.composition.getLODData(lodLevel);
@@ -139,7 +143,7 @@ export class TileLayerImpl implements TileLayer {
     public isLoaded(): boolean {
         return true; // Always loaded since composition is provided, todo: cleanup...
     }
-    
+
     public isLoading(): boolean {
         return false; // Always loaded since composition is provided, todo: cleanup...
     }
@@ -161,7 +165,11 @@ export class TileLayerImpl implements TileLayer {
     }
 
     // Calculate what tiles this layer needs for the current frame (kept for compatibility)
-    calculateVisibleTiles(camera: CameraPosition, canvasSize: { width: number, height: number }, lodBias?: number): TileRequest[] {
+    calculateVisibleTiles(
+        camera: CameraPosition,
+        canvasSize: { width: number; height: number },
+        lodBias?: number
+    ): TileRequest[] {
         if (!this.visible || !this.composition) return [];
 
         const optimalLOD = this.calculateOptimalLOD(camera.zoom, this.composition.tileSize, lodBias);
@@ -170,33 +178,35 @@ export class TileLayerImpl implements TileLayer {
     }
 
     private generateTileRequests(
-        lodData: ReadonlyMap<string, string[]>, 
-        lodLevel: number, 
-        bounds: ViewportBounds, 
+        lodData: ReadonlyMap<string, string[]>,
+        lodLevel: number,
+        bounds: ViewportBounds,
         camera: CameraPosition
     ): TileRequest[] {
         const requests: TileRequest[] = [];
 
         for (const [hash, coordinates] of lodData) {
             for (const coord of coordinates) {
-                const [x, y] = coord.split(',').map(Number) as [number, number];                
+                const [x, y] = coord.split(',').map(Number) as [number, number];
                 if (x !== undefined && y !== undefined && this.isTileInBounds(x, y, lodLevel, bounds)) {
                     // Prioritise tiles centers closest to camera center
                     const tileCenterX = x + Math.pow(2, lodLevel) / 2;
                     const tileCenterY = y + Math.pow(2, lodLevel) / 2;
-                    const distanceFromCenter = Math.sqrt(Math.pow(tileCenterX - camera.centerX, 2) + Math.pow(tileCenterY - camera.centerY, 2));
+                    const distanceFromCenter = Math.sqrt(
+                        Math.pow(tileCenterX - camera.centerX, 2) + Math.pow(tileCenterY - camera.centerY, 2)
+                    );
                     const distancePriority = Math.max(0, 1000 - distanceFromCenter * 10);
                     const layerPriorityBoost = this.zIndex * 10000;
                     const lodPriority = lodLevel === this.residentLodLevel ? 50000 : (6 - lodLevel) * 1000;
                     const priority = distancePriority + layerPriorityBoost + lodPriority;
-                    
-                    requests.push({ 
-                        hash, 
-                        worldX: x, 
-                        worldY: y, 
-                        lodLevel, 
-                        layerId: this.id, 
-                        priority
+
+                    requests.push({
+                        hash,
+                        worldX: x,
+                        worldY: y,
+                        lodLevel,
+                        layerId: this.id,
+                        priority,
                     });
                 }
             }
@@ -218,21 +228,24 @@ export class TileLayerImpl implements TileLayer {
         // this means 256px tiles will select a higher LOD to compensate for lower source resolution
         const sizeMultiplier = tileSize / 512.0;
         const effectiveZoom = zoom * sizeMultiplier;
-   
+
         const biasedZoom = effectiveZoom / lodBias;
         const baseLOD = Math.max(0, Math.floor(Math.log2(biasedZoom)));
         return Math.max(this.lodLevel, Math.min(6, baseLOD));
     }
 
-    private calculateViewportBounds(camera: CameraPosition, canvasSize: { width: number, height: number }): ViewportBounds {
+    private calculateViewportBounds(
+        camera: CameraPosition,
+        canvasSize: { width: number; height: number }
+    ): ViewportBounds {
         const tilesVisibleX = canvasSize.width / (512 / camera.zoom);
         const tilesVisibleY = canvasSize.height / (512 / camera.zoom);
-        
+
         return {
             minX: Math.floor(camera.centerX - tilesVisibleX / 2),
             maxX: Math.ceil(camera.centerX + tilesVisibleX / 2),
             minY: Math.floor(camera.centerY - tilesVisibleY / 2),
-            maxY: Math.ceil(camera.centerY + tilesVisibleY / 2)
+            maxY: Math.ceil(camera.centerY + tilesVisibleY / 2),
         };
     }
 

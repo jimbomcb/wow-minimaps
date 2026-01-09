@@ -19,10 +19,13 @@ export class FlashOverlay {
     private flashTimers: Map<string, FlashState> = new Map(); // coord -> flash state
     private flashDuration: number = 15000; // total flash duration in ms
     private holdDuration: number = 1500;
-    private maxIntensity: number = 0.75
+    private maxIntensity: number = 0.75;
     private needsRender: boolean = false;
 
-    triggerFlash(changes: { added: Set<string>; modified: Set<string>; removed: Set<string> }, duration: number = 15000): void {
+    triggerFlash(
+        changes: { added: Set<string>; modified: Set<string>; removed: Set<string> },
+        duration: number = 15000
+    ): void {
         this.flashTimers.clear();
         this.flashDuration = duration;
 

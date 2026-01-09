@@ -107,7 +107,7 @@ export class ControlPanel {
     private navigateVersion(direction: number): void {
         if (this.availableVersions.length === 0) return;
 
-        const currentIndex = this.availableVersions.findIndex(v =>
+        const currentIndex = this.availableVersions.findIndex((v) =>
             this.currentVersion === 'latest' ? false : v.version.equals(this.currentVersion)
         );
         if (currentIndex === -1) return;
@@ -128,7 +128,7 @@ export class ControlPanel {
     private navigateMap(direction: number): void {
         if (this.allMaps.length === 0) return;
 
-        const currentIndex = this.allMaps.findIndex(m => m.mapId === this.currentMapId);
+        const currentIndex = this.allMaps.findIndex((m) => m.mapId === this.currentMapId);
         if (currentIndex === -1) return;
 
         let newIndex = currentIndex + direction;
@@ -143,7 +143,7 @@ export class ControlPanel {
     }
 
     private setupEventListeners(): void {
-        // Map search 
+        // Map search
         this.mapSearchInput.addEventListener('focus', () => {
             this.showDropdown = true;
             this.renderDropdown();
@@ -196,11 +196,14 @@ export class ControlPanel {
             return;
         }
 
-        this.filteredMaps = this.allMaps.filter(m =>
-            m.mapId.toString().includes(search) ||
-            m.name.toLowerCase().includes(search) ||
-            m.directory.toLowerCase().includes(search)
-        ).sort((a, b) => a.mapId - b.mapId);
+        this.filteredMaps = this.allMaps
+            .filter(
+                (m) =>
+                    m.mapId.toString().includes(search) ||
+                    m.name.toLowerCase().includes(search) ||
+                    m.directory.toLowerCase().includes(search)
+            )
+            .sort((a, b) => a.mapId - b.mapId);
     }
 
     private renderDropdown(): void {
@@ -235,7 +238,7 @@ export class ControlPanel {
         this.mapDropdown.innerHTML = html;
 
         const items = this.mapDropdown.querySelectorAll('.dropdown-item[data-map-id]');
-        items.forEach(item => {
+        items.forEach((item) => {
             item.addEventListener('mousedown', (e) => {
                 e.preventDefault();
                 const mapId = parseInt(item.getAttribute('data-map-id')!);
@@ -258,7 +261,7 @@ export class ControlPanel {
     }
 
     private updateMapSearchText(): void {
-        const currentMap = this.allMaps.find(m => m.mapId === this.currentMapId);
+        const currentMap = this.allMaps.find((m) => m.mapId === this.currentMapId);
         this.mapSearchInput.value = currentMap
             ? `${currentMap.mapId} - ${currentMap.name}`
             : `Map ${this.currentMapId}`;
@@ -334,11 +337,11 @@ export class ControlPanel {
             // BuildVersion descending sort
             versions.sort((a, b) => b.version.compareTo(a.version));
 
-            this.availableVersions = versions.map(v => ({
+            this.availableVersions = versions.map((v) => ({
                 version: v.version,
                 displayName: v.version.toString(),
                 compositionHash: v.compositionHash,
-                products: v.products
+                products: v.products,
             }));
 
             this.updateVersionSelector();
@@ -371,7 +374,8 @@ export class ControlPanel {
             const versionDisplay = `${prefix}${versionInfo.displayName}${productsStr}`;
 
             // Add bullet point if this is the current version
-            const isCurrentVersion = this.currentVersion !== 'latest' && versionInfo.version.equals(this.currentVersion);
+            const isCurrentVersion =
+                this.currentVersion !== 'latest' && versionInfo.version.equals(this.currentVersion);
             if (isCurrentVersion) {
                 option.textContent = `● ${versionDisplay}`;
                 option.selected = true;

@@ -2,7 +2,7 @@
  * TypeScript equivalent of Minimaps.Shared.BuildVersion
  * Responsible for converting WoW's [X].[Y].[Z].[BUILD] (i.e. 11.0.7.58046) between
  * its individual components and a single sortable BIGINT received from the API.
- * This should never exist in javascript-land as a number (errors on construction), because 
+ * This should never exist in javascript-land as a number (errors on construction), because
  * the horrors of JS mean that it would be susceptible to float precision loss.
  * It will either be a BigInt in TS land, BIGINT in the database, or a string in transit.
  * Bit-packed to: reserved(1) | expansion(11) | major(10) | minor(10) | build(32)
@@ -11,10 +11,10 @@
 export class BuildVersion {
     private readonly _value: bigint;
 
-    private static readonly BUILD_MASK = 0xFFFFFFFFn; // 32 bits
-    private static readonly MINOR_MASK = 0x3FFn;      // 10 bits
-    private static readonly MAJOR_MASK = 0x3FFn;      // 10 bits
-    private static readonly EXPANSION_MASK = 0x7FFn;  // 11 bits
+    private static readonly BUILD_MASK = 0xffffffffn; // 32 bits
+    private static readonly MINOR_MASK = 0x3ffn; // 10 bits
+    private static readonly MAJOR_MASK = 0x3ffn; // 10 bits
+    private static readonly EXPANSION_MASK = 0x7ffn; // 11 bits
 
     private static readonly BUILD_SHIFT = 0n;
     private static readonly MINOR_SHIFT = 32n;
@@ -27,13 +27,13 @@ export class BuildVersion {
         } else if (typeof value === 'bigint') {
             const bigintValue = BigInt(value);
             if (bigintValue < 0n) {
-                throw new Error("BuildVersion encoded value must be non-negative");
+                throw new Error('BuildVersion encoded value must be non-negative');
             }
             this._value = bigintValue;
         } else if (typeof value === 'number') {
-            throw new Error("wrong type, either encode as BigInt or string, not number that is a float internally");
+            throw new Error('wrong type, either encode as BigInt or string, not number that is a float internally');
         } else {
-            throw new Error("Invalid type for BuildVersion constructor");
+            throw new Error('Invalid type for BuildVersion constructor');
         }
     }
 
@@ -51,17 +51,18 @@ export class BuildVersion {
             throw new Error(`Build must be between 0 and ${BuildVersion.BUILD_MASK}`);
         }
 
-        const value = (BigInt(expansion) << BuildVersion.EXPANSION_SHIFT) |
-                      (BigInt(major) << BuildVersion.MAJOR_SHIFT) |
-                      (BigInt(minor) << BuildVersion.MINOR_SHIFT) |
-                      (BigInt(build) << BuildVersion.BUILD_SHIFT);
+        const value =
+            (BigInt(expansion) << BuildVersion.EXPANSION_SHIFT) |
+            (BigInt(major) << BuildVersion.MAJOR_SHIFT) |
+            (BigInt(minor) << BuildVersion.MINOR_SHIFT) |
+            (BigInt(build) << BuildVersion.BUILD_SHIFT);
 
         return new BuildVersion(value);
     }
 
     private static parseVersionString(version: string): bigint {
         if (!version || version.trim() === '') {
-            throw new Error("Version string cannot be null or empty");
+            throw new Error('Version string cannot be null or empty');
         }
 
         const parts = version.split('.');

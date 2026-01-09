@@ -1,5 +1,5 @@
-import { CompositionDto } from "./backend-types.js";
-import { BuildVersion } from "./build-version.js";
+import { CompositionDto } from './backend-types.js';
+import { BuildVersion } from './build-version.js';
 
 export interface CameraPosition {
     centerX: number; // X tile coord, 0-64 // todo: -32 to 32
@@ -79,8 +79,7 @@ export class MinimapComposition {
         let foundAny = false;
 
         const lod0Data = this.data.lod?.['0'];
-        if (!lod0Data)
-            throw new Error("Composition data missing base tile data");
+        if (!lod0Data) throw new Error('Composition data missing base tile data');
 
         // Build coord->hash map and calculate bounds in single pass
         for (const [hash, coordinates] of Object.entries(lod0Data)) {
@@ -115,10 +114,14 @@ export class MinimapComposition {
         const width = maxX - minX;
         const height = maxY - minY;
         return {
-            minX, maxX, minY, maxY,
+            minX,
+            maxX,
+            minY,
+            maxY,
             centerX: minX + width / 2,
             centerY: minY + height / 2,
-            width, height
+            width,
+            height,
         };
     }
 
@@ -136,7 +139,10 @@ export class MinimapComposition {
     }
 
     // Compare two compositions, return changed tile coords grouped by change type
-    static diff(oldComp: MinimapComposition, newComp: MinimapComposition): {
+    static diff(
+        oldComp: MinimapComposition,
+        newComp: MinimapComposition
+    ): {
         added: Set<string>;
         modified: Set<string>;
         removed: Set<string>;

@@ -6,8 +6,8 @@ import { LayerManager } from './layer-manager.js';
 import { TileStreamer, TileRequest } from './tile-streamer.js';
 import { TileLayerImpl, TileLayerOptions } from './layers/tile-layer.js';
 import { isTileLayer, TileLayer } from './layers/layers.js';
-import { RenderContext } from "./layers/layers.js";
-import { RenderQueue } from "./render-queue.js";
+import { RenderContext } from './layers/layers.js';
+import { RenderQueue } from './render-queue.js';
 import { CoordinateTranslator } from './coordinate-translator.js';
 import { ControlPanel } from './control-panel.js';
 import { MapDataManager } from './map-data-manager.js';
@@ -18,15 +18,15 @@ import { FlashOverlay } from './flash-overlay.js';
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
     if (!canvas) {
-        console.error("missing #map-canvas");
+        console.error('missing #map-canvas');
         return;
     }
 
     const tileBaseUrl = canvas.dataset['tileBaseUrl'] || '/data/tile/';
 
-    const pathParts = window.location.pathname.split('/').filter(part => part.length > 0);
+    const pathParts = window.location.pathname.split('/').filter((part) => part.length > 0);
     if (pathParts.length < 1 || pathParts[0] !== 'map') {
-        console.error("invalid URL format, expected /map/{mapId}/{version}");
+        console.error('invalid URL format, expected /map/{mapId}/{version}');
         return;
     }
 
@@ -46,7 +46,7 @@ export async function MapViewerInit() {
     if (pathParts.length > 2) {
         const versionStr = pathParts[2];
         if (!versionStr) {
-            console.error("invalid version in URL");
+            console.error('invalid version in URL');
             return;
         }
 
@@ -55,7 +55,7 @@ export async function MapViewerInit() {
         } else {
             const buildVer = BuildVersion.tryParse(versionStr);
             if (buildVer !== null) {
-                console.log("Querying exact version ", buildVer.toString());
+                console.log('Querying exact version ', buildVer.toString());
                 version = buildVer;
             } else {
                 console.warn(`Invalid version format in URL: ${versionStr}, falling back to 'latest'`);
@@ -82,16 +82,16 @@ export async function MapViewerInit() {
             initPosition: {
                 centerX: internal.x,
                 centerY: internal.y,
-                zoom: zoom
+                zoom: zoom,
             },
-            tileBaseUrl: tileBaseUrl
+            tileBaseUrl: tileBaseUrl,
         });
     } else {
         mapViewerInstance = new MapViewer({
             container: canvas,
             mapId: mapId,
             version: version,
-            tileBaseUrl: tileBaseUrl
+            tileBaseUrl: tileBaseUrl,
         });
     }
 
@@ -132,7 +132,8 @@ export class MapViewer {
         this.tileBaseUrl = options.tileBaseUrl;
 
         // Track if we have initial position from URL
-        const hasInitialPosition = options.initPosition !== undefined &&
+        const hasInitialPosition =
+            options.initPosition !== undefined &&
             options.initPosition.centerX !== undefined &&
             options.initPosition.centerY !== undefined;
 
@@ -155,7 +156,7 @@ export class MapViewer {
         this.cameraController = new CameraController({
             centerX: options.initPosition?.centerX ?? 32,
             centerY: options.initPosition?.centerY ?? 32,
-            zoom: options.initPosition?.zoom ?? 30
+            zoom: options.initPosition?.zoom ?? 30,
         });
 
         this.cameraController.attachCanvas(this.canvas, () => this.resizeCanvas());
@@ -172,14 +173,14 @@ export class MapViewer {
             currentVersion: this.currentVersion,
             mapDataManager: this.mapDataManager,
             onMapChange: (mapId) => this.handleMapChange(mapId),
-            onVersionChange: (version) => this.handleVersionChange(version)
+            onVersionChange: (version) => this.handleVersionChange(version),
         });
 
         const debugContainer = document.getElementById('debug-panel-container');
         if (debugContainer) {
             this.debugPanel = new DebugPanel({
                 container: debugContainer,
-                enabled: this.canvas.dataset['debugEnabled'] === 'true'
+                enabled: this.canvas.dataset['debugEnabled'] === 'true',
             });
             this.debugPanel.setTileStreamer(this.tileStreamer);
             this.debugPanel.setCameraController(this.cameraController);
@@ -194,7 +195,12 @@ export class MapViewer {
      * Load a map and its compositions, creating the necessary tile layers
      * @param showFlash Whether to show flash effect for changed tiles (only for version changes on same map)
      */
-    private async loadMap(mapId: number, version: BuildVersion | 'latest', autoZoom: boolean = false, showFlash: boolean = false): Promise<void> {
+    private async loadMap(
+        mapId: number,
+        version: BuildVersion | 'latest',
+        autoZoom: boolean = false,
+        showFlash: boolean = false
+    ): Promise<void> {
         try {
             const versionStr = version === 'latest' ? 'latest' : version.toString();
             console.log(`Loading map ${mapId} version ${versionStr}...`);
@@ -213,30 +219,22 @@ export class MapViewer {
 
             // Add a monochrome parent layer under the actual map data
             if (mapData.parentComposition && mapData.parentMapId !== null) {
-                this.addTileLayerForComposition(
-                    mapData.parentMapId,
-                    mapData.parentComposition,
-                    {
-                        id: `parent-${mapData.parentMapId}`,
-                        zIndex: -1,
-                        residentLodLevel: 4,
-                        monochrome: true,
-                        debugSkipLODs: []
-                    }
-                );
+                this.addTileLayerForComposition(mapData.parentMapId, mapData.parentComposition, {
+                    id: `parent-${mapData.parentMapId}`,
+                    zIndex: -1,
+                    residentLodLevel: 4,
+                    monochrome: true,
+                    debugSkipLODs: [],
+                });
             }
 
             // Main map layer
-            this.addTileLayerForComposition(
-                mapId,
-                mapData.composition,
-                {
-                    id: 'main',
-                    zIndex: 0,
-                    residentLodLevel: 4,
-                    debugSkipLODs: []
-                }
-            );
+            this.addTileLayerForComposition(mapId, mapData.composition, {
+                id: 'main',
+                zIndex: 0,
+                residentLodLevel: 4,
+                debugSkipLODs: [],
+            });
 
             // Composition diff flash
             this.currentComposition = mapData.composition;
@@ -259,10 +257,7 @@ export class MapViewer {
 
             // fallback warning if we're snapping to a different version
             if (mapData.isFallback && mapData.fallbackVersion) {
-                this.controlPanel.showVersionFallbackWarning(
-                    mapData.requestedVersion,
-                    mapData.fallbackVersion
-                );
+                this.controlPanel.showVersionFallbackWarning(mapData.requestedVersion, mapData.fallbackVersion);
             } else {
                 this.controlPanel.hideVersionFallbackWarning();
             }
@@ -329,7 +324,7 @@ export class MapViewer {
         const wowCoords = CoordinateTranslator.internalToWow(camera.centerX, camera.centerY);
 
         let accuracy = 0;
-        if (camera.zoom <= .2) {
+        if (camera.zoom <= 0.2) {
             accuracy = 3;
         } else if (camera.zoom <= 1.0) {
             accuracy = 2;
@@ -385,13 +380,13 @@ export class MapViewer {
 
         const canvasSize = {
             width: this.canvas.width,
-            height: this.canvas.height
+            height: this.canvas.height,
         };
         const renderContext: RenderContext = {
             camera,
             canvasSize,
             deltaTime,
-            lodBias: this.renderer.lodBias // todo: move, user config?
+            lodBias: this.renderer.lodBias, // todo: move, user config?
         };
 
         this.renderQueue.clear();

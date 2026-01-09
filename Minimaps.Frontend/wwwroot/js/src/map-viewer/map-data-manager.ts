@@ -42,7 +42,7 @@ export class MapDataManager {
     private compositionCache = new Map<string, MinimapComposition>(); // comp hash -> composition
     private compositionLoadingPromises = new Map<string, Promise<MinimapComposition>>();
 
-    constructor() { }
+    constructor() {}
 
     async loadMaps(): Promise<MapInfo[]> {
         if (this.mapsCache) {
@@ -68,7 +68,7 @@ export class MapDataManager {
                 throw new Error(`Failed to load maps: ${response.statusText}`);
             }
 
-            const data = await response.json() as MapListDto;
+            const data = (await response.json()) as MapListDto;
             this.mapsCache = new Map();
 
             for (const map of data.maps) {
@@ -86,7 +86,7 @@ export class MapDataManager {
                     first: new BuildVersion(BigInt(map.first)),
                     last: new BuildVersion(BigInt(map.last)),
                     parent: map.parent,
-                    tileCount: map.tileCount
+                    tileCount: map.tileCount,
                 };
                 this.mapsCache.set(mapInfo.mapId, mapInfo);
             }
@@ -161,14 +161,18 @@ export class MapDataManager {
 
             if (!entry) {
                 // Version doesn't exist for this map, find closest
-                console.log(`Map ${mapId} not found in version ${version.toString()}, searching for closest version...`);
+                console.log(
+                    `Map ${mapId} not found in version ${version.toString()}, searching for closest version...`
+                );
                 const closest = this.findClosestVersion(version, versionMap);
                 if (closest) {
                     compositionHash = closest.hash;
                     resolvedVersion = closest.version;
                     isFallback = true;
                     fallbackVersion = closest.version;
-                    console.warn(`Map ${mapId} not available in version ${version.toString()}, using closest: ${fallbackVersion.toString()}`);
+                    console.warn(
+                        `Map ${mapId} not available in version ${version.toString()}, using closest: ${fallbackVersion.toString()}`
+                    );
                 } else {
                     throw new Error(`No suitable version found for map ${mapId} near ${version.toString()}`);
                 }
@@ -188,7 +192,7 @@ export class MapDataManager {
             compositionHash,
             parentMapId: mapInfo.parent,
             isFallback,
-            fallbackVersion
+            fallbackVersion,
         };
 
         // If there's a parent map, load its composition too
@@ -233,7 +237,7 @@ export class MapDataManager {
                 throw new Error(`Failed to load map versions: ${response.statusText}`);
             }
 
-            const data = await response.json() as MapVersionsDto;
+            const data = (await response.json()) as MapVersionsDto;
 
             const versionMap = new Map<string, MapVersionEntryDto>();
             for (const [encodedStr, entry] of Object.entries(data.versions)) {
@@ -260,7 +264,7 @@ export class MapDataManager {
             result.push({
                 version: new BuildVersion(BigInt(encodedStr)),
                 compositionHash: entry.compositionHash,
-                products: entry.products
+                products: entry.products,
             });
         }
         return result;
@@ -294,7 +298,7 @@ export class MapDataManager {
                 throw new Error(`Failed to load composition: ${response.statusText}`);
             }
 
-            const data = await response.json() as CompositionDto;
+            const data = (await response.json()) as CompositionDto;
             return MinimapComposition.fromData(data);
         } catch (error) {
             console.error(`Failed to load composition ${hash}:`, error);
@@ -311,7 +315,10 @@ export class MapDataManager {
         this.compositionLoadingPromises.clear();
     }
 
-    private findClosestVersion(requestedVersion: BuildVersion, versionMap: Map<string, MapVersionEntryDto>): { version: BuildVersion; hash: string } | null {
+    private findClosestVersion(
+        requestedVersion: BuildVersion,
+        versionMap: Map<string, MapVersionEntryDto>
+    ): { version: BuildVersion; hash: string } | null {
         if (versionMap.size === 0) return null;
 
         const requestedValue = requestedVersion.encodedValue;
@@ -320,7 +327,7 @@ export class MapDataManager {
             return {
                 version,
                 hash: entry.compositionHash,
-                distance: this.calculateVersionDistance(requestedValue, version.encodedValue)
+                distance: this.calculateVersionDistance(requestedValue, version.encodedValue),
             };
         });
 

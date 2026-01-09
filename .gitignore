@@ -487,8 +487,13 @@ $RECYCLE.BIN/
 /Temp/
 /Minimaps.Frontend/wwwroot/js/dist
 /Minimaps.CLI/cache
-/Minimaps.CLI/heightmaps/map_1220
 /Minimaps.CLI/comp
 /*.md
 !/README.md
-.vscode/
+
+# Ignore dotfiles by default
+**/.*
+!/.gitignore
+!/.git/
+!.aspire/
+!.github/

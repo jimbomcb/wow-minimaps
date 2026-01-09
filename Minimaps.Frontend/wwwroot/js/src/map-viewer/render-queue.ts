@@ -1,4 +1,4 @@
-import { RenderContext } from "./layers/layers.js";
+import { RenderContext } from './layers/layers.js';
 
 export interface BaseRenderCommand {
     readonly layerId: string;
@@ -35,13 +35,13 @@ export class RenderQueue {
             if (a.zIndex !== b.zIndex) {
                 return a.zIndex - b.zIndex;
             }
-            
+
             if (isTileCommand(a) && isTileCommand(b)) {
                 if (a.lodLevel !== b.lodLevel) {
                     return b.lodLevel - a.lodLevel;
                 }
             }
-            
+
             return 0;
         });
     }

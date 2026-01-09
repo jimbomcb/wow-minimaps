@@ -1,6 +1,6 @@
-import { RenderQueue, RenderCommand, TileRenderCommand } from "./render-queue.js";
-import { CameraPosition } from "./types.js";
-import { FlashQuad, ChangeType } from "./flash-overlay.js";
+import { RenderQueue, RenderCommand, TileRenderCommand } from './render-queue.js';
+import { CameraPosition } from './types.js';
+import { FlashQuad, ChangeType } from './flash-overlay.js';
 
 export class Renderer {
     private gl: WebGL2RenderingContext;
@@ -61,7 +61,9 @@ export class Renderer {
     }
 
     private createShaderProgram(): WebGLProgram {
-        const vertexShader = this.createShader(this.gl.VERTEX_SHADER, `#version 300 es
+        const vertexShader = this.createShader(
+            this.gl.VERTEX_SHADER,
+            `#version 300 es
             in vec2 a_position;
             in vec2 a_texCoord;
 
@@ -74,9 +76,12 @@ export class Renderer {
                 gl_Position = vec4(position.xy, 0.0, 1.0);
                 v_texCoord = a_texCoord;
             }
-        `);
+        `
+        );
 
-        const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, `#version 300 es
+        const fragmentShader = this.createShader(
+            this.gl.FRAGMENT_SHADER,
+            `#version 300 es
             precision highp float;
 
             in vec2 v_texCoord;
@@ -97,7 +102,8 @@ export class Renderer {
                     fragColor = vec4(texColor.rgb, texColor.a * u_opacity);
                 }
             }
-        `);
+        `
+        );
 
         const program = this.gl.createProgram()!;
         this.gl.attachShader(program, vertexShader);
@@ -126,7 +132,9 @@ export class Renderer {
     }
 
     private createGridShaderProgram(): WebGLProgram {
-        const vertexShader = this.createShader(this.gl.VERTEX_SHADER, `#version 300 es
+        const vertexShader = this.createShader(
+            this.gl.VERTEX_SHADER,
+            `#version 300 es
             in vec2 a_position;
 
             uniform mat3 u_transform;
@@ -135,9 +143,12 @@ export class Renderer {
                 vec3 position = u_transform * vec3(a_position, 1.0);
                 gl_Position = vec4(position.xy, 0.0, 1.0);
             }
-        `);
+        `
+        );
 
-        const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, `#version 300 es
+        const fragmentShader = this.createShader(
+            this.gl.FRAGMENT_SHADER,
+            `#version 300 es
             precision highp float;
 
             uniform vec4 u_color;
@@ -147,7 +158,8 @@ export class Renderer {
             void main() {
                 fragColor = u_color;
             }
-        `);
+        `
+        );
 
         const program = this.gl.createProgram()!;
         this.gl.attachShader(program, vertexShader);
@@ -163,7 +175,9 @@ export class Renderer {
 
     // Used during diff flashing, stencil masked colour glow highlighting add/del/mods
     private createGlowShaderProgram(): WebGLProgram {
-        const vertexShader = this.createShader(this.gl.VERTEX_SHADER, `#version 300 es
+        const vertexShader = this.createShader(
+            this.gl.VERTEX_SHADER,
+            `#version 300 es
             in vec2 a_position;
             uniform mat3 u_transform;
             out vec2 v_uv;
@@ -172,9 +186,12 @@ export class Renderer {
                 gl_Position = vec4(position.xy, 0.0, 1.0);
                 v_uv = a_position;
             }
-        `);
+        `
+        );
 
-        const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, `#version 300 es
+        const fragmentShader = this.createShader(
+            this.gl.FRAGMENT_SHADER,
+            `#version 300 es
             precision highp float;
             in vec2 v_uv;
             uniform vec4 u_color;
@@ -205,7 +222,8 @@ export class Renderer {
                 alpha = pow(alpha, 1.5); // Adjust falloff curve
                 fragColor = vec4(u_color.rgb, alpha * u_color.a);
             }
-        `);
+        `
+        );
 
         const program = this.gl.createProgram()!;
         this.gl.attachShader(program, vertexShader);
@@ -227,6 +245,7 @@ export class Renderer {
     }
 
     private createQuadBuffer(): WebGLBuffer {
+        // prettier-ignore
         const vertices = new Float32Array([
             0.0, 0.0,    0.0, 0.0,  // BL/BL
             1.0, 0.0,    1.0, 0.0,  // BR/BR
@@ -262,6 +281,7 @@ export class Renderer {
 
     private createUnitQuadBuffer(): WebGLBuffer {
         // unit quad pos only for flash/glow overlay
+        // prettier-ignore
         const vertices = new Float32Array([
             0.0, 0.0,  // BL
             1.0, 0.0,  // BR
@@ -324,7 +344,7 @@ export class Renderer {
             commandsByType.get(command.type)!.push(command);
         }
 
-        const tileCommands = commandsByType.get('tile') as TileRenderCommand[] || [];
+        const tileCommands = (commandsByType.get('tile') as TileRenderCommand[]) || [];
         this.renderTileCommands(tileCommands, position);
 
         // todo: text overlay
@@ -354,7 +374,12 @@ export class Renderer {
         }
     }
 
-    private createTileTransform(worldX: number, worldY: number, tileSize: number, position: CameraPosition): Float32Array {
+    private createTileTransform(
+        worldX: number,
+        worldY: number,
+        tileSize: number,
+        position: CameraPosition
+    ): Float32Array {
         const canvasWidth = this.gl.canvas.width;
         const canvasHeight = this.gl.canvas.height;
 
@@ -368,6 +393,7 @@ export class Renderer {
         const ndcWidth = (screenTileSize * 2.0) / canvasWidth;
         const ndcHeight = -(screenTileSize * 2.0) / canvasHeight;
 
+        // prettier-ignore
         return new Float32Array([
             ndcWidth, 0.0,       0.0,
             0.0,      ndcHeight, 0.0,
@@ -405,6 +431,7 @@ export class Renderer {
         const ndcScaleX = (pixelsPerUnit * 2.0) / canvasWidth;
         const ndcScaleY = -(pixelsPerUnit * 2.0) / canvasHeight;
 
+        // prettier-ignore
         return new Float32Array([
             ndcScaleX, 0.0,       0.0,
             0.0,       ndcScaleY, 0.0,
@@ -433,7 +460,7 @@ export class Renderer {
         // stencil time shitheads
         this.gl.enable(this.gl.STENCIL_TEST);
         this.gl.clear(this.gl.STENCIL_BUFFER_BIT);
-        this.gl.stencilFunc(this.gl.ALWAYS, 1, 0xFF);
+        this.gl.stencilFunc(this.gl.ALWAYS, 1, 0xff);
         this.gl.stencilOp(this.gl.KEEP, this.gl.KEEP, this.gl.REPLACE);
         this.gl.colorMask(false, false, false, false);
 
@@ -444,15 +471,18 @@ export class Renderer {
         this.gl.vertexAttribPointer(this.gridPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
 
         for (const flash of flashes) {
-            this.gl.uniformMatrix3fv(this.gridTransformUniform, false,
-                this.createTileTransform(flash.x, flash.y, 1, position));
+            this.gl.uniformMatrix3fv(
+                this.gridTransformUniform,
+                false,
+                this.createTileTransform(flash.x, flash.y, 1, position)
+            );
             this.gl.uniform4f(this.gridColorUniform, 1.0, 1.0, 1.0, 1.0);
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }
 
         // mask out tile interiors, draw glow only on outside
         this.gl.colorMask(true, true, true, true);
-        this.gl.stencilFunc(this.gl.EQUAL, 0, 0xFF);
+        this.gl.stencilFunc(this.gl.EQUAL, 0, 0xff);
         this.gl.stencilOp(this.gl.KEEP, this.gl.KEEP, this.gl.KEEP);
 
         this.gl.useProgram(this.glowProgram);
@@ -460,16 +490,16 @@ export class Renderer {
         this.gl.enableVertexAttribArray(this.glowPositionAttribute);
         this.gl.vertexAttribPointer(this.glowPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
 
-        const glowSize = 0.3 * (Math.max(1, Math.min(position.zoom,32) / 2) * 0.5);
+        const glowSize = 0.3 * (Math.max(1, Math.min(position.zoom, 32) / 2) * 0.5);
         const glowScale = 1.0 + 2.0 * glowSize;
         const glowRatio = glowSize / glowScale;
 
         for (const flash of flashes) {
-            this.gl.uniformMatrix3fv(this.glowTransformUniform, false, this.createTileTransform(
-                flash.x - glowSize,
-                flash.y - glowSize,
-                glowScale, position
-            ));
+            this.gl.uniformMatrix3fv(
+                this.glowTransformUniform,
+                false,
+                this.createTileTransform(flash.x - glowSize, flash.y - glowSize, glowScale, position)
+            );
 
             const [r, g, b] = this.getGlowColor(flash.changeType);
             this.gl.uniform4f(this.glowColorUniform, r, g, b, 1.0);
@@ -497,6 +527,7 @@ export class Renderer {
         const g = this.frameTickerHue & 2 ? 1.0 : 0.0;
         const b = this.frameTickerHue & 4 ? 1.0 : 0.0;
 
+        // prettier-ignore
         const transform = new Float32Array([
             0.02, 0.0,  0.0,   // scale x
             0.0,  2.0,  0.0,   // scale y

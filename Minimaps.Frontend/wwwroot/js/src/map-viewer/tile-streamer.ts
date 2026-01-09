@@ -97,7 +97,7 @@ export class TileStreamer {
 
         // Check if we can start a new load
         if (this.currentLoads >= this.maxConcurrentLoads) {
-            const existingIndex = this.pendingQueue.findIndex(p => p.hash === hash);
+            const existingIndex = this.pendingQueue.findIndex((p) => p.hash === hash);
             if (existingIndex >= 0) {
                 const existing = this.pendingQueue[existingIndex];
                 if (existing && priority > existing.priority) {
@@ -150,7 +150,7 @@ export class TileStreamer {
             const imageBitmap = await createImageBitmap(data, {
                 imageOrientation: 'none',
                 premultiplyAlpha: 'none',
-                colorSpaceConversion: 'none'
+                colorSpaceConversion: 'none',
             });
             return imageBitmap;
         } catch (error) {
@@ -171,7 +171,7 @@ export class TileStreamer {
         }
     }
 
-    private evictToBudget(targetMemory : number): void {
+    private evictToBudget(targetMemory: number): void {
         if (this.totalGpuBytes <= targetMemory) {
             return;
         }
@@ -227,7 +227,7 @@ export class TileStreamer {
             gpuMemoryBytes: this.totalGpuBytes,
             gpuMemoryMB: (this.totalGpuBytes / (1024 * 1024)).toFixed(2),
             gpuMemoryBudgetMB: (this.gpuMemoryBudget / (1024 * 1024)).toFixed(0),
-            gpuMemoryUsagePercent: ((this.totalGpuBytes / this.gpuMemoryBudget) * 100).toFixed(1)
+            gpuMemoryUsagePercent: ((this.totalGpuBytes / this.gpuMemoryBudget) * 100).toFixed(1),
         };
     }
 
@@ -261,7 +261,7 @@ export class TileStreamer {
             width: imageBitmap.width,
             height: imageBitmap.height,
             format,
-            memoryBytes
+            memoryBytes,
         };
     }
 }
