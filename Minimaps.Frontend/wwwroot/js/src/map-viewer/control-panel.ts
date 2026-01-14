@@ -1,4 +1,7 @@
 import type { MapDataManager, MapInfo } from './map-data-manager.js';
+import type { LayerManager } from './layer-manager.js';
+import type { TileLayer } from './layers/layers.js';
+import { isTileLayer } from './layers/layers.js';
 import { BuildVersion } from './build-version.js';
 
 export interface VersionInfo {
@@ -8,30 +11,45 @@ export interface VersionInfo {
     products: string[];
 }
 
+export interface LayerDisplayInfo {
+    layerId: string;
+    mapId: number;
+    mapName: string;
+    visible: boolean;
+    monochrome: boolean;
+    isParent: boolean;
+}
+
 export interface ControlPanelOptions {
     currentMapId: number;
     currentVersion: BuildVersion | 'latest';
     mapDataManager: MapDataManager;
+    layerManager: LayerManager;
     onMapChange: (mapId: number) => void;
     onVersionChange: (version: BuildVersion | 'latest') => void;
+    onLayerChange: () => void;
 }
 
 export class ControlPanel {
     private currentMapId: number;
     private currentVersion: BuildVersion | 'latest';
     private mapDataManager: MapDataManager;
+    private layerManager: LayerManager;
     private onMapChange: (mapId: number) => void;
     private onVersionChange: (version: BuildVersion | 'latest') => void;
+    private onLayerChange: () => void;
 
     private controlElement: HTMLElement;
     private mapSearchInput: HTMLInputElement;
     private mapDropdown: HTMLDivElement;
     private versionSelect: HTMLSelectElement;
     private versionWarning: HTMLDivElement | null = null;
+    private layersTree: HTMLDivElement;
 
     private allMaps: MapInfo[] = [];
     private filteredMaps: MapInfo[] = [];
     private availableVersions: VersionInfo[] = [];
+    private currentLayers: LayerDisplayInfo[] = [];
     private showDropdown = false;
     private keyboardListenerBound: ((e: KeyboardEvent) => void) | null = null;
 
@@ -39,8 +57,10 @@ export class ControlPanel {
         this.currentMapId = options.currentMapId;
         this.currentVersion = options.currentVersion;
         this.mapDataManager = options.mapDataManager;
+        this.layerManager = options.layerManager;
         this.onMapChange = options.onMapChange;
         this.onVersionChange = options.onVersionChange;
+        this.onLayerChange = options.onLayerChange;
 
         this.controlElement = document.getElementById('map-control-panel')!;
         if (!this.controlElement) {
@@ -65,6 +85,11 @@ export class ControlPanel {
         this.versionWarning = document.getElementById('version-warning') as HTMLDivElement;
         if (!this.versionWarning) {
             throw new Error('#version-warning not found');
+        }
+
+        this.layersTree = document.getElementById('layers-tree') as HTMLDivElement;
+        if (!this.layersTree) {
+            throw new Error('#layers-tree not found');
         }
 
         this.setupEventListeners();
@@ -385,6 +410,142 @@ export class ControlPanel {
 
             this.versionSelect.appendChild(option);
         }
+    }
+
+    public updateLayers(): void {
+        const layers = this.layerManager.getAllLayers();
+        this.currentLayers = [];
+
+        for (const layer of layers) {
+            if (!isTileLayer(layer)) continue;
+
+            // map ID from layer ID (either "main" or "parent-{mapId}")
+            let mapId: number;
+            let isParent = false;
+            if (layer.id === 'main') {
+                mapId = this.currentMapId;
+            } else if (layer.id.startsWith('parent-')) {
+                mapId = parseInt(layer.id.replace('parent-', ''));
+                isParent = true;
+            } else {
+                continue;
+            }
+
+            const mapInfo = this.allMaps.find((m) => m.mapId === mapId);
+            const mapName = mapInfo?.name ?? `Map ${mapId}`;
+
+            this.currentLayers.push({
+                layerId: layer.id,
+                mapId,
+                mapName,
+                visible: layer.visible,
+                monochrome: layer.monochrome,
+                isParent,
+            });
+        }
+
+        // highest zIndex first photoshop-like
+        this.currentLayers.sort((a, b) => (b.isParent ? -1 : 0) - (a.isParent ? -1 : 0));
+
+        this.renderLayersTree();
+    }
+
+    private renderLayersTree(): void {
+        this.layersTree.replaceChildren();
+
+        if (this.currentLayers.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'layer-item';
+            empty.innerHTML = '<span class="layer-info">No layers</span>';
+            this.layersTree.appendChild(empty);
+            return;
+        }
+
+        const hasParent = this.currentLayers.some((l) => l.isParent);
+
+        for (const layer of this.currentLayers) {
+            const item = this.createLayerItem(layer, hasParent);
+            this.layersTree.appendChild(item);
+        }
+    }
+
+    private createLayerItem(layer: LayerDisplayInfo, hasParent: boolean): HTMLElement {
+        const item = document.createElement('div');
+        item.className = 'layer-item';
+        item.dataset['layerId'] = layer.layerId;
+
+        // Layer info
+        const info = document.createElement('span');
+        info.className = 'layer-info';
+        info.innerHTML = `<span class="layer-id">${layer.mapId}:</span><span class="layer-name">${layer.mapName}</span>`;
+        item.appendChild(info);
+
+        // Monochrome toggle
+        if (layer.isParent && hasParent) {
+            const monochromeBtn = this.createIconButton('monochrome-toggle', 'Toggle grayscale', false, () => {
+                this.handleMonochromeToggle(layer.layerId);
+            });
+            if (layer.monochrome) monochromeBtn.classList.add('active');
+            monochromeBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 2a10 10 0 0 1 0 20z" fill="currentColor"></path>
+            </svg>`;
+            item.appendChild(monochromeBtn);
+        }
+
+        // Visibility toggle
+        const visibilityBtn = this.createIconButton('visibility-toggle', 'Toggle visibility', !layer.visible, () => {
+            this.handleVisibilityToggle(layer.layerId);
+        });
+        visibilityBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+        </svg>`;
+        item.appendChild(visibilityBtn);
+
+        return item;
+    }
+
+    private createIconButton(className: string, title: string, inactive: boolean, onClick: () => void): HTMLSpanElement {
+        const btn = document.createElement('span');
+        btn.className = `layer-icon ${className}`;
+        if (inactive) btn.classList.add('inactive');
+        btn.title = title;
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            onClick();
+        });
+        return btn;
+    }
+
+    private handleVisibilityToggle(layerId: string): void {
+        const layer = this.layerManager.getLayer(layerId);
+        if (!layer) return;
+
+        layer.visible = !layer.visible;
+
+        const layerInfo = this.currentLayers.find((l) => l.layerId === layerId);
+        if (layerInfo) {
+            layerInfo.visible = layer.visible;
+        }
+
+        this.renderLayersTree();
+        this.onLayerChange();
+    }
+
+    private handleMonochromeToggle(layerId: string): void {
+        const layer = this.layerManager.getLayer(layerId);
+        if (!layer || !isTileLayer(layer)) return;
+
+        layer.monochrome = !layer.monochrome;
+
+        const layerInfo = this.currentLayers.find((l) => l.layerId === layerId);
+        if (layerInfo) {
+            layerInfo.monochrome = layer.monochrome;
+        }
+
+        this.renderLayersTree();
+        this.onLayerChange();
     }
 
     public dispose(): void {

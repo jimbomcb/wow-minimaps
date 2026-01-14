@@ -175,8 +175,10 @@ export class MapViewer {
             currentMapId: this.currentMapId,
             currentVersion: this.currentVersion,
             mapDataManager: this.mapDataManager,
+            layerManager: this.layerManager,
             onMapChange: (mapId) => this.handleMapChange(mapId),
             onVersionChange: (version) => this.handleVersionChange(version),
+            onLayerChange: () => this.scheduleRender(),
         });
 
         const debugContainer = document.getElementById('debug-panel-container');
@@ -252,6 +254,7 @@ export class MapViewer {
             }
 
             this.controlPanel.setCurrentMap(mapId);
+            this.controlPanel.updateLayers();
 
             if (autoZoom && mapData.composition.bounds) {
                 console.log(`Auto-zooming to fit`, mapData.composition.bounds);

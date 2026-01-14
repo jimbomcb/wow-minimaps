@@ -29,6 +29,10 @@ export class LayerManager {
         return this.layers.get(layerId);
     }
 
+    getAllLayers(): Layer[] {
+        return this.renderOrder.map((id) => this.layers.get(id)).filter((layer) => layer !== undefined) as Layer[];
+    }
+
     // reorder layer map
     private updateRenderOrder(): void {
         this.renderOrder = Array.from(this.layers.values())

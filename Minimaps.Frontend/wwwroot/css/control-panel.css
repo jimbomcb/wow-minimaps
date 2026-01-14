@@ -181,3 +181,91 @@
     flex: 1;
     line-height: 1.4;
 }
+
+/* Layers Section */
+.map-controls .control-divider {
+    height: 1px;
+    background: #5c4a36;
+    margin: 12px 0;
+}
+
+.map-controls .layers-title {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #a89880;
+}
+
+.map-controls .layers-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.map-controls .layer-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    background: #0d0a08;
+    border: 1px solid #3d3228;
+    gap: 8px;
+}
+
+.map-controls .layer-item:hover {
+    background: #12100c;
+    border-color: #5c4a36;
+}
+
+.map-controls .layer-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.map-controls .layer-id {
+    color: #c9a558;
+    font-weight: 600;
+}
+
+.map-controls .layer-name {
+    color: #e8d4b8;
+}
+
+.map-controls .layer-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #c9a558;
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 2px;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.map-controls .layer-icon:hover {
+    border-color: #5c4a36;
+}
+
+.map-controls .layer-icon.inactive {
+    color: #4a3d30;
+}
+
+.map-controls .layer-icon.active {
+    color: #c9a558;
+}
+
+.map-controls .monochrome-toggle:not(.active) {
+    color: #4a3d30;
+}
+
+.map-controls .layer-icon svg {
+    width: 14px;
+    height: 14px;
+}

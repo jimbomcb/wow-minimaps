@@ -28,6 +28,7 @@ export interface TileLayer extends BaseLayer {
     composition: MinimapComposition | null;
     lodLevel: number;
     residentLodLevel: number;
+    monochrome: boolean;
 
     isLoaded(): boolean;
     isLoading(): boolean;
