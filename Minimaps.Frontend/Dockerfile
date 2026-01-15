@@ -15,6 +15,8 @@ WORKDIR /src
 COPY ["External/DBCD/Directory.Build.props", "External/DBCD/"]
 COPY ["External/DBCD/Directory.Build.targets", "External/DBCD/"]
 COPY ["Minimaps.Frontend/Minimaps.Frontend.csproj", "Minimaps.Frontend/"]
+COPY ["Minimaps.Frontend/package.json", "Minimaps.Frontend/"]
+COPY ["Minimaps.Frontend/package-lock.json", "Minimaps.Frontend/"]
 COPY ["Minimaps.Aspire.ServiceDefaults/Minimaps.Aspire.ServiceDefaults.csproj", "Minimaps.Aspire.ServiceDefaults/"]
 COPY ["Minimaps.Database/Minimaps.Database.csproj", "Minimaps.Database/"]
 COPY ["Minimaps.Shared/Minimaps.Shared.csproj", "Minimaps.Shared/"]
@@ -23,6 +25,7 @@ COPY ["External/DBCD/DBCD.IO/DBCD.IO.csproj", "External/DBCD/DBCD.IO/"]
 RUN dotnet restore "./Minimaps.Frontend/Minimaps.Frontend.csproj"
 COPY . .
 WORKDIR "/src/Minimaps.Frontend"
+RUN npm ci
 RUN dotnet build "./Minimaps.Frontend.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
