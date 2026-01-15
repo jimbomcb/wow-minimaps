@@ -117,14 +117,9 @@ public class R2TileStore : ITileStore, IDisposable
             response = await _s3Client.ListObjectsV2Async(request, cancellationToken);
             foreach (var obj in response.S3Objects)
             {
-                // Key format: "xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                var parts = obj.Key.Split('/');
-                if (parts.Length == 2 && parts[1].Length == 32)
+                if (ContentHash.TryParse(obj.Key, out var hash))
                 {
-                    if (ContentHash.TryParse(parts[1], out var hash))
-                    {
-                        hashes.Add(hash);
-                    }
+                    hashes.Add(hash);
                 }
             }
             request.ContinuationToken = response.NextContinuationToken;
