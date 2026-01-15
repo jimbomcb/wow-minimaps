@@ -6,6 +6,7 @@
 .map-viewport {
     height: 100%;
     position: relative;
+    user-select: none;
 }
 
 #map-canvas {
