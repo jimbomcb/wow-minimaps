@@ -45,6 +45,14 @@ export class ControlPanel {
     private versionSelect: HTMLSelectElement;
     private versionWarning: HTMLDivElement | null = null;
     private layersTree: HTMLDivElement;
+    private mapNavPrevBtn: HTMLButtonElement;
+    private mapNavNextBtn: HTMLButtonElement;
+    private mapNavPrevLabel: HTMLSpanElement;
+    private mapNavNextLabel: HTMLSpanElement;
+    private versionNavPrevBtn: HTMLButtonElement;
+    private versionNavNextBtn: HTMLButtonElement;
+    private versionNavPrevLabel: HTMLSpanElement;
+    private versionNavNextLabel: HTMLSpanElement;
 
     private allMaps: MapInfo[] = [];
     private filteredMaps: MapInfo[] = [];
@@ -96,6 +104,16 @@ export class ControlPanel {
             throw new Error('#layers-tree not found');
         }
 
+        this.mapNavPrevBtn = document.getElementById('map-nav-prev') as HTMLButtonElement;
+        this.mapNavNextBtn = document.getElementById('map-nav-next') as HTMLButtonElement;
+        this.mapNavPrevLabel = document.getElementById('map-nav-prev-label') as HTMLSpanElement;
+        this.mapNavNextLabel = document.getElementById('map-nav-next-label') as HTMLSpanElement;
+
+        this.versionNavPrevBtn = document.getElementById('version-nav-prev') as HTMLButtonElement;
+        this.versionNavNextBtn = document.getElementById('version-nav-next') as HTMLButtonElement;
+        this.versionNavPrevLabel = document.getElementById('version-nav-prev-label') as HTMLSpanElement;
+        this.versionNavNextLabel = document.getElementById('version-nav-next-label') as HTMLSpanElement;
+
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
         this.loadMapsFromAPI();
@@ -111,22 +129,22 @@ export class ControlPanel {
 
             const key = e.key.toLowerCase();
 
-            // Q/E for version navigation
-            if (key === 'e') {
-                e.preventDefault();
-                this.navigateVersion(-1);
-            } else if (key === 'q') {
-                e.preventDefault();
-                this.navigateVersion(1);
-            }
-
-            // Z/C for map navigation
-            else if (key === 'z') {
+            // Q/E for map navigation
+            if (key === 'q') {
                 e.preventDefault();
                 this.navigateMap(-1);
-            } else if (key === 'c') {
+            } else if (key === 'e') {
                 e.preventDefault();
                 this.navigateMap(1);
+            }
+
+            // Z/C for version navigation
+            else if (key === 'z') {
+                e.preventDefault();
+                this.navigateVersion(1);
+            } else if (key === 'c') {
+                e.preventDefault();
+                this.navigateVersion(-1);
             }
         };
 
@@ -212,6 +230,20 @@ export class ControlPanel {
                 console.error('Failed to parse version from selector:', error);
             }
         });
+
+        if (this.mapNavPrevBtn) {
+            this.mapNavPrevBtn.addEventListener('click', () => this.navigateMap(-1));
+        }
+        if (this.mapNavNextBtn) {
+            this.mapNavNextBtn.addEventListener('click', () => this.navigateMap(1));
+        }
+
+        if (this.versionNavPrevBtn) {
+            this.versionNavPrevBtn.addEventListener('click', () => this.navigateVersion(1));
+        }
+        if (this.versionNavNextBtn) {
+            this.versionNavNextBtn.addEventListener('click', () => this.navigateVersion(-1));
+        }
     }
 
     private scrollToCurrentMapInDropdown(): void {
@@ -289,6 +321,7 @@ export class ControlPanel {
         this.mapSearchInput.value = `${mapId} - ${mapName}`;
         this.showDropdown = false;
         this.renderDropdown();
+        this.updateMapNavButtons();
 
         this.loadVersionsForMap(mapId).then(() => {
             if (mapId === this.currentMapId) {
@@ -304,9 +337,62 @@ export class ControlPanel {
             : `Map ${this.currentMapId}`;
     }
 
+    private updateMapNavButtons(): void {
+        if (!this.mapNavPrevBtn || !this.mapNavNextBtn) return;
+
+        const currentIndex = this.allMaps.findIndex((m) => m.mapId === this.currentMapId);
+        if (currentIndex > 0) {
+            const prevMap = this.allMaps[currentIndex - 1]!;
+            this.mapNavPrevLabel.textContent = `${prevMap.mapId}: ${prevMap.name}`;
+            this.mapNavPrevBtn.disabled = false;
+        } else {
+            this.mapNavPrevLabel.textContent = '—';
+            this.mapNavPrevBtn.disabled = true;
+        }
+
+        if (currentIndex >= 0 && currentIndex < this.allMaps.length - 1) {
+            const nextMap = this.allMaps[currentIndex + 1]!;
+            this.mapNavNextLabel.textContent = `${nextMap.mapId}: ${nextMap.name}`;
+            this.mapNavNextBtn.disabled = false;
+        } else {
+            this.mapNavNextLabel.textContent = '—';
+            this.mapNavNextBtn.disabled = true;
+        }
+    }
+
+    private updateVersionNavButtons(): void {
+        if (!this.versionNavPrevBtn || !this.versionNavNextBtn) return;
+
+        let currentIndex: number;
+        if (this.currentVersion === 'latest') {
+            currentIndex = 0;
+        } else {
+            currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
+        }
+
+        if (currentIndex >= 0 && currentIndex < this.availableVersions.length - 1) {
+            const prevVersion = this.availableVersions[currentIndex + 1]!;
+            this.versionNavPrevLabel.textContent = prevVersion.displayName;
+            this.versionNavPrevBtn.disabled = false;
+        } else {
+            this.versionNavPrevLabel.textContent = '—';
+            this.versionNavPrevBtn.disabled = true;
+        }
+
+        if (currentIndex > 0) {
+            const nextVersion = this.availableVersions[currentIndex - 1]!;
+            this.versionNavNextLabel.textContent = nextVersion.displayName;
+            this.versionNavNextBtn.disabled = false;
+        } else {
+            this.versionNavNextLabel.textContent = '—';
+            this.versionNavNextBtn.disabled = true;
+        }
+    }
+
     public setCurrentMap(mapId: number): void {
         this.currentMapId = mapId;
         this.updateMapSearchText();
+        this.updateMapNavButtons();
         this.loadVersionsForMap(mapId);
     }
 
@@ -323,6 +409,7 @@ export class ControlPanel {
 
         if (this.availableVersions.length > 0) {
             this.updateVersionSelector();
+            this.updateVersionNavButtons();
         }
     }
 
@@ -364,6 +451,7 @@ export class ControlPanel {
             this.allMaps = await this.mapDataManager.loadMaps();
             this.filteredMaps = [...this.allMaps];
             this.updateMapSearchText();
+            this.updateMapNavButtons();
 
             await this.loadVersionsForMap(this.currentMapId);
         } catch (error) {
@@ -386,6 +474,7 @@ export class ControlPanel {
             }));
 
             this.updateVersionSelector();
+            this.updateVersionNavButtons();
         } catch (error) {
             console.error(`Failed to load versions for map ${mapId}:`, error);
         }

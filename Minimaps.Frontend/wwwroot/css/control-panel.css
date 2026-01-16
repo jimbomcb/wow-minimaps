@@ -58,6 +58,71 @@
     color: #a89880;
 }
 
+.map-controls .map-nav-buttons {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.map-controls .map-nav-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    background: #2a2218;
+    border: none;
+    box-shadow: inset -1px -1px 0 #0a0805, inset 1px 1px 0 #4a3d30;
+    color: #e8d4b8;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    min-width: 0;
+    text-align: left;
+}
+
+.map-controls .map-nav-btn:hover {
+    background: #3a3020;
+}
+
+.map-controls .map-nav-btn:active {
+    background: #1a1410;
+    box-shadow: inset 1px 1px 0 #0a0805, inset -1px -1px 0 #4a3d30;
+}
+
+.map-controls .map-nav-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.map-controls .map-nav-btn:disabled:hover {
+    background: #2a2218;
+}
+
+.map-controls .map-nav-arrow {
+    color: #c9a558;
+    font-size: 8px;
+    flex-shrink: 0;
+}
+
+.map-controls .map-nav-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.map-controls .map-nav-hint {
+    flex-shrink: 0;
+    padding: 0 4px;
+    background: #1a1410;
+    border: 1px solid #3d3228;
+    font-size: 9px;
+    font-weight: 600;
+    color: #a89880;
+}
+
 .map-controls .dropdown-wrapper {
     position: relative;
 }
