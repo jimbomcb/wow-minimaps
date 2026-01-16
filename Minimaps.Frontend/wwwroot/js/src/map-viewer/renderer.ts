@@ -9,6 +9,7 @@ export class Renderer {
     private glowProgram: WebGLProgram;
     private quadBuffer: WebGLBuffer;
     private gridBuffer: WebGLBuffer;
+    private chunkGridBuffer: WebGLBuffer;
     private unitQuadBuffer: WebGLBuffer;
     private positionAttribute!: number;
     private texCoordAttribute!: number;
@@ -56,6 +57,7 @@ export class Renderer {
         this.setupGLState();
         this.quadBuffer = this.createQuadBuffer();
         this.gridBuffer = this.createGridBuffer();
+        this.chunkGridBuffer = this.createChunkGridBuffer();
         this.unitQuadBuffer = this.createUnitQuadBuffer();
         this.setupAttributes();
     }
@@ -279,6 +281,29 @@ export class Renderer {
         return buffer;
     }
 
+    private createChunkGridBuffer(): WebGLBuffer {
+        const chunkSize = 1 / 16; // https://wowdev.wiki/ADT/v18 "A map tile is split up into 16x16 = 256 map chunks"
+        const gridSize = 64;
+        const verts: number[] = [];
+
+        for (let x = 0; x <= gridSize * 16; x++) {
+            const xPos = x * chunkSize;
+            verts.push(xPos, 0);
+            verts.push(xPos, gridSize);
+        }
+
+        for (let y = 0; y <= gridSize * 16; y++) {
+            const yPos = y * chunkSize;
+            verts.push(0, yPos);
+            verts.push(gridSize, yPos);
+        }
+
+        const buffer = this.gl.createBuffer()!;
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, new Float32Array(verts), this.gl.STATIC_DRAW);
+        return buffer;
+    }
+
     private createUnitQuadBuffer(): WebGLBuffer {
         // unit quad pos only for flash/glow overlay
         // prettier-ignore
@@ -404,12 +429,25 @@ export class Renderer {
     private renderGrid(position: CameraPosition): void {
         this.gl.useProgram(this.gridProgram);
 
+        const transform = this.createGridTransform(position);
+        this.gl.uniformMatrix3fv(this.gridTransformUniform, false, transform);
+
+        // Inner 16x16 ADT chunks
+        if (position.zoom < 2) {
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.chunkGridBuffer);
+            this.gl.enableVertexAttribArray(this.gridPositionAttribute);
+            this.gl.vertexAttribPointer(this.gridPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
+            this.gl.uniform4f(this.gridColorUniform, 0.3, 0.3, 0.35, 0.1);
+
+            const chunkDivisions = 64 * 16;
+            const chunkLines = (chunkDivisions + 1) * 2;
+            this.gl.drawArrays(this.gl.LINES, 0, chunkLines * 2);
+        }
+
+        // Main 64x64 ADT grid
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.gridBuffer);
         this.gl.enableVertexAttribArray(this.gridPositionAttribute);
         this.gl.vertexAttribPointer(this.gridPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
-
-        const transform = this.createGridTransform(position);
-        this.gl.uniformMatrix3fv(this.gridTransformUniform, false, transform);
 
         this.gl.uniform4f(this.gridColorUniform, 0.3, 0.3, 0.35, 0.3);
 
