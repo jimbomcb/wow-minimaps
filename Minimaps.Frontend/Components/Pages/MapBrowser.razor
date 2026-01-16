@@ -33,10 +33,12 @@
                 </button>
             </div>
             <div class="dropdown-wrapper">
+                <div id="map-display" class="map-display"></div>
                 <input
                     id="map-search-input"
                     type="text"
                     class="map-search-input"
+                    style="display: none;"
                     autocomplete="off" />
                 <div id="map-dropdown" class="dropdown-menu" style="display: none;"></div>
             </div>
@@ -44,6 +46,12 @@
         </div>
 
         <div class="control-section">
+            <div class="version-settings">
+                <button id="version-toggle-unique" class="version-setting-btn" title="Show only unique compositions">
+                    <span class="setting-icon">◇</span>
+                    <span class="setting-label">Unique</span>
+                </button>
+            </div>
             <div class="map-nav-buttons">
                 <button id="version-nav-prev" class="map-nav-btn" title="Previous version (Z)">
                     <span class="map-nav-arrow">◀</span>
@@ -56,9 +64,13 @@
                     <span class="map-nav-hint">C</span>
                 </button>
             </div>
-            <select id="version-selector" class="version-selector">
-                <option value="latest">latest</option>
-            </select>
+            <div class="version-dropdown-wrapper">
+                <button id="version-dropdown-btn" class="version-dropdown-btn">
+                    <span id="version-dropdown-label">Loading...</span>
+                    <span class="dropdown-arrow">▼</span>
+                </button>
+                <div id="version-dropdown" class="version-dropdown" style="display: none;"></div>
+            </div>
             <div id="version-warning" class="version-warning hidden"></div>
         </div>
 

@@ -78,6 +78,7 @@
     font-family: inherit;
     cursor: pointer;
     min-width: 0;
+    min-height: 24px;
     text-align: left;
 }
 
@@ -107,10 +108,43 @@
 
 .map-controls .map-nav-label {
     flex: 1;
+    min-width: 0;
+    line-height: 1.2;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
+}
+
+.map-controls .map-nav-label .build-num {
+    color: #6d5f4e;
+}
+
+.map-controls .id-highlight {
+    color: #c9a558;
+    font-weight: 600;
+}
+
+.map-controls .map-nav-label .version-range {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.map-controls .map-nav-label .version-range .range-row {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+}
+
+.map-controls .map-nav-label .version-range .range-label {
+    font-size: 9px;
+    color: #6d5f4e;
+    min-width: 2.5em;
+    text-align: right;
+}
+
+.map-controls .map-nav-label .version-range .range-ver {
+    text-align: left;
 }
 
 .map-controls .map-nav-hint {
@@ -127,6 +161,24 @@
     position: relative;
 }
 
+.map-controls .map-display {
+    width: 100%;
+    padding: 4px 12px;
+    background: #0d0a08;
+    border: 1px solid #5c4a36;
+    border-radius: 0;
+    color: #e8d4b8;
+    font-size: 14px;
+    cursor: pointer;
+    box-shadow: inset 1px 1px 2px #000;
+    box-sizing: border-box;
+}
+
+.map-controls .map-display:hover {
+    background: #12100c;
+    border-color: #7a6248;
+}
+
 .map-controls .map-search-input {
     width: 100%;
     padding: 4px 12px;
@@ -136,7 +188,7 @@
     color: #e8d4b8;
     font-size: 14px;
     outline: none;
-    cursor: pointer;
+    cursor: text;
     box-shadow: inset 1px 1px 2px #000;
 }
 
@@ -147,7 +199,6 @@
 .map-controls .map-search-input:focus {
     background: #12100c;
     border-color: #c9a558;
-    cursor: text;
 }
 
 .map-controls .dropdown-menu {
@@ -177,10 +228,8 @@
     background: #2a2218;
 }
 
-.map-controls .map-id {
-    font-weight: 600;
-    color: #c9a558;
-    min-width: 50px;
+.map-controls .dropdown-item .id-highlight {
+    min-width: 40px;
     flex-shrink: 0;
 }
 
@@ -216,7 +265,48 @@
     cursor: help;
 }
 
-.map-controls .version-selector {
+.map-controls .version-settings {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.map-controls .version-setting-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: #1a1410;
+    border: 1px solid #3d3228;
+    color: #6d5f4e;
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.map-controls .version-setting-btn:hover {
+    background: #2a2218;
+    border-color: #5c4a36;
+    color: #a89880;
+}
+
+.map-controls .version-setting-btn.active {
+    background: #2a2218;
+    border-color: #c9a558;
+    color: #c9a558;
+}
+
+.map-controls .version-setting-btn .setting-icon {
+    font-size: 10px;
+}
+
+/* Version Dropdown */
+.map-controls .version-dropdown-wrapper {
+    position: relative;
+}
+
+.map-controls .version-dropdown-btn {
     width: 100%;
     padding: 4px 12px;
     background: #0d0a08;
@@ -224,25 +314,106 @@
     border-radius: 0;
     color: #e8d4b8;
     font-size: 14px;
+    font-family: inherit;
     cursor: pointer;
     outline: none;
     box-shadow: inset 1px 1px 2px #000;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-align: left;
 }
 
-.map-controls .version-selector:hover {
+.map-controls .version-dropdown-btn:hover {
     background: #12100c;
     border-color: #7a6248;
 }
 
-.map-controls .version-selector:focus {
+.map-controls .version-dropdown-btn:focus {
     background: #12100c;
     border-color: #c9a558;
 }
 
-.map-controls .version-selector option {
+.map-controls .version-dropdown-btn .dropdown-arrow {
+    font-size: 10px;
+    color: #a89880;
+}
+
+.map-controls .version-dropdown-btn .build-num {
+    color: #6d5f4e;
+}
+
+.map-controls .version-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 350px;
+    overflow-y: auto;
     background: #1a1410;
+    border: 2px solid #5c4a36;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+    z-index: 1001;
+}
+
+.map-controls .version-item {
+    padding: 4px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
     color: #e8d4b8;
-    padding: 8px;
+    border-left: 3px solid transparent;
+}
+
+.map-controls .version-item:hover {
+    background: #2a2218;
+}
+
+.map-controls .version-item.selected {
+    background: #2a2218;
+    border-left-color: #c9a558;
+}
+
+.map-controls .version-item.group-first {
+    padding-top: 6px;
+}
+
+.map-controls .version-item.group-member {
+    padding-left: 20px;
+    font-size: 11px;
+    color: #6d5f4e;
+}
+
+.map-controls .version-item.group-member:hover {
+    color: #a89880;
+}
+
+.map-controls .version-item .version-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.map-controls .version-item .version-text .build-num {
+    color: #6d5f4e;
+}
+
+.map-controls .version-item.group-member .version-text .build-num {
+    color: #4a3d30;
+}
+
+.map-controls .version-item .version-products {
+    font-size: 10px;
+    color: #5c4a36;
+    flex-shrink: 0;
+}
+
+.map-controls .version-item.group-first .version-products {
+    color: #7a6248;
 }
 
 .map-controls .version-warning {
@@ -316,10 +487,6 @@
     white-space: nowrap;
 }
 
-.map-controls .layer-id {
-    color: #c9a558;
-    font-weight: 600;
-}
 
 .map-controls .layer-name {
     color: #e8d4b8;

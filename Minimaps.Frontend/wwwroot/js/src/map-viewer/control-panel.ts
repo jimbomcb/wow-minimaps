@@ -40,9 +40,13 @@ export class ControlPanel {
     private onLayerChange: () => void;
 
     private controlElement: HTMLElement;
+    private mapDisplay: HTMLDivElement;
     private mapSearchInput: HTMLInputElement;
     private mapDropdown: HTMLDivElement;
-    private versionSelect: HTMLSelectElement;
+    private versionDropdownBtn: HTMLButtonElement;
+    private versionDropdownLabel: HTMLSpanElement;
+    private versionDropdown: HTMLDivElement;
+    private versionToggleUnique: HTMLButtonElement;
     private versionWarning: HTMLDivElement | null = null;
     private layersTree: HTMLDivElement;
     private mapNavPrevBtn: HTMLButtonElement;
@@ -59,11 +63,16 @@ export class ControlPanel {
     private filteredMaps: MapInfo[] = [];
     private availableVersions: VersionInfo[] = [];
     private currentLayers: LayerDisplayInfo[] = [];
-    private showDropdown = false;
+    private showMapDropdown = false;
+    private showVersionDropdown = false;
+    private showUniqueOnly = true;
     private keyboardListenerBound: ((e: KeyboardEvent) => void) | null = null;
 
     private mapNavTime: number = 0;
     private readonly MAP_THROTTLE_MS = 50;
+
+    // Cached version groups (rebuilt when availableVersions changes)
+    private versionGroups: { hash: string; versions: VersionInfo[] }[] = [];
 
 
     constructor(options: ControlPanelOptions) {
@@ -80,6 +89,11 @@ export class ControlPanel {
             throw new Error('#map-control-panel not found');
         }
 
+        this.mapDisplay = document.getElementById('map-display') as HTMLDivElement;
+        if (!this.mapDisplay) {
+            throw new Error('#map-display not found');
+        }
+
         this.mapSearchInput = document.getElementById('map-search-input') as HTMLInputElement;
         if (!this.mapSearchInput) {
             throw new Error('#map-search-input not found');
@@ -90,9 +104,26 @@ export class ControlPanel {
             throw new Error('#map-dropdown not found');
         }
 
-        this.versionSelect = document.getElementById('version-selector') as HTMLSelectElement;
-        if (!this.versionSelect) {
-            throw new Error('#version-selector not found');
+        this.versionDropdownBtn = document.getElementById('version-dropdown-btn') as HTMLButtonElement;
+        if (!this.versionDropdownBtn) {
+            throw new Error('#version-dropdown-btn not found');
+        }
+
+        this.versionDropdownLabel = document.getElementById('version-dropdown-label') as HTMLSpanElement;
+        if (!this.versionDropdownLabel) {
+            throw new Error('#version-dropdown-label not found');
+        }
+
+        this.versionDropdown = document.getElementById('version-dropdown') as HTMLDivElement;
+        if (!this.versionDropdown) {
+            throw new Error('#version-dropdown not found');
+        }
+
+        this.versionToggleUnique = document.getElementById('version-toggle-unique') as HTMLButtonElement;
+        if (this.versionToggleUnique && this.showUniqueOnly) {
+            this.versionToggleUnique.classList.add('active');
+            const icon = this.versionToggleUnique.querySelector('.setting-icon');
+            if (icon) icon.textContent = '◆';
         }
 
         this.versionWarning = document.getElementById('version-warning') as HTMLDivElement;
@@ -140,39 +171,85 @@ export class ControlPanel {
                 this.navigateMap(1);
             }
 
-            // Z/C for version navigation
+            // Z/C for version navigation (Z = older/prev, C = newer/next)
             else if (key === 'z') {
                 e.preventDefault();
-                this.navigateVersion(1);
+                this.navigateVersion(-1);
             } else if (key === 'c') {
                 e.preventDefault();
-                this.navigateVersion(-1);
+                this.navigateVersion(1);
             }
         };
 
         document.addEventListener('keydown', this.keyboardListenerBound, { capture: true });
     }
 
+    private rebuildVersionGroups(): void {
+        this.versionGroups = [];
+        let currentGroup: { hash: string; versions: VersionInfo[] } | null = null;
+
+        for (const version of this.availableVersions) {
+            if (!currentGroup || currentGroup.hash !== version.compositionHash) {
+                currentGroup = { hash: version.compositionHash, versions: [version] };
+                this.versionGroups.push(currentGroup);
+            } else {
+                currentGroup.versions.push(version);
+            }
+        }
+    }
+
+    private findCurrentGroupIndex(): number {
+        if (this.currentVersion === 'latest') return this.versionGroups.length - 1;
+
+        for (let i = 0; i < this.versionGroups.length; i++) {
+            const group = this.versionGroups[i]!;
+            if (group.versions.some(v => v.version.equals(this.currentVersion as BuildVersion))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     private navigateVersion(direction: number): void {
         if (this.availableVersions.length === 0) return;
 
-        let currentIndex: number;
-        if (this.currentVersion === 'latest') {
-            currentIndex = 0;
+        if (this.showUniqueOnly) {
+            // Navigate by composition groups
+            const currentGroupIndex = this.findCurrentGroupIndex();
+            if (currentGroupIndex === -1) return;
+
+            const newGroupIndex = currentGroupIndex + direction;
+            if (newGroupIndex < 0 || newGroupIndex >= this.versionGroups.length) return;
+
+            const newGroup = this.versionGroups[newGroupIndex];
+            if (newGroup && newGroup.versions.length > 0) {
+                const canonicalVersion = newGroup.versions[0]!;
+                this.currentVersion = canonicalVersion.version;
+                this.updateVersionDropdownLabel();
+                this.updateVersionNavButtons();
+                this.onVersionChange(canonicalVersion.version);
+            }
         } else {
-            currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
-            if (currentIndex === -1) return;
-        }
+            // Navigate individual versions
+            let currentIndex: number;
+            if (this.currentVersion === 'latest') {
+                currentIndex = this.availableVersions.length - 1;
+            } else {
+                currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
+                if (currentIndex === -1) return;
+            }
 
-        let newIndex = currentIndex + direction;
-        newIndex = Math.max(0, Math.min(this.availableVersions.length - 1, newIndex));
+            let newIndex = currentIndex + direction;
+            newIndex = Math.max(0, Math.min(this.availableVersions.length - 1, newIndex));
 
-        if (newIndex !== currentIndex) {
-            const newVersion = this.availableVersions[newIndex];
-            if (newVersion) {
-                this.currentVersion = newVersion.version;
-                this.versionSelect.value = newVersion.version.encodedValueString;
-                this.onVersionChange(newVersion.version);
+            if (newIndex !== currentIndex) {
+                const newVersion = this.availableVersions[newIndex];
+                if (newVersion) {
+                    this.currentVersion = newVersion.version;
+                    this.updateVersionDropdownLabel();
+                    this.updateVersionNavButtons();
+                    this.onVersionChange(newVersion.version);
+                }
             }
         }
     }
@@ -199,40 +276,68 @@ export class ControlPanel {
     }
 
     private setupEventListeners(): void {
-        // Map search
+        // Map search - click on display to open input
+        this.mapDisplay.addEventListener('click', () => {
+            this.mapDisplay.style.display = 'none';
+            this.mapSearchInput.style.display = 'block';
+            this.mapSearchInput.focus();
+            this.mapSearchInput.select();
+        });
+
         this.mapSearchInput.addEventListener('focus', () => {
-            this.showDropdown = true;
-            this.renderDropdown();
+            this.showMapDropdown = true;
+            this.renderMapDropdown();
             this.scrollToCurrentMapInDropdown();
         });
 
         this.mapSearchInput.addEventListener('blur', () => {
             setTimeout(() => {
-                this.showDropdown = false;
-                this.renderDropdown();
+                this.showMapDropdown = false;
+                this.renderMapDropdown();
+                // Switch back to display mode
+                this.mapSearchInput.style.display = 'none';
+                this.mapDisplay.style.display = 'block';
+                this.updateMapDisplay();
             }, 200);
         });
 
         this.mapSearchInput.addEventListener('input', (e) => {
             const target = e.target as HTMLInputElement;
             this.filterMaps(target.value);
-            this.renderDropdown();
+            this.renderMapDropdown();
         });
 
-        // Version selector
-        this.versionSelect.addEventListener('change', (e) => {
-            const target = e.target as HTMLSelectElement;
-            const encodedStr = target.value;
-
-            try {
-                const version = new BuildVersion(BigInt(encodedStr));
-                this.currentVersion = version;
-                this.onVersionChange(version);
-            } catch (error) {
-                console.error('Failed to parse version from selector:', error);
+        this.versionDropdownBtn.addEventListener('click', () => {
+            this.showVersionDropdown = !this.showVersionDropdown;
+            this.renderVersionDropdown();
+            if (this.showVersionDropdown) {
+                this.scrollToCurrentVersionInDropdown();
             }
         });
 
+        document.addEventListener('click', (e) => {
+            if (this.showVersionDropdown &&
+                !this.versionDropdownBtn.contains(e.target as Node) &&
+                !this.versionDropdown.contains(e.target as Node)) {
+                this.showVersionDropdown = false;
+                this.renderVersionDropdown();
+            }
+        });
+
+        // Unique toggle button
+        if (this.versionToggleUnique) {
+            this.versionToggleUnique.addEventListener('click', () => {
+                this.showUniqueOnly = !this.showUniqueOnly;
+                this.versionToggleUnique.classList.toggle('active', this.showUniqueOnly);
+                const icon = this.versionToggleUnique.querySelector('.setting-icon');
+                if (icon) icon.textContent = this.showUniqueOnly ? '◆' : '◇';
+                this.renderVersionDropdown();
+                this.updateVersionDropdownLabel();
+                this.updateVersionNavButtons();
+            });
+        }
+
+        // Map nav buttons
         if (this.mapNavPrevBtn) {
             this.mapNavPrevBtn.addEventListener('click', () => this.navigateMap(-1));
         }
@@ -240,11 +345,12 @@ export class ControlPanel {
             this.mapNavNextBtn.addEventListener('click', () => this.navigateMap(1));
         }
 
+        // Version nav buttons
         if (this.versionNavPrevBtn) {
-            this.versionNavPrevBtn.addEventListener('click', () => this.navigateVersion(1));
+            this.versionNavPrevBtn.addEventListener('click', () => this.navigateVersion(-1));
         }
         if (this.versionNavNextBtn) {
-            this.versionNavNextBtn.addEventListener('click', () => this.navigateVersion(-1));
+            this.versionNavNextBtn.addEventListener('click', () => this.navigateVersion(1));
         }
     }
 
@@ -276,8 +382,8 @@ export class ControlPanel {
             .sort((a, b) => a.mapId - b.mapId);
     }
 
-    private renderDropdown(): void {
-        if (!this.showDropdown) {
+    private renderMapDropdown(): void {
+        if (!this.showMapDropdown) {
             this.mapDropdown.style.display = 'none';
             return;
         }
@@ -295,7 +401,7 @@ export class ControlPanel {
         for (const map of displayMaps) {
             html += `
                 <div class="dropdown-item" data-map-id="${map.mapId}" data-map-name="${map.name}">
-                    <span class="map-id">${map.mapId}</span>
+                    <span class="id-highlight">${map.mapId}</span>
                     <span class="map-name">${map.name}</span>
                 </div>
             `;
@@ -318,11 +424,121 @@ export class ControlPanel {
         });
     }
 
+    private renderVersionDropdown(): void {
+        if (!this.showVersionDropdown) {
+            this.versionDropdown.style.display = 'none';
+            return;
+        }
+
+        this.versionDropdown.style.display = 'block';
+
+        if (this.versionGroups.length === 0) {
+            this.versionDropdown.innerHTML = '<div class="version-item">No versions available</div>';
+            return;
+        }
+
+        let html = '';
+        for (const group of this.versionGroups) {
+            const isMultiple = group.versions.length > 1;
+
+            const groupIsSelected = group.versions.some(v =>
+                this.currentVersion !== 'latest' && v.version.equals(this.currentVersion as BuildVersion)
+            );
+
+            for (let i = 0; i < group.versions.length; i++) {
+                const version = group.versions[i]!;
+                const isFirst = i === 0;
+                const isGroupRepresentative = isFirst;
+
+                // In unique-only mode only the oldest (first) version in a group
+                if (this.showUniqueOnly && !isFirst) continue;
+
+                const classes = [
+                    'version-item',
+                    (this.showUniqueOnly ? groupIsSelected : (this.currentVersion !== 'latest' && version.version.equals(this.currentVersion as BuildVersion))) ? 'selected' : '',
+                    isGroupRepresentative ? 'group-first' : 'group-member',
+                ].filter(Boolean).join(' ');
+
+                const productsStr = version.products.length > 0 ? version.products.join(', ') : '';
+
+                let displayHtml: string;
+                if (this.showUniqueOnly && isMultiple) {
+                    displayHtml = this.getGroupDisplayRangeHtml(group);
+                } else {
+                    displayHtml = this.formatVersionHtml(version.displayName);
+                }
+
+                html += `
+                    <div class="${classes}" data-version="${version.version.encodedValueString}">
+                        <span class="version-text">${displayHtml}</span>
+                        <span class="version-products">${productsStr}</span>
+                    </div>
+                `;
+            }
+        }
+
+        this.versionDropdown.innerHTML = html;
+
+        const items = this.versionDropdown.querySelectorAll('.version-item[data-version]');
+        items.forEach((item) => {
+            item.addEventListener('click', () => {
+                const encodedStr = item.getAttribute('data-version')!;
+                try {
+                    const version = new BuildVersion(BigInt(encodedStr));
+                    this.selectVersion(version);
+                } catch (error) {
+                    console.error('Failed to parse version:', error);
+                }
+            });
+        });
+    }
+
+    private scrollToCurrentVersionInDropdown(): void {
+        setTimeout(() => {
+            const selectedItem = this.versionDropdown.querySelector('.version-item.selected');
+            if (selectedItem) {
+                selectedItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            }
+        }, 0);
+    }
+
+    private selectVersion(version: BuildVersion): void {
+        this.currentVersion = version;
+        this.showVersionDropdown = false;
+        this.renderVersionDropdown();
+        this.updateVersionDropdownLabel();
+        this.updateVersionNavButtons();
+        this.onVersionChange(version);
+    }
+
+    private updateVersionDropdownLabel(): void {
+        if (this.availableVersions.length === 0) {
+            this.versionDropdownLabel.textContent = 'No versions';
+            return;
+        }
+
+        // In unique mode show the group range, otherwise specific version
+        if (this.showUniqueOnly) {
+            const currentGroupIndex = this.findCurrentGroupIndex();
+            if (currentGroupIndex >= 0) {
+                const currentGroup = this.versionGroups[currentGroupIndex]!;
+                this.versionDropdownLabel.innerHTML = this.getGroupDisplayRangeHtml(currentGroup);
+                return;
+            }
+        }
+
+        if (this.currentVersion === 'latest') {
+            this.versionDropdownLabel.innerHTML = this.formatVersionHtml(this.availableVersions[this.availableVersions.length - 1]!.displayName);
+        } else {
+            this.versionDropdownLabel.innerHTML = this.formatVersionHtml(this.currentVersion.toString());
+        }
+    }
+
     private selectMap(mapId: number, mapName: string): void {
         this.currentMapId = mapId;
         this.mapSearchInput.value = `${mapId} - ${mapName}`;
-        this.showDropdown = false;
-        this.renderDropdown();
+        this.showMapDropdown = false;
+        this.renderMapDropdown();
         this.updateMapNavButtons();
         this.updateMapAliases();
 
@@ -335,6 +551,16 @@ export class ControlPanel {
         this.mapSearchInput.value = currentMap
             ? `${currentMap.mapId} - ${currentMap.name}`
             : `Map ${this.currentMapId}`;
+        this.updateMapDisplay();
+    }
+
+    private updateMapDisplay(): void {
+        const currentMap = this.allMaps.find((m) => m.mapId === this.currentMapId);
+        if (currentMap) {
+            this.mapDisplay.innerHTML = `<span class="id-highlight">${currentMap.mapId}</span> ${currentMap.name}`;
+        } else {
+            this.mapDisplay.textContent = `Map ${this.currentMapId}`;
+        }
     }
 
     private updateMapNavButtons(): void {
@@ -343,7 +569,7 @@ export class ControlPanel {
         const currentIndex = this.allMaps.findIndex((m) => m.mapId === this.currentMapId);
         if (currentIndex > 0) {
             const prevMap = this.allMaps[currentIndex - 1]!;
-            this.mapNavPrevLabel.textContent = `${prevMap.mapId}: ${prevMap.name}`;
+            this.mapNavPrevLabel.innerHTML = `<span class="id-highlight">${prevMap.mapId}</span> ${prevMap.name}`;
             this.mapNavPrevBtn.disabled = false;
         } else {
             this.mapNavPrevLabel.textContent = '—';
@@ -352,7 +578,7 @@ export class ControlPanel {
 
         if (currentIndex >= 0 && currentIndex < this.allMaps.length - 1) {
             const nextMap = this.allMaps[currentIndex + 1]!;
-            this.mapNavNextLabel.textContent = `${nextMap.mapId}: ${nextMap.name}`;
+            this.mapNavNextLabel.innerHTML = `<span class="id-highlight">${nextMap.mapId}</span> ${nextMap.name}`;
             this.mapNavNextBtn.disabled = false;
         } else {
             this.mapNavNextLabel.textContent = '—';
@@ -360,32 +586,85 @@ export class ControlPanel {
         }
     }
 
+    // Format version string with de-emphasized build number
+    private formatVersionHtml(version: string): string {
+        const parts = version.split('.');
+        if (parts.length === 4) {
+            const [w, x, y, z] = parts;
+            return `${w}.${x}.${y}<span class="build-num">.${z}</span>`;
+        }
+        return version;
+    }
+
+    // Tabular layout for nav buttons
+    private getGroupDisplayRangeVerticalHtml(group: { hash: string; versions: VersionInfo[] }): string {
+        if (group.versions.length === 1) {
+            return this.formatVersionHtml(group.versions[0]!.displayName);
+        }
+        const oldest = group.versions[0]!;
+        const newest = group.versions[group.versions.length - 1]!;
+        return `<span class="version-range"><span class="range-row"><span class="range-label">From</span><span class="range-ver">${this.formatVersionHtml(oldest.displayName)}</span></span><span class="range-row"><span class="range-label">To</span><span class="range-ver">${this.formatVersionHtml(newest.displayName)}</span></span></span>`;
+    }
+
+    // Inline horizontal layout for dropdowns
+    private getGroupDisplayRangeHtml(group: { hash: string; versions: VersionInfo[] }): string {
+        if (group.versions.length === 1) {
+            return this.formatVersionHtml(group.versions[0]!.displayName);
+        }
+        const oldest = group.versions[0]!;
+        const newest = group.versions[group.versions.length - 1]!;
+        return `${this.formatVersionHtml(oldest.displayName)} → ${this.formatVersionHtml(newest.displayName)}`;
+    }
+
     private updateVersionNavButtons(): void {
         if (!this.versionNavPrevBtn || !this.versionNavNextBtn) return;
 
-        let currentIndex: number;
-        if (this.currentVersion === 'latest') {
-            currentIndex = 0;
-        } else {
-            currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
-        }
+        // todo: expand if i want some other grouping setups, just grouping by subsequent matches for now
+        if (this.showUniqueOnly) {
+            const currentGroupIndex = this.findCurrentGroupIndex();
 
-        if (currentIndex >= 0 && currentIndex < this.availableVersions.length - 1) {
-            const prevVersion = this.availableVersions[currentIndex + 1]!;
-            this.versionNavPrevLabel.textContent = prevVersion.displayName;
-            this.versionNavPrevBtn.disabled = false;
-        } else {
-            this.versionNavPrevLabel.textContent = '—';
-            this.versionNavPrevBtn.disabled = true;
-        }
+            if (currentGroupIndex > 0) {
+                const prevGroup = this.versionGroups[currentGroupIndex - 1]!;
+                this.versionNavPrevLabel.innerHTML = this.getGroupDisplayRangeVerticalHtml(prevGroup);
+                this.versionNavPrevBtn.disabled = false;
+            } else {
+                this.versionNavPrevLabel.textContent = '—';
+                this.versionNavPrevBtn.disabled = true;
+            }
 
-        if (currentIndex > 0) {
-            const nextVersion = this.availableVersions[currentIndex - 1]!;
-            this.versionNavNextLabel.textContent = nextVersion.displayName;
-            this.versionNavNextBtn.disabled = false;
+            if (currentGroupIndex >= 0 && currentGroupIndex < this.versionGroups.length - 1) {
+                const nextGroup = this.versionGroups[currentGroupIndex + 1]!;
+                this.versionNavNextLabel.innerHTML = this.getGroupDisplayRangeVerticalHtml(nextGroup);
+                this.versionNavNextBtn.disabled = false;
+            } else {
+                this.versionNavNextLabel.textContent = '—';
+                this.versionNavNextBtn.disabled = true;
+            }
         } else {
-            this.versionNavNextLabel.textContent = '—';
-            this.versionNavNextBtn.disabled = true;
+            let currentIndex: number;
+            if (this.currentVersion === 'latest') {
+                currentIndex = this.availableVersions.length - 1;
+            } else {
+                currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
+            }
+
+            if (currentIndex > 0) {
+                const prevVersion = this.availableVersions[currentIndex - 1]!;
+                this.versionNavPrevLabel.innerHTML = this.formatVersionHtml(prevVersion.displayName);
+                this.versionNavPrevBtn.disabled = false;
+            } else {
+                this.versionNavPrevLabel.textContent = '—';
+                this.versionNavPrevBtn.disabled = true;
+            }
+
+            if (currentIndex >= 0 && currentIndex < this.availableVersions.length - 1) {
+                const nextVersion = this.availableVersions[currentIndex + 1]!;
+                this.versionNavNextLabel.innerHTML = this.formatVersionHtml(nextVersion.displayName);
+                this.versionNavNextBtn.disabled = false;
+            } else {
+                this.versionNavNextLabel.textContent = '—';
+                this.versionNavNextBtn.disabled = true;
+            }
         }
     }
 
@@ -446,17 +725,9 @@ export class ControlPanel {
 
     public setCurrentVersion(version: BuildVersion | 'latest'): void {
         this.currentVersion = version;
-        if (version === 'latest') {
-            // latest = default to most recent
-            if (this.availableVersions.length > 0) {
-                this.versionSelect.value = this.availableVersions[0]!.version.encodedValueString;
-            }
-        } else {
-            this.versionSelect.value = version.encodedValueString;
-        }
 
         if (this.availableVersions.length > 0) {
-            this.updateVersionSelector();
+            this.updateVersionDropdownLabel();
             this.updateVersionNavButtons();
         }
     }
@@ -481,17 +752,9 @@ export class ControlPanel {
 
     public setAvailableVersions(versions: VersionInfo[]): void {
         this.availableVersions = versions;
-
-        this.versionSelect.innerHTML = '';
-        for (const version of versions) {
-            const option = document.createElement('option');
-            option.value = version.version.encodedValueString;
-            option.textContent = version.displayName;
-            if (this.currentVersion !== 'latest' && version.version.equals(this.currentVersion)) {
-                option.selected = true;
-            }
-            this.versionSelect.appendChild(option);
-        }
+        this.rebuildVersionGroups();
+        this.updateVersionDropdownLabel();
+        this.updateVersionNavButtons();
     }
 
     public async loadMapsFromAPI(): Promise<void> {
@@ -512,8 +775,8 @@ export class ControlPanel {
         try {
             const versions = await this.mapDataManager.getVersionsForMap(mapId);
 
-            // BuildVersion descending sort
-            versions.sort((a, b) => b.version.compareTo(a.version));
+            // BuildVersion ascending sort (oldest first)
+            versions.sort((a, b) => a.version.compareTo(b.version));
 
             this.availableVersions = versions.map((v) => ({
                 version: v.version,
@@ -522,47 +785,11 @@ export class ControlPanel {
                 products: v.products,
             }));
 
-            this.updateVersionSelector();
+            this.rebuildVersionGroups();
+            this.updateVersionDropdownLabel();
             this.updateVersionNavButtons();
         } catch (error) {
             console.error(`Failed to load versions for map ${mapId}:`, error);
-        }
-    }
-
-    private updateVersionSelector(): void {
-        this.versionSelect.innerHTML = '';
-
-        for (let i = 0; i < this.availableVersions.length; i++) {
-            const versionInfo = this.availableVersions[i];
-            if (!versionInfo) continue;
-
-            const option = document.createElement('option');
-            option.value = versionInfo.version.encodedValueString;
-
-            // Check if this version has the same composition as the previous version
-            let prefix = '';
-            if (i > 0) {
-                const prevVersion = this.availableVersions[i - 1];
-                if (prevVersion && versionInfo.compositionHash === prevVersion.compositionHash) {
-                    prefix = '= ';
-                }
-            }
-
-            // Format: "1.2.3.456 (wow, wow_beta)"
-            const productsStr = versionInfo.products.length > 0 ? ` (${versionInfo.products.join(', ')})` : '';
-            const versionDisplay = `${prefix}${versionInfo.displayName}${productsStr}`;
-
-            // Add bullet point if this is the current version
-            const isCurrentVersion =
-                this.currentVersion !== 'latest' && versionInfo.version.equals(this.currentVersion);
-            if (isCurrentVersion) {
-                option.textContent = `● ${versionDisplay}`;
-                option.selected = true;
-            } else {
-                option.textContent = `  ${versionDisplay}`;
-            }
-
-            this.versionSelect.appendChild(option);
         }
     }
 
@@ -631,7 +858,7 @@ export class ControlPanel {
         // Layer info
         const info = document.createElement('span');
         info.className = 'layer-info';
-        info.innerHTML = `<span class="layer-id">${layer.mapId}:</span><span class="layer-name">${layer.mapName}</span>`;
+        info.innerHTML = `<span class="id-highlight">${layer.mapId}</span> <span class="layer-name">${layer.mapName}</span>`;
         item.appendChild(info);
 
         // Monochrome toggle
