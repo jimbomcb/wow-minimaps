@@ -262,6 +262,7 @@ export class MapViewer {
                 }
             }
 
+            this.controlPanel.setCurrentVersion(mapData.version);
             this.controlPanel.setCurrentMap(mapId);
             this.controlPanel.updateLayers();
 

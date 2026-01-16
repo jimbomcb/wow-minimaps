@@ -130,16 +130,19 @@ export class ControlPanel {
             }
         };
 
-        document.addEventListener('keydown', this.keyboardListenerBound);
+        document.addEventListener('keydown', this.keyboardListenerBound, { capture: true });
     }
 
     private navigateVersion(direction: number): void {
         if (this.availableVersions.length === 0) return;
 
-        const currentIndex = this.availableVersions.findIndex((v) =>
-            this.currentVersion === 'latest' ? false : v.version.equals(this.currentVersion)
-        );
-        if (currentIndex === -1) return;
+        let currentIndex: number;
+        if (this.currentVersion === 'latest') {
+            currentIndex = 0;
+        } else {
+            currentIndex = this.availableVersions.findIndex((v) => v.version.equals(this.currentVersion as BuildVersion));
+            if (currentIndex === -1) return;
+        }
 
         let newIndex = currentIndex + direction;
         newIndex = Math.max(0, Math.min(this.availableVersions.length - 1, newIndex));
@@ -316,6 +319,10 @@ export class ControlPanel {
             }
         } else {
             this.versionSelect.value = version.encodedValueString;
+        }
+
+        if (this.availableVersions.length > 0) {
+            this.updateVersionSelector();
         }
     }
 
@@ -559,7 +566,7 @@ export class ControlPanel {
 
     public dispose(): void {
         if (this.keyboardListenerBound) {
-            document.removeEventListener('keydown', this.keyboardListenerBound);
+            document.removeEventListener('keydown', this.keyboardListenerBound, { capture: true });
             this.keyboardListenerBound = null;
         }
     }
