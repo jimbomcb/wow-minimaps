@@ -191,6 +191,31 @@
     white-space: nowrap;
 }
 
+.map-controls .map-aliases {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #6d5f4e;
+    font-style: italic;
+}
+
+.map-controls .map-aliases:empty {
+    display: none;
+}
+
+.map-controls .map-aliases .alias-label {
+    color: #5a4d3e;
+    margin-right: 4px;
+}
+
+.map-controls .map-aliases .alias-list {
+    color: #8a7d6a;
+}
+
+.map-controls .map-aliases .alias-name {
+    border-bottom: 1px dotted #6d5f4e;
+    cursor: help;
+}
+
 .map-controls .version-selector {
     width: 100%;
     padding: 4px 12px;

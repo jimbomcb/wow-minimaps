@@ -53,6 +53,7 @@ export class ControlPanel {
     private versionNavNextBtn: HTMLButtonElement;
     private versionNavPrevLabel: HTMLSpanElement;
     private versionNavNextLabel: HTMLSpanElement;
+    private mapAliases: HTMLDivElement;
 
     private allMaps: MapInfo[] = [];
     private filteredMaps: MapInfo[] = [];
@@ -113,6 +114,7 @@ export class ControlPanel {
         this.versionNavNextBtn = document.getElementById('version-nav-next') as HTMLButtonElement;
         this.versionNavPrevLabel = document.getElementById('version-nav-prev-label') as HTMLSpanElement;
         this.versionNavNextLabel = document.getElementById('version-nav-next-label') as HTMLSpanElement;
+        this.mapAliases = document.getElementById('map-aliases') as HTMLDivElement;
 
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
@@ -389,10 +391,58 @@ export class ControlPanel {
         }
     }
 
+    private updateMapAliases(): void {
+        if (!this.mapAliases) return;
+
+        const currentMap = this.allMaps.find((m) => m.mapId === this.currentMapId);
+        if (!currentMap || currentMap.nameHistory.size === 0) {
+            this.mapAliases.innerHTML = '';
+            return;
+        }
+
+        const sortedEntries = Array.from(currentMap.nameHistory.entries()).sort((a, b) => a[0].compareTo(b[0]));
+        const aliasRanges = new Map<string, { start: BuildVersion; end: BuildVersion | null }[]>();
+        for (let i = 0; i < sortedEntries.length; i++) {
+            const [version, alias] = sortedEntries[i]!;
+            if (alias === currentMap.name) continue;
+
+            // end version (version before next name change, or null if current)
+            let endVersion: BuildVersion | null = null;
+            if (i < sortedEntries.length - 1) {
+                endVersion = sortedEntries[i + 1]![0];
+            }
+
+            if (!aliasRanges.has(alias)) {
+                aliasRanges.set(alias, []);
+            }
+            aliasRanges.get(alias)!.push({ start: version, end: endVersion });
+        }
+
+        if (aliasRanges.size === 0) {
+            this.mapAliases.innerHTML = '';
+            return;
+        }
+
+        const aliasSpans = Array.from(aliasRanges.keys()).sort().map((alias) => {
+            const ranges = aliasRanges.get(alias)!;
+            const rangeStrs = ranges.map((r) => {
+                if (r.end === null) {
+                    return `From ${r.start.toString()} until current`;
+                }
+                return `From ${r.start.toString()} until ${r.end.toString()}`;
+            });
+            const tooltip = rangeStrs.join(', ');
+            return `<span class="alias-name" title="${tooltip}">${alias}</span>`;
+        });
+
+        this.mapAliases.innerHTML = `<span class="alias-label">aka:</span><span class="alias-list">${aliasSpans.join(', ')}</span>`;
+    }
+
     public setCurrentMap(mapId: number): void {
         this.currentMapId = mapId;
         this.updateMapSearchText();
         this.updateMapNavButtons();
+        this.updateMapAliases();
         this.loadVersionsForMap(mapId);
     }
 
@@ -452,6 +502,7 @@ export class ControlPanel {
             this.filteredMaps = [...this.allMaps];
             this.updateMapSearchText();
             this.updateMapNavButtons();
+            this.updateMapAliases();
 
             await this.loadVersionsForMap(this.currentMapId);
         } catch (error) {
