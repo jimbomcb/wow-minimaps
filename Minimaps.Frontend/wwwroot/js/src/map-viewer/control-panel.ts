@@ -287,9 +287,10 @@ export class ControlPanel {
         this.showDropdown = false;
         this.renderDropdown();
 
-        // temp? Load versions for the selected map BEFORE triggering the change
         this.loadVersionsForMap(mapId).then(() => {
-            this.onMapChange(mapId);
+            if (mapId === this.currentMapId) {
+                this.onMapChange(mapId);
+            }
         });
     }
 
