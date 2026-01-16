@@ -324,12 +324,10 @@ export class ControlPanel {
         this.showDropdown = false;
         this.renderDropdown();
         this.updateMapNavButtons();
+        this.updateMapAliases();
 
-        this.loadVersionsForMap(mapId).then(() => {
-            if (mapId === this.currentMapId) {
-                this.onMapChange(mapId);
-            }
-        });
+        this.onMapChange(mapId);
+        this.loadVersionsForMap(mapId);
     }
 
     private updateMapSearchText(): void {
