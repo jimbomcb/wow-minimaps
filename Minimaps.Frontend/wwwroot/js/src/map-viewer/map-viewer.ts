@@ -126,6 +126,7 @@ export class MapViewer {
 
     private flashOverlay: FlashOverlay;
     private currentComposition: MinimapComposition | null = null;
+    private mapLoadGeneration: number = 0;
 
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
@@ -206,13 +207,21 @@ export class MapViewer {
         autoZoom: boolean = false,
         showFlash: boolean = false
     ): Promise<void> {
+        const thisGeneration = ++this.mapLoadGeneration;
+        this.tileStreamer.clearPendingQueue();
+
         try {
             const versionStr = version === 'latest' ? 'latest' : version.toString();
-            console.log(`Loading map ${mapId} version ${versionStr}...`);
+            console.log(`Loading map ${mapId} version ${versionStr} (gen ${thisGeneration})...`);
 
             const oldComposition = showFlash ? this.currentComposition : null;
 
             const mapData = await this.mapDataManager.loadMapData(mapId, version);
+
+            if (thisGeneration !== this.mapLoadGeneration) {
+                console.log(`Map load gen ${thisGeneration} superseded by gen ${this.mapLoadGeneration}, discarding`);
+                return;
+            }
 
             this.currentVersion = mapData.version;
 
@@ -257,7 +266,6 @@ export class MapViewer {
             this.controlPanel.updateLayers();
 
             if (autoZoom && mapData.composition.bounds) {
-                console.log(`Auto-zooming to fit`, mapData.composition.bounds);
                 this.cameraController.fitToBounds(mapData.composition.bounds, 10);
             }
 
@@ -271,8 +279,10 @@ export class MapViewer {
             this.scheduleRender();
             console.log(`Map ${mapId} loaded successfully`);
         } catch (error) {
-            console.error(`Failed to load map ${mapId}:`, error);
-            // TODO: Show error in UI
+            if (thisGeneration === this.mapLoadGeneration) {
+                console.error(`Failed to load map ${mapId}:`, error);
+                // TODO: Show error in UI (error skip if canceled from later load)
+            }
         }
     }
 

@@ -53,6 +53,10 @@ export class ControlPanel {
     private showDropdown = false;
     private keyboardListenerBound: ((e: KeyboardEvent) => void) | null = null;
 
+    private mapNavTime: number = 0;
+    private readonly MAP_THROTTLE_MS = 50;
+
+
     constructor(options: ControlPanelOptions) {
         this.currentMapId = options.currentMapId;
         this.currentVersion = options.currentVersion;
@@ -152,6 +156,10 @@ export class ControlPanel {
 
     private navigateMap(direction: number): void {
         if (this.allMaps.length === 0) return;
+
+        const now = performance.now();
+        if (now - this.mapNavTime < this.MAP_THROTTLE_MS) return;
+        this.mapNavTime = now;
 
         const currentIndex = this.allMaps.findIndex((m) => m.mapId === this.currentMapId);
         if (currentIndex === -1) return;

@@ -61,7 +61,7 @@ export class TileLayerImpl implements TileLayer {
                 this.tileStreamer.markResident(hash, this.residentLodLevel);
                 this.residentHashes.push(hash);
             }
-            console.log(`Marked ${residentData.size} resident for layer ${this.id} LOD${this.residentLodLevel}`);
+            //console.log(`Marked ${residentData.size} resident for layer ${this.id} LOD${this.residentLodLevel}`);
         }
     }
 

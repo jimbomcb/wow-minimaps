@@ -75,6 +75,15 @@ export class TileStreamer {
         this.residentHashes.delete(hash);
     }
 
+    clearPendingQueue(): void {
+        const pendingCount = this.pendingQueue.length;
+        this.pendingQueue = [];
+
+        if (pendingCount > 0) {
+            console.log(`Tile streamer queue cleared (${pendingCount})`);
+        }
+    }
+
     // per-frame tile request processing
     processFrameRequirements(requests: TileRequest[]): void {
         for (const request of requests) {
