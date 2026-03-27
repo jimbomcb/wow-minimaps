@@ -61,7 +61,7 @@
 .map-controls .map-nav-buttons {
     display: flex;
     gap: 4px;
-    margin-bottom: 6px;
+    margin-top: 6px;
 }
 
 .map-controls .map-nav-btn {
@@ -70,10 +70,10 @@
     align-items: center;
     gap: 4px;
     padding: 3px 6px;
-    background: #2a2218;
+    background: #1f1a13;
     border: none;
-    box-shadow: inset -1px -1px 0 #0a0805, inset 1px 1px 0 #4a3d30;
-    color: #e8d4b8;
+    box-shadow: inset -1px -1px 0 #0a0805, inset 1px 1px 0 #3a3020;
+    color: #a89880;
     font-size: 11px;
     font-family: inherit;
     cursor: pointer;
@@ -83,7 +83,8 @@
 }
 
 .map-controls .map-nav-btn:hover {
-    background: #3a3020;
+    background: #2a2218;
+    color: #e8d4b8;
 }
 
 .map-controls .map-nav-btn:active {
@@ -175,6 +176,9 @@
     cursor: pointer;
     box-shadow: inset 1px 1px 2px #000;
     box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .map-controls .map-display:hover {
