@@ -359,7 +359,7 @@ export class ControlPanel {
         setTimeout(() => {
             const currentMapElement = this.mapDropdown.querySelector(`[data-map-id="${this.currentMapId}"]`);
             if (currentMapElement) {
-                currentMapElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                currentMapElement.scrollIntoView({ block: 'center' });
             }
         }, 0);
     }
@@ -395,20 +395,25 @@ export class ControlPanel {
             return;
         }
 
-        const displayMaps = this.filteredMaps.slice(0, 50);
-        let html = '';
+        let html = `
+            <div class="dropdown-header">
+                <span class="col-id">ID</span>
+                <span class="col-name">Name</span>
+                <span class="col-version">First</span>
+                <span class="col-version">Last</span>
+            </div>
+        `;
 
-        for (const map of displayMaps) {
+        for (const map of this.filteredMaps) {
+            const isCurrent = map.mapId === this.currentMapId;
             html += `
-                <div class="dropdown-item" data-map-id="${map.mapId}" data-map-name="${map.name}">
-                    <span class="id-highlight">${map.mapId}</span>
-                    <span class="map-name">${map.name}</span>
+                <div class="dropdown-item${isCurrent ? ' current' : ''}" data-map-id="${map.mapId}" data-map-name="${map.name}">
+                    <span class="col-id id-highlight">${map.mapId}</span>
+                    <span class="col-name">${map.name}</span>
+                    <span class="col-version">${map.first.toString()}</span>
+                    <span class="col-version">${map.last.toString()}</span>
                 </div>
             `;
-        }
-
-        if (this.filteredMaps.length > 50) {
-            html += `<div class="dropdown-item info">Showing 50 of ${this.filteredMaps.length} results</div>`;
         }
 
         this.mapDropdown.innerHTML = html;
@@ -537,6 +542,7 @@ export class ControlPanel {
     private selectMap(mapId: number, mapName: string): void {
         this.currentMapId = mapId;
         this.mapSearchInput.value = `${mapId} - ${mapName}`;
+        this.mapSearchInput.blur();
         this.showMapDropdown = false;
         this.renderMapDropdown();
         this.updateMapNavButtons();
@@ -586,13 +592,7 @@ export class ControlPanel {
         }
     }
 
-    // Format version string with de-emphasized build number
     private formatVersionHtml(version: string): string {
-        const parts = version.split('.');
-        if (parts.length === 4) {
-            const [w, x, y, z] = parts;
-            return `${w}.${x}.${y}<span class="build-num">.${z}</span>`;
-        }
         return version;
     }
 
@@ -613,7 +613,7 @@ export class ControlPanel {
         }
         const oldest = group.versions[0]!;
         const newest = group.versions[group.versions.length - 1]!;
-        return `${this.formatVersionHtml(oldest.displayName)} → ${this.formatVersionHtml(newest.displayName)}`;
+        return `${this.formatVersionHtml(oldest.displayName)} <span class="range-sep">to</span> ${this.formatVersionHtml(newest.displayName)}`;
     }
 
     private updateVersionNavButtons(): void {

@@ -8,7 +8,7 @@
 
     border-radius: 2px;
     padding: 16px;
-    min-width: 320px;
+    width: 320px;
 
     box-shadow: inset 1px 1px 0 #3d3228, inset -1px -1px 0 #0a0805;
     border: 2px solid #5c4a36;
@@ -115,10 +115,6 @@
     text-overflow: ellipsis;
 }
 
-.map-controls .map-nav-label .build-num {
-    color: #6d5f4e;
-}
-
 .map-controls .id-highlight {
     color: #c9a558;
     font-weight: 600;
@@ -145,6 +141,13 @@
 
 .map-controls .map-nav-label .version-range .range-ver {
     text-align: left;
+}
+
+.map-controls .range-sep {
+    color: #6d5f4e;
+    font-size: 11px;
+    font-style: italic;
+    margin: 0 2px;
 }
 
 .map-controls .map-nav-hint {
@@ -205,14 +208,30 @@
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    right: 0;
-    max-height: 300px;
+    min-width: 100%;
+    width: max-content;
+    max-height: 60vh;
     overflow-y: auto;
     background: #1a1410;
     border: 2px solid #5c4a36;
     border-radius: 0;
     box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
     z-index: 1001;
+}
+
+.map-controls .dropdown-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    color: #6d5f4e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #3a2e22;
+    position: sticky;
+    top: 0;
+    background: #1a1410;
 }
 
 .map-controls .dropdown-item {
@@ -224,20 +243,35 @@
     gap: 8px;
 }
 
+.map-controls .dropdown-item.current {
+    background: #2a1f10;
+    border-left: 2px solid #c9a558;
+    padding-left: 10px;
+}
+
 .map-controls .dropdown-item:hover {
     background: #2a2218;
 }
 
-.map-controls .dropdown-item .id-highlight {
+.map-controls .col-id {
     min-width: 40px;
     flex-shrink: 0;
 }
 
-.map-controls .map-name {
-    color: #e8d4b8;
+.map-controls .col-name {
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 140px;
+}
+
+.map-controls .col-version {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #a89880;
+    white-space: nowrap;
+    min-width: 100px;
 }
 
 .map-controls .map-aliases {
@@ -339,15 +373,12 @@
     color: #a89880;
 }
 
-.map-controls .version-dropdown-btn .build-num {
-    color: #6d5f4e;
-}
-
 .map-controls .version-dropdown {
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    right: 0;
+    min-width: 100%;
+    width: max-content;
     max-height: 350px;
     overflow-y: auto;
     background: #1a1410;
@@ -396,14 +427,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.map-controls .version-item .version-text .build-num {
-    color: #6d5f4e;
-}
-
-.map-controls .version-item.group-member .version-text .build-num {
-    color: #4a3d30;
 }
 
 .map-controls .version-item .version-products {
