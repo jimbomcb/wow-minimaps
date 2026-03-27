@@ -401,6 +401,8 @@ export class ControlPanel {
                 <span class="col-name">Name</span>
                 <span class="col-version">First</span>
                 <span class="col-version">Last</span>
+                <span class="col-count-unique">Unique</span>
+                <span class="col-count-total">Builds</span>
             </div>
         `;
 
@@ -412,6 +414,8 @@ export class ControlPanel {
                     <span class="col-name">${map.name}</span>
                     <span class="col-version">${map.first.toString()}</span>
                     <span class="col-version">${map.last.toString()}</span>
+                    <span class="col-count-unique">${map.uniqueCount}</span>
+                    <span class="col-count-total">${map.versionCount}</span>
                 </div>
             `;
         }

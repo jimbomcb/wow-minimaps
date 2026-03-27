@@ -31,4 +31,6 @@ export interface MapListEntryDto {
     last: string; // BuildVersion encoded string
     parent: number | null;
     tileCount: number;
+    versionCount: number;
+    uniqueCount: number;
 }

@@ -44,7 +44,9 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     {
         await using var conn = await dataSource.OpenConnectionAsync();
         await using var cmd = new NpgsqlCommand(@"
-            SELECT m.id, m.directory, m.name, m.first_minimap, m.last_minimap, m.name_history, m.parent, COALESCE(c.tiles, 0) as tile_count
+            SELECT m.id, m.directory, m.name, m.first_minimap, m.last_minimap, m.name_history, m.parent, COALESCE(c.tiles, 0) as tile_count,
+                (SELECT COUNT(*) FROM build_maps bm2 WHERE bm2.map_id = m.id AND bm2.composition_hash IS NOT NULL) as version_count,
+                (SELECT COUNT(DISTINCT bm3.composition_hash) FROM build_maps bm3 WHERE bm3.map_id = m.id AND bm3.composition_hash IS NOT NULL) as unique_count
             FROM maps m
             LEFT JOIN build_maps bm ON m.id = bm.map_id AND m.last_minimap = bm.build_id
             LEFT JOIN compositions c ON bm.composition_hash = c.hash
@@ -65,21 +67,23 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
             var nameHistory = reader.GetFieldValue<Dictionary<BuildVersion, string>>(5);
             int? parent = reader.IsDBNull(6) ? null : reader.GetInt32(6);
             var tileCount = reader.GetInt32(7);
+            var versionCount = reader.GetInt32(8);
+            var uniqueCount = reader.GetInt32(9);
 
-            // for now i'm just going to filter out maps with 0 tiles, 
+            // for now i'm just going to filter out maps with 0 tiles,
             // these are usually WMO constructed maps that have 0 ADT tiles, and I anticipate
             // a way to render these maps in the future. hiding for now.
             if (tileCount == 0)
                 continue;
 
-            maps.Add(new MapListEntryDto(id, directory, name, nameHistory, first, last, parent, tileCount));
+            maps.Add(new MapListEntryDto(id, directory, name, nameHistory, first, last, parent, tileCount, versionCount, uniqueCount));
         } while (await reader.ReadAsync());
 
         return new MapListDto(maps);
     }
 
     public readonly record struct MapListDto(List<MapListEntryDto> Maps);
-    public readonly record struct MapListEntryDto(int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory, BuildVersion First, BuildVersion Last, int? Parent, int TileCount);
+    public readonly record struct MapListEntryDto(int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory, BuildVersion First, BuildVersion Last, int? Parent, int TileCount, int VersionCount, int UniqueCount);
 
     [HttpGet("comp/{hash}")]
     public async Task<ActionResult<MinimapComposition>> GetComposition(string hash)

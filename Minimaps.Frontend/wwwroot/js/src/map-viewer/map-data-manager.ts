@@ -11,6 +11,8 @@ export interface MapInfo {
     last: BuildVersion;
     parent: number | null;
     tileCount: number;
+    versionCount: number;
+    uniqueCount: number;
 }
 
 export interface MapVersionInfo {
@@ -87,6 +89,8 @@ export class MapDataManager {
                     last: new BuildVersion(BigInt(map.last)),
                     parent: map.parent,
                     tileCount: map.tileCount,
+                    versionCount: map.versionCount,
+                    uniqueCount: map.uniqueCount,
                 };
                 this.mapsCache.set(mapInfo.mapId, mapInfo);
             }
