@@ -20,11 +20,12 @@ export class Renderer {
     private gridPositionAttribute!: number;
     private gridTransformUniform!: WebGLUniformLocation;
     private gridColorUniform!: WebGLUniformLocation;
-    private glowPositionAttribute!: number;
-    private glowTransformUniform!: WebGLUniformLocation;
-    private glowColorUniform!: WebGLUniformLocation;
-    private glowIntensityUniform!: WebGLUniformLocation;
-    private glowRatioUniform!: WebGLUniformLocation;
+    private borderPositionAttribute!: number;
+    private borderTransformUniform!: WebGLUniformLocation;
+    private borderColorUniform!: WebGLUniformLocation;
+    private borderOpacityUniform!: WebGLUniformLocation;
+    private borderTimeUniform!: WebGLUniformLocation;
+    private borderSizeUniform!: WebGLUniformLocation;
 
     // Frame ticker for debug
     private frameTickerHue: number = 0;
@@ -53,7 +54,7 @@ export class Renderer {
 
         this.program = this.createShaderProgram();
         this.gridProgram = this.createGridShaderProgram();
-        this.glowProgram = this.createGlowShaderProgram();
+        this.glowProgram = this.createBorderShaderProgram();
         this.setupGLState();
         this.quadBuffer = this.createQuadBuffer();
         this.gridBuffer = this.createGridBuffer();
@@ -175,8 +176,8 @@ export class Renderer {
         return program;
     }
 
-    // Used during diff flashing, stencil masked colour glow highlighting add/del/mods
-    private createGlowShaderProgram(): WebGLProgram {
+    // Marching ants / pixel crawl border for diff highlighting
+    private createBorderShaderProgram(): WebGLProgram {
         const vertexShader = this.createShader(
             this.gl.VERTEX_SHADER,
             `#version 300 es
@@ -197,32 +198,46 @@ export class Renderer {
             precision highp float;
             in vec2 v_uv;
             uniform vec4 u_color;
-            uniform float u_intensity;
-            uniform float u_glowRatio;
+            uniform float u_opacity;
+            uniform float u_time;
+            uniform vec2 u_borderSize; // border as fraction of expanded quad
 
             out vec4 fragColor;
 
             void main() {
-                // Glow quad is larger than tile. tile occupies the center region.
-                // glowRatio = glowSize / glowScale, passed as uniform
-                float tileMin = u_glowRatio;
-                float tileMax = 1.0 - u_glowRatio;
+                float bx = u_borderSize.x;
+                float by = u_borderSize.y;
 
-                // Distance from tile boundary
-                float dx = 0.0;
-                float dy = 0.0;
-                if (v_uv.x < tileMin) dx = tileMin - v_uv.x;
-                else if (v_uv.x > tileMax) dx = v_uv.x - tileMax;
-                if (v_uv.y < tileMin) dy = tileMin - v_uv.y;
-                else if (v_uv.y > tileMax) dy = v_uv.y - tileMax;
+                // Tile occupies center [bx, 1-bx] x [by, 1-by] of expanded quad,
+                // interior stencilled.
+                if (v_uv.x > bx && v_uv.x < 1.0 - bx && v_uv.y > by && v_uv.y < 1.0 - by) {
+                    discard;
+                }
 
-                float dist = sqrt(dx * dx + dy * dy);
-                float normalizedDist = dist / u_glowRatio;
-                normalizedDist = clamp(normalizedDist, 0.0, 1.0);
+                float tileU = (v_uv.x - bx) / (1.0 - 2.0 * bx);
+                float tileV = (v_uv.y - by) / (1.0 - 2.0 * by);
 
-                float alpha = (1.0 - normalizedDist) * u_intensity;
-                alpha = pow(alpha, 1.5); // Adjust falloff curve
-                fragColor = vec4(u_color.rgb, alpha * u_color.a);
+                // clockwise crawl, closest edge for direction
+                float crawlCoord = 0.0;
+                float minDist = 999.0;
+                float dLeft = bx - v_uv.x;
+                float dRight = v_uv.x - (1.0 - bx);
+                float dTop = by - v_uv.y;
+                float dBottom = v_uv.y - (1.0 - by);
+
+                if (dTop > 0.0    && dTop < minDist)    { minDist = dTop;    crawlCoord = tileU; }
+                if (dRight > 0.0  && dRight < minDist)  { minDist = dRight;  crawlCoord = tileV; }
+                if (dBottom > 0.0 && dBottom < minDist) { minDist = dBottom; crawlCoord = 1.0 - tileU; }
+                if (dLeft > 0.0   && dLeft < minDist)   { minDist = dLeft;   crawlCoord = 1.0 - tileV; }
+
+                float stripeScale = 10.0;
+                float pattern = fract(crawlCoord * stripeScale - u_time * 0.5);
+                float stripe = step(0.5, pattern);
+                vec3 brightColor = u_color.rgb;
+                vec3 darkColor = u_color.rgb * 0.3;
+                vec3 finalColor = mix(darkColor, brightColor, stripe);
+
+                fragColor = vec4(finalColor, u_opacity);
             }
         `
         );
@@ -233,7 +248,7 @@ export class Renderer {
         this.gl.linkProgram(program);
 
         if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
-            throw new Error('Failed to link glow shader program');
+            throw new Error('Failed to link border shader program');
         }
 
         return program;
@@ -331,11 +346,12 @@ export class Renderer {
         this.gridTransformUniform = this.gl.getUniformLocation(this.gridProgram, 'u_transform')!;
         this.gridColorUniform = this.gl.getUniformLocation(this.gridProgram, 'u_color')!;
 
-        this.glowPositionAttribute = this.gl.getAttribLocation(this.glowProgram, 'a_position');
-        this.glowTransformUniform = this.gl.getUniformLocation(this.glowProgram, 'u_transform')!;
-        this.glowColorUniform = this.gl.getUniformLocation(this.glowProgram, 'u_color')!;
-        this.glowIntensityUniform = this.gl.getUniformLocation(this.glowProgram, 'u_intensity')!;
-        this.glowRatioUniform = this.gl.getUniformLocation(this.glowProgram, 'u_glowRatio')!;
+        this.borderPositionAttribute = this.gl.getAttribLocation(this.glowProgram, 'a_position');
+        this.borderTransformUniform = this.gl.getUniformLocation(this.glowProgram, 'u_transform')!;
+        this.borderColorUniform = this.gl.getUniformLocation(this.glowProgram, 'u_color')!;
+        this.borderOpacityUniform = this.gl.getUniformLocation(this.glowProgram, 'u_opacity')!;
+        this.borderTimeUniform = this.gl.getUniformLocation(this.glowProgram, 'u_time')!;
+        this.borderSizeUniform = this.gl.getUniformLocation(this.glowProgram, 'u_borderSize')!;
 
         const vao = this.gl.createVertexArray()!;
         this.gl.bindVertexArray(vao);
@@ -489,19 +505,20 @@ export class Renderer {
     }
 
     /**
-     * Render flash overlay as outer glow around the contigous changed areas
-     * Stencil buffer mask out tile interiors
+     * Render marching ants border on changed tile
+     * Pass 1: stencil fill interiors
+     * Pass 2: draw expanded border quads outside stenciled
      */
-    renderFlashOverlay(flashes: FlashQuad[], position: CameraPosition): void {
+    renderFlashOverlay(flashes: FlashQuad[], position: CameraPosition, time: number): void {
         if (flashes.length === 0) return;
 
-        // stencil time shitheads
+        // pass 1: fill stencil tile interiors
         this.gl.enable(this.gl.STENCIL_TEST);
         this.gl.clear(this.gl.STENCIL_BUFFER_BIT);
         this.gl.stencilFunc(this.gl.ALWAYS, 1, 0xff);
         this.gl.stencilOp(this.gl.KEEP, this.gl.KEEP, this.gl.REPLACE);
         this.gl.colorMask(false, false, false, false);
-
+        
         // push flashing tile quads into stencil
         this.gl.useProgram(this.gridProgram);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.unitQuadBuffer);
@@ -518,31 +535,52 @@ export class Renderer {
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }
 
-        // mask out tile interiors, draw glow only on outside
+        // pass 2: darken unstenciled
         this.gl.colorMask(true, true, true, true);
         this.gl.stencilFunc(this.gl.EQUAL, 0, 0xff);
         this.gl.stencilOp(this.gl.KEEP, this.gl.KEEP, this.gl.KEEP);
 
+        this.gl.useProgram(this.gridProgram);
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.unitQuadBuffer);
+        this.gl.enableVertexAttribArray(this.gridPositionAttribute);
+        this.gl.vertexAttribPointer(this.gridPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
+
+        const dimIntensity = flashes[0]!.intensity * 0.6;
+        // prettier-ignore
+        const fullScreenTransform = new Float32Array([
+            2.0, 0.0, 0.0,
+            0.0, 2.0, 0.0,
+           -1.0,-1.0, 1.0
+        ]);
+        this.gl.uniformMatrix3fv(this.gridTransformUniform, false, fullScreenTransform);
+        this.gl.uniform4f(this.gridColorUniform, 0.0, 0.0, 0.0, dimIntensity);
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+        // pass 3: marching ants
         this.gl.useProgram(this.glowProgram);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.unitQuadBuffer);
-        this.gl.enableVertexAttribArray(this.glowPositionAttribute);
-        this.gl.vertexAttribPointer(this.glowPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
+        this.gl.enableVertexAttribArray(this.borderPositionAttribute);
+        this.gl.vertexAttribPointer(this.borderPositionAttribute, 2, this.gl.FLOAT, false, 0, 0);
 
-        const glowSize = 0.3 * (Math.max(1, Math.min(position.zoom, 32) / 2) * 0.5);
-        const glowScale = 1.0 + 2.0 * glowSize;
-        const glowRatio = glowSize / glowScale;
+        const borderPx = 3.0;
+        const pixelsPerUnit = 512 / position.zoom;
+        const borderWorld = borderPx / pixelsPerUnit;
+        const totalSize = 1.0 + 2.0 * borderWorld;
+        const borderFrac = borderWorld / totalSize;
+
+        this.gl.uniform1f(this.borderTimeUniform, time);
+        this.gl.uniform2f(this.borderSizeUniform, borderFrac, borderFrac);
 
         for (const flash of flashes) {
             this.gl.uniformMatrix3fv(
-                this.glowTransformUniform,
+                this.borderTransformUniform,
                 false,
-                this.createTileTransform(flash.x - glowSize, flash.y - glowSize, glowScale, position)
+                this.createTileTransform(flash.x - borderWorld, flash.y - borderWorld, totalSize, position)
             );
 
             const [r, g, b] = this.getGlowColor(flash.changeType);
-            this.gl.uniform4f(this.glowColorUniform, r, g, b, 1.0);
-            this.gl.uniform1f(this.glowIntensityUniform, flashes[0]!.intensity);
-            this.gl.uniform1f(this.glowRatioUniform, glowRatio);
+            this.gl.uniform4f(this.borderColorUniform, r, g, b, 1.0);
+            this.gl.uniform1f(this.borderOpacityUniform, flash.intensity);
 
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }

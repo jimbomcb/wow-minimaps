@@ -418,7 +418,7 @@ export class MapViewer {
         const flashActive = this.flashOverlay.update(deltaTime);
         if (this.flashOverlay.hasActiveFlashes()) {
             const flashes = this.flashOverlay.getActiveFlashes();
-            this.renderer.renderFlashOverlay(flashes, camera);
+            this.renderer.renderFlashOverlay(flashes, camera, currentTime / 1000.0);
         }
 
         // debug frame ticker
