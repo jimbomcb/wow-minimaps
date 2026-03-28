@@ -1,6 +1,6 @@
 import { MinimapComposition } from './types.js';
 import { BuildVersion } from './build-version.js';
-import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto } from './backend-types.js';
+import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto, MapLayersDto } from './backend-types.js';
 
 export interface MapInfo {
     mapId: number;
@@ -43,6 +43,10 @@ export class MapDataManager {
 
     private compositionCache = new Map<string, MinimapComposition>(); // comp hash -> composition
     private compositionLoadingPromises = new Map<string, Promise<MinimapComposition>>();
+
+    // Layer data: mapId -> (layerType -> (encodedVersion -> compositionHash))
+    private layerCache = new Map<number, Map<string, Map<string, string>>>();
+    private layerLoadingPromises = new Map<number, Promise<void>>();
 
     constructor() {}
 
@@ -310,6 +314,60 @@ export class MapDataManager {
         }
     }
 
+    /**
+     * Load available layers for a map.
+     * Returns layer types that have data.
+     */
+    async loadLayersForMap(mapId: number): Promise<string[]> {
+        if (!this.layerCache.has(mapId)) {
+            if (!this.layerLoadingPromises.has(mapId)) {
+                const promise = this.fetchLayersForMap(mapId);
+                this.layerLoadingPromises.set(mapId, promise);
+                try { await promise; } finally { this.layerLoadingPromises.delete(mapId); }
+            } else {
+                await this.layerLoadingPromises.get(mapId);
+            }
+        }
+        return Array.from(this.layerCache.get(mapId)?.keys() ?? []);
+    }
+
+    private async fetchLayersForMap(mapId: number): Promise<void> {
+        try {
+            const response = await fetch(`/data/layers/${mapId}`);
+            if (!response.ok) return;
+
+            const data = (await response.json()) as MapLayersDto;
+            const layerMap = new Map<string, Map<string, string>>();
+            for (const [layerType, versions] of Object.entries(data.layers)) {
+                const versionMap = new Map<string, string>();
+                for (const [encodedVer, hash] of Object.entries(versions)) {
+                    versionMap.set(encodedVer, hash);
+                }
+                if (versionMap.size > 0) layerMap.set(layerType, versionMap);
+            }
+            this.layerCache.set(mapId, layerMap);
+        } catch {
+            this.layerCache.set(mapId, new Map());
+        }
+    }
+
+    /**
+     * Get a layer composition for a specific map, version, and layer type.
+     */
+    async getLayerComposition(mapId: number, version: BuildVersion, layerType: string): Promise<MinimapComposition | null> {
+        await this.loadLayersForMap(mapId);
+        const layerMap = this.layerCache.get(mapId);
+        if (!layerMap) return null;
+
+        const versionMap = layerMap.get(layerType);
+        if (!versionMap || versionMap.size === 0) return null;
+
+        const hash = versionMap.get(version.encodedValueString);
+        if (!hash) return null;
+
+        return await this.loadComposition(hash);
+    }
+
     clearCache(): void {
         this.mapsCache = null;
         this.mapsLoadingPromise = null;
@@ -317,6 +375,8 @@ export class MapDataManager {
         this.versionLoadingPromises.clear();
         this.compositionCache.clear();
         this.compositionLoadingPromises.clear();
+        this.layerCache.clear();
+        this.layerLoadingPromises.clear();
     }
 
     private findClosestVersion(

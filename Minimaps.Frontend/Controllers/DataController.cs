@@ -106,6 +106,39 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         return Content(json, "application/json");
     }
 
+    [HttpGet("layers/{mapId}")]
+    public async Task<ActionResult<MapLayersDto>> GetMapLayers(int mapId)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            SELECT bml.build_id, bml.layer_type, bml.composition_hash
+            FROM build_map_layers bml
+            WHERE bml.map_id = $1
+            ORDER BY bml.layer_type, bml.build_id ASC", conn);
+        cmd.Parameters.AddWithValue(mapId);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var layers = new Dictionary<string, Dictionary<BuildVersion, ContentHash>>();
+        while (await reader.ReadAsync())
+        {
+            var buildVer = reader.GetFieldValue<BuildVersion>(0);
+            var layerType = reader.GetString(1);
+            var compHash = reader.GetFieldValue<ContentHash>(2);
+
+            if (!layers.TryGetValue(layerType, out var versions))
+            {
+                versions = new Dictionary<BuildVersion, ContentHash>();
+                layers[layerType] = versions;
+            }
+            versions[buildVer] = compHash;
+        }
+
+        if (layers.Count == 0)
+            return new MapLayersDto(new());
+
+        return new MapLayersDto(layers);
+    }
+
     [HttpGet("tile/{hash}")]
     [ResponseCache(Duration = 31536000, Location = ResponseCacheLocation.Any)] // 1 year cache
     public async Task<IActionResult> GetTile(string hash)

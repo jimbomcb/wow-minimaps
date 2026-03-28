@@ -18,6 +18,7 @@ export interface LayerDisplayInfo {
     visible: boolean;
     monochrome: boolean;
     isParent: boolean;
+    layerType: string | null; // null = main map, otherwise layer type like 'noliquid'
 }
 
 export interface ControlPanelOptions {
@@ -797,6 +798,10 @@ export class ControlPanel {
         }
     }
 
+    private static readonly LAYER_TYPE_LABELS: Record<string, string> = {
+        'noliquid': 'Underwater',
+    };
+
     public updateLayers(): void {
         const layers = this.layerManager.getAllLayers();
         this.currentLayers = [];
@@ -804,20 +809,30 @@ export class ControlPanel {
         for (const layer of layers) {
             if (!isTileLayer(layer)) continue;
 
-            // map ID from layer ID (either "main" or "parent-{mapId}")
             let mapId: number;
             let isParent = false;
+            let layerType: string | null = null;
+
             if (layer.id === 'main') {
                 mapId = this.currentMapId;
             } else if (layer.id.startsWith('parent-')) {
                 mapId = parseInt(layer.id.replace('parent-', ''));
                 isParent = true;
             } else {
-                continue;
+                // Layer type pattern: {layerType}-{mapId}
+                const dashIdx = layer.id.lastIndexOf('-');
+                if (dashIdx > 0) {
+                    layerType = layer.id.substring(0, dashIdx);
+                    mapId = parseInt(layer.id.substring(dashIdx + 1));
+                } else {
+                    continue;
+                }
             }
 
             const mapInfo = this.allMaps.find((m) => m.mapId === mapId);
-            const mapName = mapInfo?.name ?? `Map ${mapId}`;
+            const mapName = layerType
+                ? (ControlPanel.LAYER_TYPE_LABELS[layerType] ?? layerType)
+                : (mapInfo?.name ?? `Map ${mapId}`);
 
             this.currentLayers.push({
                 layerId: layer.id,
@@ -826,11 +841,17 @@ export class ControlPanel {
                 visible: layer.visible,
                 monochrome: layer.monochrome,
                 isParent,
+                layerType,
             });
         }
 
-        // highest zIndex first photoshop-like
-        this.currentLayers.sort((a, b) => (b.isParent ? -1 : 0) - (a.isParent ? -1 : 0));
+        // Sort: parent layers at bottom, additional layers above main
+        // Highest z first like photoshop.
+        this.currentLayers.sort((a, b) => {
+            if (a.isParent !== b.isParent) return a.isParent ? 1 : -1;
+            if ((a.layerType !== null) !== (b.layerType !== null)) return a.layerType !== null ? -1 : 1;
+            return 0;
+        });
 
         this.renderLayersTree();
     }

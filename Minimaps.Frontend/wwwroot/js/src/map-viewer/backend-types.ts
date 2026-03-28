@@ -34,3 +34,7 @@ export interface MapListEntryDto {
     versionCount: number;
     uniqueCount: number;
 }
+
+export interface MapLayersDto {
+    layers: Record<string, Record<string, string>>; // layerType -> encodedVersion -> compositionHash
+}

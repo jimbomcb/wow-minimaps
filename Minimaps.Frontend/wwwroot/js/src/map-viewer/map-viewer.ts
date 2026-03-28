@@ -279,11 +279,42 @@ export class MapViewer {
 
             this.scheduleRender();
             console.log(`Map ${mapId} loaded successfully`);
+
+            // Main layer loaded, stream in any additional layers
+            this.loadAdditionalLayers(mapId, mapData.version, thisGeneration);
         } catch (error) {
             if (thisGeneration === this.mapLoadGeneration) {
                 console.error(`Failed to load map ${mapId}:`, error);
                 // TODO: Show error in UI (error skip if canceled from later load)
             }
+        }
+    }
+
+    private async loadAdditionalLayers(mapId: number, version: BuildVersion, generation: number): Promise<void> {
+        try {
+            const layerTypes = await this.mapDataManager.loadLayersForMap(mapId);
+            if (generation !== this.mapLoadGeneration) return;
+
+            for (const layerType of layerTypes) {
+                const composition = await this.mapDataManager.getLayerComposition(mapId, version, layerType);
+                if (generation !== this.mapLoadGeneration) return;
+                if (!composition) continue;
+
+                this.addTileLayerForComposition(mapId, composition, {
+                    id: `${layerType}-${mapId}`,
+                    zIndex: 1,
+                    opacity: 0.85,
+                    residentLodLevel: 4,
+                    debugSkipLODs: [],
+                });
+            }
+
+            if (layerTypes.length > 0) {
+                this.controlPanel.updateLayers();
+                this.scheduleRender();
+            }
+        } catch (error) {
+            console.warn(`Failed to load additional layers for map ${mapId}:`, error);
         }
     }
 
