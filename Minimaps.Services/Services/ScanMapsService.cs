@@ -348,6 +348,7 @@ internal class ScanMapsService :
 
         var encryptedMaps = new ConcurrentBag<EncryptedMap>();
         var compositions = new ConcurrentDictionary<int, MinimapComposition>(); // Build the tile composition of each map
+        var layerCompositions = new ConcurrentDictionary<(int MapId, string LayerType), MinimapComposition>();
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
 
         // map of hashed LOD0 tiles to their source FDID of the BLP
@@ -480,6 +481,81 @@ internal class ScanMapsService :
                     }
 
                     compositions.TryAdd(row.ID, new(lodBuilder, missingTiles));
+
+                    // Up until relatively recently Blizzard added underwater minimap overrides direct to the exe...
+                    // The list of legacy files are hardcoded and we'll pull them in for each matching map below.
+                    // Going forward they'll probably be driven by AltMinimap tables (https://wago.tools/db2/AltMinimap)
+                    var noliquidTiles = NoliquidTiles.GetTilesForMap(row.ID);
+                    if (noliquidTiles != null)
+                    {
+                        var nlLod0 = new Dictionary<TileCoord, ContentHash>();
+                        var nlMissing = new HashSet<TileCoord>();
+                        foreach (var nlTile in noliquidTiles)
+                        {
+                            var nlCkey = filesystem.GetFDIDContentKey(nlTile.FileId);
+                            if (nlCkey.Length == 0)
+                            {
+                                nlMissing.Add(new(nlTile.X, nlTile.Y));
+                                continue;
+                            }
+
+                            var nlHash = new ContentHash(nlCkey.AsSpan());
+                            nlLod0[new(nlTile.X, nlTile.Y)] = nlHash;
+                            mapLOD0TileFDIDs.TryAdd(nlHash, nlTile.FileId);
+                        }
+
+                        if (nlLod0.Count > 0)
+                        {
+                            var nlLodBuilder = new Dictionary<int, CompositionLOD> { { 0, new(nlLod0) } };
+                            Span<byte> nlHashBytes = stackalloc byte[16];
+
+                            for (int level = 1; level <= MinimapComposition.MAX_LOD; level++)
+                            {
+                                if (!_serviceConfig.LODLevels.Contains(level))
+                                    continue;
+
+                                int factor = 1 << level;
+                                var nlBuilder = new Dictionary<TileCoord, ContentHash>();
+                                for (int lodX = 0; lodX < 64; lodX += factor)
+                                {
+                                    for (int lodY = 0; lodY < 64; lodY += factor)
+                                    {
+                                        var nlHashList = new List<ContentHash?>(factor * factor);
+                                        for (int ty = 0; ty < factor; ty++)
+                                            for (int tx = 0; tx < factor; tx++)
+                                                nlHashList.Add(nlLod0.TryGetValue(new(lodX + tx, lodY + ty), out var sh) ? sh : null);
+
+                                        // no empty LOD chunks
+                                        if (!nlHashList.Any(x => x.HasValue))
+                                            continue;
+
+                                        using var nlMd5 = MD5.Create();
+                                        foreach (var h in nlHashList)
+                                        {
+                                            if (h.HasValue) 
+                                                h.Value.CopyTo(nlHashBytes);
+                                            else 
+                                                nlHashBytes.Clear(); // fill stack array with 16 0s for missing tile hashes
+
+                                            nlMd5.TransformBlock(nlHashBytes.ToArray(), 0, 16, null, 0);
+                                        }
+                                        nlMd5.TransformFinalBlock([], 0, 0);
+
+                                        var nlCombined = new ContentHash(nlMd5.Hash!);
+                                        nlBuilder.Add(new(lodX, lodY), nlCombined);
+
+                                        if (!mapLODTileComponents.TryAdd(nlCombined, new LODTileInfo(level, nlHashList)))
+                                            Debug.Assert(mapLODTileComponents[nlCombined].ComponentHashes.SequenceEqual(nlHashList));
+                                    }
+                                }
+
+                                if (nlBuilder.Count > 0)
+                                    nlLodBuilder.Add(level, new(nlBuilder));
+                            }
+
+                            layerCompositions.TryAdd((row.ID, "noliquid"), new(nlLodBuilder, nlMissing));
+                        }
+                    }
                 }
                 catch (DecryptionKeyMissingException ex)
                 {
@@ -831,6 +907,47 @@ internal class ScanMapsService :
                 buildMapsBatch.BatchCommands.Add(cmd);
             }
             await buildMapsBatch.ExecuteNonQueryAsync(cancellation);
+        }
+
+        // Push layer compositions (noliquid etc)
+        if (!layerCompositions.IsEmpty)
+        {
+            _logger.LogInformation("Storing {Count} layer compositions", layerCompositions.Count);
+            for (int i = 0; i < layerCompositions.Count; i += COMPOSITION_BATCH_SIZE)
+            {
+                var layerBatch = layerCompositions.Skip(i).Take(COMPOSITION_BATCH_SIZE);
+                await using var nlBatch = new NpgsqlBatch(conn);
+
+                foreach (var entry in layerBatch)
+                {
+                    var (mapId, layerType) = entry.Key;
+                    var comp = entry.Value;
+
+                    var cmdComp = nlBatch.CreateBatchCommand();
+                    cmdComp.CommandText = "INSERT INTO compositions (hash, composition, tiles, extents) VALUES ($1, $2::JSONB, $3, $4::JSONB) " +
+                        "ON CONFLICT (hash) DO UPDATE SET composition = EXCLUDED.composition, tiles = EXCLUDED.tiles, extents = EXCLUDED.extents";
+                    cmdComp.Parameters.AddWithValue(comp.Hash);
+                    cmdComp.Parameters.AddWithValue(JsonSerializer.Serialize(comp));
+                    cmdComp.Parameters.AddWithValue(comp.GetLOD(0)!.Tiles.Count);
+
+                    var extents = comp.CalcExtents();
+                    cmdComp.Parameters.AddWithValue(extents != null
+                        ? JsonSerializer.Serialize(new { x0 = extents.Value.Min.X, y0 = extents.Value.Min.Y, x1 = extents.Value.Max.X, y1 = extents.Value.Max.Y })
+                        : (object)DBNull.Value);
+                    nlBatch.BatchCommands.Add(cmdComp);
+
+                    var cmdLayer = nlBatch.CreateBatchCommand();
+                    cmdLayer.CommandText = "INSERT INTO build_map_layers (build_id, map_id, layer_type, composition_hash) VALUES ($1, $2, $3, $4) " +
+                        "ON CONFLICT (build_id, map_id, layer_type) DO UPDATE SET composition_hash = EXCLUDED.composition_hash";
+                    cmdLayer.Parameters.AddWithValue(version);
+                    cmdLayer.Parameters.AddWithValue(mapId);
+                    cmdLayer.Parameters.AddWithValue(layerType);
+                    cmdLayer.Parameters.AddWithValue(comp.Hash);
+                    nlBatch.BatchCommands.Add(cmdLayer);
+                }
+
+                await nlBatch.ExecuteNonQueryAsync(cancellation);
+            }
         }
 
         _logger.LogInformation("Done!");
