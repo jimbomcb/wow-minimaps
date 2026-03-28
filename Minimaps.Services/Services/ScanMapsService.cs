@@ -54,6 +54,17 @@ internal class ScanMapsService :
         public List<int> LODLevels { get; set; } = [];
     }
 
+    /// <summary>
+    /// Scan data versions, updated when we add new things that warrant rescanning
+    /// old builds. 
+    /// </summary>
+    private enum DataVersion
+    {
+        Initial = 1,
+        NoliquidLayers = 2,
+    }
+    private const DataVersion CURRENT_DATA_VERSION = DataVersion.NoliquidLayers;
+
     private static string GetExpectedWdtPath(string directory, string tail = ".wdt") => string.Format("world/maps/{0}/{0}{1}", directory, tail);
 
     private readonly Configuration _serviceConfig = new();
@@ -101,14 +112,20 @@ internal class ScanMapsService :
 
         BuildVersion build;
         Int64 productId;
-        await using (var command = new NpgsqlCommand("SELECT p.build_id, p.id FROM product_scans ps " +
+        bool isUpgrade;
+        await using (var command = new NpgsqlCommand(
+            "SELECT p.build_id, p.id, (ps.state != 'pending') as is_upgrade FROM product_scans ps " +
             "LEFT JOIN products p ON p.id = ps.product_id " +
             "WHERE ps.state = $1 " +
-            "ORDER BY p.build_id ASC " + // scan in patch ascending order
+            "   OR (ps.state IN ('full_decrypt', 'partial_decrypt') AND ps.data_version_attempt < $2) " +
+            "ORDER BY " +
+            "   CASE WHEN ps.state = 'pending' THEN 0 ELSE 1 END, " + // new scans first
+            "   p.build_id ASC " +
             "LIMIT 1 " +
             "FOR UPDATE OF ps SKIP LOCKED", conn, transaction))
         {
             command.Parameters.AddWithValue(Database.Tables.ScanState.Pending);
+            command.Parameters.AddWithValue((int)CURRENT_DATA_VERSION);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
             // No pending jobs
@@ -117,6 +134,7 @@ internal class ScanMapsService :
 
             build = reader.GetFieldValue<BuildVersion>(0);
             productId = reader.GetInt64(1);
+            isUpgrade = reader.GetBoolean(2);
         }
 
         var timer = Stopwatch.StartNew();
@@ -158,17 +176,19 @@ internal class ScanMapsService :
                 successCmd.Parameters.AddWithValue("EncMaps", NpgsqlTypes.NpgsqlDbType.Jsonb, JsonSerializer.Serialize(keyGrouped));
             }
 
-            successCmd.CommandText += "WHERE product_id = @ProductId;";
+            successCmd.CommandText += ", data_version = @DataVer, data_version_attempt = @DataVer, data_version_error = NULL WHERE product_id = @ProductId;";
+            successCmd.Parameters.AddWithValue("DataVer", (int)CURRENT_DATA_VERSION);
 
             await successCmd.ExecuteNonQueryAsync(cancellationToken);
 
+            var upgradeTag = isUpgrade ? " [upgrade]" : "";
             var successMessage = scanResult.Status switch
             {
-                ProcessStatus.FullDecrypt => $"Scan completed: {scanResult.Product.Product} {build} - Fully decrypted ({timer.ElapsedMilliseconds}ms)",
-                ProcessStatus.EncryptedMaps => $"Scan completed: {scanResult.Product.Product} {build} - Partially decrypted ({scanResult.EncryptedMaps!.Count()} maps encrypted) ({timer.ElapsedMilliseconds}ms)",
-                ProcessStatus.EncryptedMapDB => $"Scan completed: {scanResult.Product.Product} {build} - Map DB encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
-                ProcessStatus.EncryptedBuild => $"Scan completed: {scanResult.Product.Product} {build} - Build encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
-                _ => $"Scan completed: {scanResult.Product.Product} {build} ({timer.ElapsedMilliseconds}ms)"
+                ProcessStatus.FullDecrypt => $"Scan completed{upgradeTag}: {scanResult.Product.Product} {build} - Fully decrypted ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedMaps => $"Scan completed{upgradeTag}: {scanResult.Product.Product} {build} - Partially decrypted ({scanResult.EncryptedMaps!.Count()} maps encrypted) ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedMapDB => $"Scan completed{upgradeTag}: {scanResult.Product.Product} {build} - Map DB encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
+                ProcessStatus.EncryptedBuild => $"Scan completed{upgradeTag}: {scanResult.Product.Product} {build} - Build encrypted (key: {scanResult.EncryptKey}) ({timer.ElapsedMilliseconds}ms)",
+                _ => $"Scan completed{upgradeTag}: {scanResult.Product.Product} {build} ({timer.ElapsedMilliseconds}ms)"
             };
             _logger.LogInformation(successMessage);
             _eventLog.Post(successMessage);
@@ -180,15 +200,31 @@ internal class ScanMapsService :
             _logger.LogWarning(ex, "Caught BuildProcessException: {Msg}", ex.Message);
 
             var exceptionFirstLine = ex.InnerException?.Message.Split('\n').FirstOrDefault() ?? ex.Message.Split('\n').FirstOrDefault() ?? "Unknown error";
-            _eventLog.Post($"Scan failed: {ex.Product.Product} {ex.Version} - {exceptionFirstLine}");
 
-            await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
-                "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
-            failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
-            failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
-            failCmd.Parameters.AddWithValue("Exception", ex.ToString());
-            failCmd.Parameters.AddWithValue("ProductId", productId);
-            await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            if (isUpgrade)
+            {
+                // Upgrade failed - preserve existing state, just record the attempt
+                _eventLog.Post($"Upgrade failed: {ex.Product.Product} {ex.Version} - {exceptionFirstLine}");
+                await using var failCmd = new NpgsqlCommand(
+                    "UPDATE product_scans SET data_version_attempt = @DataVer, data_version_error = @Error, " +
+                    "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
+                failCmd.Parameters.AddWithValue("DataVer", (int)CURRENT_DATA_VERSION);
+                failCmd.Parameters.AddWithValue("Error", ex.ToString());
+                failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
+                failCmd.Parameters.AddWithValue("ProductId", productId);
+                await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            else
+            {
+                _eventLog.Post($"Scan failed: {ex.Product.Product} {ex.Version} - {exceptionFirstLine}");
+                await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
+                    "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
+                failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
+                failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
+                failCmd.Parameters.AddWithValue("Exception", ex.ToString());
+                failCmd.Parameters.AddWithValue("ProductId", productId);
+                await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
         catch (Exception ex) when (_serviceConfig.CatchScanExceptions)
         {
@@ -197,15 +233,30 @@ internal class ScanMapsService :
             _logger.LogError(ex, "Caught unhandled exception");
 
             var exceptionFirstLine = ex.Message.Split('\n').FirstOrDefault() ?? "Unknown error";
-            _eventLog.Post($"Scan failed: {build} - {exceptionFirstLine}");
 
-            await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
-                "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
-            failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
-            failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
-            failCmd.Parameters.AddWithValue("Exception", "Unhandled processing exception: " + ex.ToString());
-            failCmd.Parameters.AddWithValue("ProductId", productId);
-            await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            if (isUpgrade)
+            {
+                _eventLog.Post($"Upgrade failed: {build} - {exceptionFirstLine}");
+                await using var failCmd = new NpgsqlCommand(
+                    "UPDATE product_scans SET data_version_attempt = @DataVer, data_version_error = @Error, " +
+                    "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
+                failCmd.Parameters.AddWithValue("DataVer", (int)CURRENT_DATA_VERSION);
+                failCmd.Parameters.AddWithValue("Error", "Unhandled: " + ex.ToString());
+                failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
+                failCmd.Parameters.AddWithValue("ProductId", productId);
+                await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
+            else
+            {
+                _eventLog.Post($"Scan failed: {build} - {exceptionFirstLine}");
+                await using var failCmd = new NpgsqlCommand("UPDATE product_scans SET state = @NewState, exception = @Exception, " +
+                    "last_scanned = timezone('utc', now()), scan_time = @ScanTime WHERE product_id = @ProductId;", conn, transaction);
+                failCmd.Parameters.AddWithValue("NewState", Database.Tables.ScanState.Exception);
+                failCmd.Parameters.AddWithValue("ScanTime", Period.FromMilliseconds(timer.ElapsedMilliseconds));
+                failCmd.Parameters.AddWithValue("Exception", "Unhandled processing exception: " + ex.ToString());
+                failCmd.Parameters.AddWithValue("ProductId", productId);
+                await failCmd.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -485,7 +536,7 @@ internal class ScanMapsService :
                     // Up until relatively recently Blizzard added underwater minimap overrides direct to the exe...
                     // The list of legacy files are hardcoded and we'll pull them in for each matching map below.
                     // Going forward they'll probably be driven by AltMinimap tables (https://wago.tools/db2/AltMinimap)
-                    var noliquidTiles = NoliquidTiles.GetTilesForMap(row.ID);
+                    var noliquidTiles = version >= KnownBuilds.NoliquidIntroduced ? NoliquidTiles.GetTilesForMap(row.ID) : null;
                     if (noliquidTiles != null)
                     {
                         var nlLod0 = new Dictionary<TileCoord, ContentHash>();
@@ -832,6 +883,31 @@ internal class ScanMapsService :
 
             comp.TileSize = sizeCounts.OrderByDescending(x => x.Value).First().Key;
         }
+
+        // Same tile size finalization for layer compositions, remove empty ones
+        var emptyLayerKeys = new List<(int, string)>();
+        foreach (var entry in layerCompositions)
+        {
+            var comp = entry.Value;
+            var lod0 = comp.GetLOD(0);
+            if (lod0 == null || lod0.Tiles.Count == 0)
+            {
+                emptyLayerKeys.Add(entry.Key);
+                continue;
+            }
+
+            var sizeCounts = new Dictionary<int, int>();
+            foreach (var tileHash in lod0.Tiles.Values)
+            {
+                if (!tileHashSize.TryGetValue(tileHash, out int tileSize))
+                    throw new Exception("Layer tile hash missing size info during composition finalization");
+                sizeCounts[tileSize] = sizeCounts.GetValueOrDefault(tileSize) + 1;
+            }
+
+            comp.TileSize = sizeCounts.OrderByDescending(x => x.Value).First().Key;
+        }
+        foreach (var key in emptyLayerKeys)
+            layerCompositions.TryRemove(key, out _);
 
         // Push the minimap composition data now that all the tiles are registered
         // Batched super conservatively otherwise we often hit NpgsqlBufferWriter.ThrowOutOfMemory, probably need to up the connection string buffer?

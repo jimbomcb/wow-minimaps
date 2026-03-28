@@ -17,4 +17,11 @@ public static class KnownBuilds
     /// After 9.0.1 the associated WDT is referenced by the map table
     /// </summary>
     public static readonly BuildVersion MapAddWdtFileId = new(9, 0, 1, 33978);
+
+    /// <summary>
+    /// Noliquid (underwater) minimap tiles were introduced in Cataclysm.
+    /// For some reason I'm getting the cata FDIDs resolving in pre-data builds...
+    /// Limiting it this way.
+    /// </summary>
+    public static readonly BuildVersion NoliquidIntroduced = new(4, 0, 0, 0);
 }

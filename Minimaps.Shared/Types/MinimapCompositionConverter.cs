@@ -187,9 +187,13 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
             writer.WriteEndArray();
         }
 
-        if (value.TileSize >= 0)
+        if (value.TileSize > 0)
         {
             writer.WriteNumber("tileSize", value.TileSize);
+        }
+        else if (value.GetLOD(0)!.Tiles.Count > 0)
+        {
+            throw new InvalidOperationException($"MinimapComposition.TileSize must be set before serialization (got {value.TileSize})");
         }
 
         writer.WritePropertyName("lod");

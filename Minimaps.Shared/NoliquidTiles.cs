@@ -6,6 +6,10 @@ namespace Minimaps.Shared;
 /// Static lookup of known "noliquid" (underwater) minimap tile FDIDs.
 /// These are no longer used (in favour of them getting stored in new DB tables) but are still present for some old maps.
 /// Just grep'd out from the _noliquid paths in the community listfile.
+/// 
+/// It's true that given we're hard-coding the FDIDs I think it will always correspond to the same BLP minimap file on the backend...
+/// Given this is an entirely deprecated path in favour of the new DB table, I'm not going to go to the effort of scanning out the memory offsets
+/// of the noliquid FDIDs hard-coded into WoW.exe to try detect them being changed.
 /// </summary>
 public static class NoliquidTiles
 {
