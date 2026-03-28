@@ -4,7 +4,7 @@ namespace Minimaps.Shared;
 
 /// <summary>
 /// Static lookup of known "noliquid" (underwater) minimap tile FDIDs.
-/// These are no longer used (in favour of them getting stored in new DB tables) but are still present for sole old maps.
+/// These are no longer used (in favour of them getting stored in new DB tables) but are still present for some old maps.
 /// Just grep'd out from the _noliquid paths in the community listfile.
 /// </summary>
 public static class NoliquidTiles
