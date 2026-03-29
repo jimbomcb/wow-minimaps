@@ -62,8 +62,9 @@ internal class ScanMapsService :
     {
         Initial = 1,
         NoliquidLayers = 2,
+        MapTextureLayers = 3,
     }
-    private const DataVersion CURRENT_DATA_VERSION = DataVersion.NoliquidLayers;
+    private const DataVersion CURRENT_DATA_VERSION = DataVersion.MapTextureLayers;
 
     private static string GetExpectedWdtPath(string directory, string tail = ".wdt") => string.Format("world/maps/{0}/{0}{1}", directory, tail);
 
@@ -117,6 +118,7 @@ internal class ScanMapsService :
             "SELECT p.build_id, p.id, (ps.state != 'pending') as is_upgrade FROM product_scans ps " +
             "LEFT JOIN products p ON p.id = ps.product_id " +
             "WHERE ps.state = $1 " +
+            
             "   OR (ps.state IN ('full_decrypt', 'partial_decrypt') AND ps.data_version_attempt < $2) " +
             "ORDER BY " +
             "   CASE WHEN ps.state = 'pending' THEN 0 ELSE 1 END, " + // new scans first
@@ -332,6 +334,74 @@ internal class ScanMapsService :
     private readonly record struct ProcessResult(ProcessStatus Status, BuildProductDto Product, string? EncryptKey, IEnumerable<EncryptedMap>? EncryptedMaps = null);
     private readonly record struct LODTileInfo(int Level, List<ContentHash?> ComponentHashes);
 
+    /// <summary>
+    /// Build a MinimapComposition (LOD0 + LOD pyramid) from a set of LOD0 tiles.
+    /// Tile and LOD hashes written out for phase 1/2 processing.
+    /// </summary>
+    private MinimapComposition? BuildComposition(
+        IEnumerable<(TileCoord Pos, ContentHash Hash, uint FileId)> lod0Tiles,
+        HashSet<TileCoord> missingTiles,
+        ConcurrentDictionary<ContentHash, uint> lod0TileFDIDs,
+        ConcurrentDictionary<ContentHash, LODTileInfo> lodTileComponents)
+    {
+        var lod0 = new Dictionary<TileCoord, ContentHash>();
+        foreach (var tile in lod0Tiles)
+        {
+            lod0[tile.Pos] = tile.Hash;
+            lod0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
+        }
+
+        if (lod0.Count == 0)
+            return null;
+
+        var lodBuilder = new Dictionary<int, CompositionLOD> { { 0, new(lod0) } };
+        Span<byte> hashBytes = stackalloc byte[16];
+
+        for (int level = 1; level <= MinimapComposition.MAX_LOD; level++)
+        {
+            if (!_serviceConfig.LODLevels.Contains(level))
+                continue;
+
+            int factor = 1 << level;
+            var builder = new Dictionary<TileCoord, ContentHash>();
+            for (int lodX = 0; lodX < 64; lodX += factor)
+            {
+                for (int lodY = 0; lodY < 64; lodY += factor)
+                {
+                    var hashList = new List<ContentHash?>(factor * factor);
+                    for (int ty = 0; ty < factor; ty++)
+                        for (int tx = 0; tx < factor; tx++)
+                            hashList.Add(lod0.TryGetValue(new(lodX + tx, lodY + ty), out var sh) ? sh : null);
+
+                    if (!hashList.Any(x => x.HasValue))
+                        continue;
+
+                    using var md5 = MD5.Create();
+                    foreach (var h in hashList)
+                    {
+                        if (h.HasValue) 
+                            h.Value.CopyTo(hashBytes);
+                        else 
+                            hashBytes.Clear();
+                        md5.TransformBlock(hashBytes.ToArray(), 0, 16, null, 0);
+                    }
+                    md5.TransformFinalBlock([], 0, 0);
+
+                    var combinedHash = new ContentHash(md5.Hash!);
+                    builder.Add(new(lodX, lodY), combinedHash);
+
+                    if (!lodTileComponents.TryAdd(combinedHash, new LODTileInfo(level, hashList)))
+                        Debug.Assert(lodTileComponents[combinedHash].ComponentHashes.SequenceEqual(hashList));
+                }
+            }
+
+            if (builder.Count > 0)
+                lodBuilder.Add(level, new(builder));
+        }
+
+        return new MinimapComposition(lodBuilder, missingTiles);
+    }
+
     private async Task<ProcessResult> ProcessBuild(NpgsqlConnection conn, BuildVersion version, BuildProductDto product, CancellationToken cancellation)
     {
         _logger.LogInformation("Processing {Ver} {Prod}", version, product);
@@ -441,105 +511,62 @@ internal class ScanMapsService :
                     }
 
                     using var wdtStream = new WDTReader(wdtStreamRaw);
-                    var minimapTiles = wdtStream.ReadMinimapTiles();
-                    if (minimapTiles == null)
+                    var maid = wdtStream.ReadMAID();
+                    if (maid == null)
                     {
-                        // Some maps reference a WDT but don't have MAID chunks?
-                        // TODO: Are these stored elsewhere like older versions? Assuming not
-                        _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir}) - No ReadMinimapTiles result", row.ID, directory);
+                        _logger.LogWarning("Failed to open WDT for map {MapId} ({MapDir}) - No MAID chunk", row.ID, directory);
                         return;
                     }
 
-                    // TODO: WMO based minimaps have 0 tiles I think, need some way to represent on backend
-                    // the list of tiles that are referenced by the WDT but their associated file doesn't exist on the CDN
-                    var missingTiles = new HashSet<TileCoord>();
-                    var lod0Builder = new Dictionary<TileCoord, ContentHash>();
-                    foreach (var tile in minimapTiles)
+                    // minimaps
+                    var minimapResolved = new List<(TileCoord Pos, ContentHash Hash, uint FileId)>();
+                    var minimapMissing = new HashSet<TileCoord>();
+                    foreach (var (coord, entry) in maid)
                     {
-                        var tilePos = new TileCoord(tile.X, tile.Y);
+                        if (entry.MinimapTexture == 0)
+                            continue;
 
-                        // get the content hash from the FDID, gather the deduped list of Tiles
-                        var ckey = filesystem.GetFDIDContentKey(tile.FileId);
+                        var pos = new TileCoord(coord.X, coord.Y);
+                        var ckey = filesystem.GetFDIDContentKey(entry.MinimapTexture);
                         if (ckey.Length == 0)
                         {
-                            // tiles with no content key are missing from the archives, note it as missing
-                            missingTiles.Add(tilePos);
+                            minimapMissing.Add(pos);
                             continue;
                         }
-
-                        var contentHash = new ContentHash(ckey.AsSpan());
-                        lod0Builder.Add(tilePos, contentHash);
-                        mapLOD0TileFDIDs.TryAdd(contentHash, tile.FileId);
+                        minimapResolved.Add((pos, new ContentHash(ckey.AsSpan()), entry.MinimapTexture));
                     }
 
-                    // Build the LOD tile componments, for now these are deduplicated by keying them
-                    // based on the concatenated MD5 of their components
-                    var lodBuilder = new Dictionary<int, CompositionLOD>();
-                    var lod0 = lod0Builder;
-                    lodBuilder.Add(0, new(lod0));
-                    Span<byte> hashBytes = stackalloc byte[16];
+                    var minimapComp = BuildComposition(minimapResolved, minimapMissing, mapLOD0TileFDIDs, mapLODTileComponents);
+                    if (minimapComp != null)
+                        compositions.TryAdd(row.ID, minimapComp);
 
-                    for (int level = 1; level <= MinimapComposition.MAX_LOD; level++)
+                    // maptextures
+                    var mapTexResolved = new List<(TileCoord Pos, ContentHash Hash, uint FileId)>();
+                    var mapTexMissing = new HashSet<TileCoord>();
+                    foreach (var (coord, entry) in maid)
                     {
-                        if (!_serviceConfig.LODLevels.Contains(level))
+                        if (entry.MapTexture == 0)
                             continue;
 
-                        // each LOD tile covers a 2^level x 2^level area of LOD0 tiles
-                        int factor = 1 << level;
-                        var builder = new Dictionary<TileCoord, ContentHash>();
-                        for (int lodX = 0; lodX < 64; lodX += factor)
+                        var pos = new TileCoord(coord.X, coord.Y);
+                        var ckey = filesystem.GetFDIDContentKey(entry.MapTexture);
+                        if (ckey.Length == 0)
                         {
-                            for (int lodY = 0; lodY < 64; lodY += factor)
-                            {
-                                var hashList = new List<ContentHash?>(factor * factor);
-                                for (int ty = 0; ty < factor; ty++)
-                                {
-                                    for (int tx = 0; tx < factor; tx++)
-                                    {
-                                        if (lod0.TryGetValue(new(lodX + tx, lodY + ty), out var subHash))
-                                            hashList.Add(subHash);
-                                        else
-                                            hashList.Add(null);
-                                    }
-                                }
-
-                                // no empty LOD chunks
-                                if (!hashList.Any(x => x.HasValue))
-                                    continue;
-
-                                using var md5 = MD5.Create();
-                                foreach (var h in hashList)
-                                {
-                                    if (h.HasValue)
-                                        h.Value.CopyTo(hashBytes);
-                                    else
-                                        hashBytes.Clear(); // fill stack array with 16 0s for missing tile hashes
-
-                                    md5.TransformBlock(hashBytes.ToArray(), 0, 16, null, 0);
-                                }
-                                md5.TransformFinalBlock([], 0, 0);
-
-                                var combinedHash = new ContentHash(md5.Hash!);
-                                builder.Add(new(lodX, lodY), combinedHash);
-
-                                if (!mapLODTileComponents.TryAdd(combinedHash, new LODTileInfo(level, hashList)))
-                                    Debug.Assert(mapLODTileComponents[combinedHash].ComponentHashes.SequenceEqual(hashList), "Hash collision???");
-                            }
+                            mapTexMissing.Add(pos);
+                            continue;
                         }
-
-                        if (builder.Count > 0)
-                            lodBuilder.Add(level, new(builder));
+                        mapTexResolved.Add((pos, new ContentHash(ckey.AsSpan()), entry.MapTexture));
                     }
 
-                    compositions.TryAdd(row.ID, new(lodBuilder, missingTiles));
+                    var mapTexComp = BuildComposition(mapTexResolved, mapTexMissing, mapLOD0TileFDIDs, mapLODTileComponents);
+                    if (mapTexComp != null)
+                        layerCompositions.TryAdd((row.ID, "maptexture"), mapTexComp);
 
-                    // Up until relatively recently Blizzard added underwater minimap overrides direct to the exe...
-                    // The list of legacy files are hardcoded and we'll pull them in for each matching map below.
-                    // Going forward they'll probably be driven by AltMinimap tables (https://wago.tools/db2/AltMinimap)
+                    // noliquid (hard-coded)
                     var noliquidTiles = version >= KnownBuilds.NoliquidIntroduced ? NoliquidTiles.GetTilesForMap(row.ID) : null;
                     if (noliquidTiles != null)
                     {
-                        var nlLod0 = new Dictionary<TileCoord, ContentHash>();
+                        var nlResolved = new List<(TileCoord Pos, ContentHash Hash, uint FileId)>();
                         var nlMissing = new HashSet<TileCoord>();
                         foreach (var nlTile in noliquidTiles)
                         {
@@ -549,63 +576,12 @@ internal class ScanMapsService :
                                 nlMissing.Add(new(nlTile.X, nlTile.Y));
                                 continue;
                             }
-
-                            var nlHash = new ContentHash(nlCkey.AsSpan());
-                            nlLod0[new(nlTile.X, nlTile.Y)] = nlHash;
-                            mapLOD0TileFDIDs.TryAdd(nlHash, nlTile.FileId);
+                            nlResolved.Add((new(nlTile.X, nlTile.Y), new ContentHash(nlCkey.AsSpan()), nlTile.FileId));
                         }
 
-                        if (nlLod0.Count > 0)
-                        {
-                            var nlLodBuilder = new Dictionary<int, CompositionLOD> { { 0, new(nlLod0) } };
-                            Span<byte> nlHashBytes = stackalloc byte[16];
-
-                            for (int level = 1; level <= MinimapComposition.MAX_LOD; level++)
-                            {
-                                if (!_serviceConfig.LODLevels.Contains(level))
-                                    continue;
-
-                                int factor = 1 << level;
-                                var nlBuilder = new Dictionary<TileCoord, ContentHash>();
-                                for (int lodX = 0; lodX < 64; lodX += factor)
-                                {
-                                    for (int lodY = 0; lodY < 64; lodY += factor)
-                                    {
-                                        var nlHashList = new List<ContentHash?>(factor * factor);
-                                        for (int ty = 0; ty < factor; ty++)
-                                            for (int tx = 0; tx < factor; tx++)
-                                                nlHashList.Add(nlLod0.TryGetValue(new(lodX + tx, lodY + ty), out var sh) ? sh : null);
-
-                                        // no empty LOD chunks
-                                        if (!nlHashList.Any(x => x.HasValue))
-                                            continue;
-
-                                        using var nlMd5 = MD5.Create();
-                                        foreach (var h in nlHashList)
-                                        {
-                                            if (h.HasValue) 
-                                                h.Value.CopyTo(nlHashBytes);
-                                            else 
-                                                nlHashBytes.Clear(); // fill stack array with 16 0s for missing tile hashes
-
-                                            nlMd5.TransformBlock(nlHashBytes.ToArray(), 0, 16, null, 0);
-                                        }
-                                        nlMd5.TransformFinalBlock([], 0, 0);
-
-                                        var nlCombined = new ContentHash(nlMd5.Hash!);
-                                        nlBuilder.Add(new(lodX, lodY), nlCombined);
-
-                                        if (!mapLODTileComponents.TryAdd(nlCombined, new LODTileInfo(level, nlHashList)))
-                                            Debug.Assert(mapLODTileComponents[nlCombined].ComponentHashes.SequenceEqual(nlHashList));
-                                    }
-                                }
-
-                                if (nlBuilder.Count > 0)
-                                    nlLodBuilder.Add(level, new(nlBuilder));
-                            }
-
-                            layerCompositions.TryAdd((row.ID, "noliquid"), new(nlLodBuilder, nlMissing));
-                        }
+                        var nlComp = BuildComposition(nlResolved, nlMissing, mapLOD0TileFDIDs, mapLODTileComponents);
+                        if (nlComp != null)
+                            layerCompositions.TryAdd((row.ID, "noliquid"), nlComp);
                     }
                 }
                 catch (DecryptionKeyMissingException ex)
@@ -651,7 +627,7 @@ internal class ScanMapsService :
 
         _logger.LogInformation("{DeltaCount}/{TotalCount} ({Pct}%) tiles to upload", tileDelta.Count, tileHashSet.Count, ((float)tileDelta.Count / tileHashSet.Count) * 100.0f);
         _eventLog.Post($"{product.Product} {version} - Tiles: {tileDelta.Count}/{tileHashSet.Count} ({((float)tileDelta.Count / tileHashSet.Count) * 100.0f:F1}%) new");
-        
+
         // Configure channels:
         // - Global consumer consumes hash + metadata of geenrated tiles, batch registers with DB
         // - Phase 1 Producer: Produce all LOD0 tiles
@@ -708,64 +684,74 @@ internal class ScanMapsService :
         // Phase 1 produce: LOD0 tiles
         var tileErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var lod0Delta = tileDelta.Intersect(mapLOD0TileFDIDs.Keys);
-        //var lod0Delta = mapLOD0TileFDIDs.Keys;
         _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
-        await Parallel.ForEachAsync(lod0Delta,
-            new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
-            async (tileHash, token) =>
-            {
-                var tileFDID = mapLOD0TileFDIDs[tileHash];
 
-                try
+        using var tileAbortCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        try
+        {
+            await Parallel.ForEachAsync(lod0Delta,
+                new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = tileAbortCts.Token },
+                async (tileHash, token) =>
                 {
-                    using var tileStream = await _blizztrack.OpenStreamFDID(tileFDID, filesystem, validate: true, cancellation: token);
-                    if (tileStream == null || tileStream == Stream.Null)
+                    var tileFDID = mapLOD0TileFDIDs[tileHash];
+
+                    try
                     {
-                        _logger.LogWarning("Failed to open tile {TileHash} FDID {TileFDID}", tileHash, tileFDID);
-                        return;
-                    }
-
-                    using var blpFile = new BLPSharp.BLPFile(tileStream);
-                    var mapBytes = blpFile.GetPixels(0, out int width, out int height) ??
-                        throw new Exception($"Failed to decode BLP (len:{tileStream.Length})");
-                    Debug.Assert(width == height);
-
-                    if (width > 2048)
-                        throw new Exception("Unexpected tile size");
-
-                    tileHashSize.TryAdd(tileHash, width);
-
-                    await using var webpStream = new MemoryStream();
-                    using (var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height))
-                    {
-                        image.Save(webpStream, new WebpEncoder()
+                        using var tileStream = await _blizztrack.OpenStreamFDID(tileFDID, filesystem, validate: true, cancellation: token);
+                        if (tileStream == null || tileStream == Stream.Null)
                         {
-                            FileFormat = _serviceConfig.Compression.Baseline.Type,
-                            Method = _serviceConfig.Compression.Baseline.Level,
-                            EntropyPasses = 10,
-                            Quality = _serviceConfig.Compression.Baseline.Quality
-                        });
+                            _logger.LogWarning("Failed to open tile {TileHash} FDID {TileFDID}", tileHash, tileFDID);
+                            return;
+                        }
+
+                        using var blpFile = new BLPSharp.BLPFile(tileStream);
+                        var mapBytes = blpFile.GetPixels(0, out int width, out int height) ??
+                            throw new Exception($"Failed to decode BLP (len:{tileStream.Length})");
+                        Debug.Assert(width == height);
+
+                        if (width > 2048)
+                            throw new Exception("Unexpected tile size");
+
+                        tileHashSize.TryAdd(tileHash, width);
+
+                        await using var webpStream = new MemoryStream();
+                        using (var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height))
+                        {
+                            image.Save(webpStream, new WebpEncoder()
+                            {
+                                FileFormat = _serviceConfig.Compression.Baseline.Type,
+                                Method = _serviceConfig.Compression.Baseline.Level,
+                                EntropyPasses = 10,
+                                Quality = _serviceConfig.Compression.Baseline.Quality
+                            });
+                        }
+
+                        webpStream.Position = 0;
+                        await _tileStore.SaveAsync(tileHash, webpStream, "image/webp");
+                        await channel.Writer.WriteAsync(new()
+                        {
+                            hash = tileHash,
+                            tile_size = (short)width,
+                        }, token);
+
+                        _logger.LogTrace("Uploaded LOD0 tile {TileHash} FDID {TileFDID} ({Width}x{Height})", tileHash, tileFDID, width, height);
                     }
-
-                    webpStream.Position = 0;
-                    await _tileStore.SaveAsync(tileHash, webpStream, "image/webp");
-                    await channel.Writer.WriteAsync(new()
+                    catch (OperationCanceledException) { /* abort already in progress */ }
+                    catch (Exception ex)
                     {
-                        hash = tileHash,
-                        tile_size = (short)width,
-                    }, token);
+                        tileErrors.TryAdd(tileHash, ex);
+                        if (tileErrors.Count >= 5)
+                            await tileAbortCts.CancelAsync();
+                    }
+                });
+        }
+        catch (OperationCanceledException) when (tileErrors.Count > 0)
+        {
+            _logger.LogWarning("Tile processing aborted: {ErrorCount} tiles failed, CDN data likely unavailable for this build", tileErrors.Count);
+        }
 
-                    _logger.LogTrace("Uploaded LOD0 tile {TileHash} FDID {TileFDID} ({Width}x{Height})", tileHash, tileFDID, width, height);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error processing LOD0 tile {TileHash} FDID {TileFDID}", tileHash, tileFDID);
-                    tileErrors.TryAdd(tileHash, ex);
-                }
-            });
-
-        // After getting both sizes from the db and the LOD0 scan above, we should know the sizes of all LOD0 tiles
-        Debug.Assert(mapLOD0TileFDIDs.Keys.Except(tileHashSize.Keys).Count() == 0);
+        if (tileErrors.Count > 0)
+            throw new AggregateException($"{tileErrors.Count} tiles failed to process", tileErrors.Values);
 
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);

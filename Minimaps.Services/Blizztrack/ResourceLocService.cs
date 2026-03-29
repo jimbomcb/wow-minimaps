@@ -227,11 +227,12 @@ public class ResourceLocService : IResourceLocator
         foreach (var ep in endpoints)
         {
             token.ThrowIfCancellationRequested();
-            var request = BuildRequest(ep.Host, ep.DataStem, descriptor);
             try
             {
                 var response = await _acquisitionPipeline.ExecuteAsync(async (ct) =>
                 {
+                    // Build a fresh request per attempt
+                    var request = BuildRequest(ep.Host, ep.DataStem, descriptor);
                     return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
                 }, token);
                 if (response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.PartialContent)

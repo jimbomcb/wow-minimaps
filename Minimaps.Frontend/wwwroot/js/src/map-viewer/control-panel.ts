@@ -800,6 +800,7 @@ export class ControlPanel {
 
     private static readonly LAYER_TYPE_LABELS: Record<string, string> = {
         'noliquid': 'Underwater',
+        'maptexture': 'maptexture',
     };
 
     public updateLayers(): void {

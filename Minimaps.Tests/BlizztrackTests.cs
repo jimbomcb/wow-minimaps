@@ -357,6 +357,78 @@ public class BlizztrackTests
     }
 #endif
 
+    /// <summary>
+    /// Validates that maptexture BLPs with IV size 8 can be decrypted.
+    /// FDID 3182881 is world/maptextures/2297/2297_25_22.blp (Icecrown Citadel 8.3)
+    /// which fails with "Invalid IV size 8" in Blizztrack's BLTE.TryDecrypt.
+    /// </summary>
+    [Fact]
+    public async Task MapTextureBLP_IVSize8()
+    {
+        var configValues = GetTestConfigValues("C:\\temp\\lfs_test");
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        services.AddHttpClient();
+
+        services.AddSingleton<ResourceLocService>();
+        services.AddSingleton<BlizztrackFSService>();
+        services.AddSingleton<IRibbitClient>(new RibbitClient(RibbitRegion.US));
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        try
+        {
+            var logger = serviceProvider.GetRequiredService<ILogger<BlizztrackTests>>();
+            var tactKeys = await TACTKeys.LoadAsync("C:\\temp\\lfs_test", logger);
+            foreach (var key in tactKeys)
+                TACTKeyService.SetKey(key.KeyName, key.KeyValue);
+            logger.LogInformation("Loaded {KeyCount} TACT keys", tactKeys.Count);
+
+            var resourceLocService = serviceProvider.GetRequiredService<ResourceLocService>();
+            var blizztrackService = serviceProvider.GetRequiredService<BlizztrackFSService>();
+
+            // Build 12.0.1.66709 - the build that produces IV size 8 errors for map 2297 maptextures
+            const string product = "wow";
+            const string buildConfig = "8d07263c0bb34301871c0d3e676d1315";
+            const string cdnConfig = "4f9ba92e21e24154f3290b78bf4d6ca5";
+            const string productConfig = "53020d32e1a25648c8e1eafd5771935f";
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+            var fileSystem = await blizztrackService.ResolveFileSystem(product, buildConfig, cdnConfig, productConfig, cts.Token);
+
+            // Test all failing FDIDs from map 2297 (Icecrown Citadel 8.3) maptextures
+            // These fail with "Invalid IV size 8" during full scan but pass in isolation
+            uint[] failingFdids = { 3182881, 3182887, 3182877, 3182923, 3182721, 3182567, 3182793 };
+
+            foreach (var testFileId in failingFdids)
+            {
+                logger.LogInformation("Testing FDID {FDID}...", testFileId);
+
+                using var stream = await blizztrackService.OpenStreamFDID(testFileId, fileSystem, validate: true, cancellation: cts.Token);
+                Assert.NotNull(stream);
+                Assert.True(stream.Length > 0, $"Empty stream for FDID {testFileId}");
+
+                // Verify it's a valid BLP
+                using var blpFile = new BLPFile(stream);
+                var pixels = blpFile.GetPixels(0, out int width, out int height);
+                Assert.NotNull(pixels);
+                Assert.True(width > 0 && height > 0, $"Invalid BLP dimensions for FDID {testFileId}: {width}x{height}");
+
+                logger.LogInformation("FDID {FDID}: MapTexture BLP decoded successfully: {Width}x{Height}", testFileId, width, height);
+            }
+        }
+        finally
+        {
+            serviceProvider.Dispose();
+        }
+    }
+
     [Fact]
     public async Task EncryptedBuild()
     {
