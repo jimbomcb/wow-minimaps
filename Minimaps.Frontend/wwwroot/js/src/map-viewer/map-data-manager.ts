@@ -1,6 +1,6 @@
 import { MinimapComposition } from './types.js';
 import { BuildVersion } from './build-version.js';
-import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto, MapLayersDto } from './backend-types.js';
+import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto, MapLayersDto, MapLayerEntryDto } from './backend-types.js';
 
 export interface MapInfo {
     mapId: number;
@@ -44,8 +44,8 @@ export class MapDataManager {
     private compositionCache = new Map<string, MinimapComposition>(); // comp hash -> composition
     private compositionLoadingPromises = new Map<string, Promise<MinimapComposition>>();
 
-    // Layer data: mapId -> (layerType -> (encodedVersion -> compositionHash))
-    private layerCache = new Map<number, Map<string, Map<string, string>>>();
+    // Layer data: mapId -> (layerType -> (encodedVersion -> { hash, partial }))
+    private layerCache = new Map<number, Map<string, Map<string, { hash: string; partial: boolean }>>>();
     private layerLoadingPromises = new Map<number, Promise<void>>();
 
     constructor() {}
@@ -337,13 +337,14 @@ export class MapDataManager {
             if (!response.ok) return;
 
             const data = (await response.json()) as MapLayersDto;
-            const layerMap = new Map<string, Map<string, string>>();
+            const layerMap = new Map<string, Map<string, { hash: string; partial: boolean }>>();
             for (const [layerType, versions] of Object.entries(data.layers)) {
-                const versionMap = new Map<string, string>();
-                for (const [encodedVer, hash] of Object.entries(versions)) {
-                    versionMap.set(encodedVer, hash);
+                const versionMap = new Map<string, { hash: string; partial: boolean }>();
+                for (const [encodedVer, entry] of Object.entries(versions)) {
+                    versionMap.set(encodedVer, { hash: entry.compositionHash, partial: entry.partial });
                 }
-                if (versionMap.size > 0) layerMap.set(layerType, versionMap);
+                if (versionMap.size > 0)
+                    layerMap.set(layerType, versionMap);
             }
             this.layerCache.set(mapId, layerMap);
         } catch {
@@ -362,10 +363,24 @@ export class MapDataManager {
         const versionMap = layerMap.get(layerType);
         if (!versionMap || versionMap.size === 0) return null;
 
-        const hash = versionMap.get(version.encodedValueString);
-        if (!hash) return null;
+        const entry = versionMap.get(version.encodedValueString);
+        if (!entry)
+            return null;
 
-        return await this.loadComposition(hash);
+        return await this.loadComposition(entry.hash);
+    }
+
+    isLayerPartial(mapId: number, version: BuildVersion, layerType: string): boolean {
+        const layerMap = this.layerCache.get(mapId);
+        if (!layerMap)
+            return false;
+
+        const versionMap = layerMap.get(layerType);
+        if (!versionMap)
+            return false;
+
+        const entry = versionMap.get(version.encodedValueString);
+        return entry?.partial ?? false;
     }
 
     clearCache(): void {

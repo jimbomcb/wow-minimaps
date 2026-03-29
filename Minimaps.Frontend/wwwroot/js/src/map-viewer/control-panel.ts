@@ -19,6 +19,7 @@ export interface LayerDisplayInfo {
     monochrome: boolean;
     isParent: boolean;
     layerType: string | null; // null = main map, otherwise layer type like 'noliquid'
+    partial: boolean;
 }
 
 export interface ControlPanelOptions {
@@ -807,6 +808,11 @@ export class ControlPanel {
         const layers = this.layerManager.getAllLayers();
         this.currentLayers = [];
 
+        // Resolve actual version for partial checks
+        const resolvedVersion = this.currentVersion === 'latest'
+            ? (this.availableVersions.length > 0 ? this.availableVersions[this.availableVersions.length - 1]!.version : null)
+            : this.currentVersion;
+
         for (const layer of layers) {
             if (!isTileLayer(layer)) continue;
 
@@ -835,6 +841,10 @@ export class ControlPanel {
                 ? (ControlPanel.LAYER_TYPE_LABELS[layerType] ?? layerType)
                 : (mapInfo?.name ?? `Map ${mapId}`);
 
+            const partial = layerType !== null && resolvedVersion !== null
+                ? this.mapDataManager.isLayerPartial(mapId, resolvedVersion, layerType)
+                : false;
+
             this.currentLayers.push({
                 layerId: layer.id,
                 mapId,
@@ -843,6 +853,7 @@ export class ControlPanel {
                 monochrome: layer.monochrome,
                 isParent,
                 layerType,
+                partial,
             });
         }
 
@@ -884,7 +895,8 @@ export class ControlPanel {
         // Layer info
         const info = document.createElement('span');
         info.className = 'layer-info';
-        info.innerHTML = `<span class="id-highlight">${layer.mapId}</span> <span class="layer-name">${layer.mapName}</span>`;
+        const partialBadge = layer.partial ? ' <span class="layer-partial" title="Incomplete — some tiles not available at archive time">!</span>' : '';
+        info.innerHTML = `<span class="id-highlight">${layer.mapId}</span> <span class="layer-name">${layer.mapName}</span>${partialBadge}`;
         item.appendChild(info);
 
         // Monochrome toggle

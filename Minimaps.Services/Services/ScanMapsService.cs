@@ -73,8 +73,9 @@ internal class ScanMapsService :
         Initial = 1,
         NoliquidLayers = 2,
         MapTextureLayers = 3,
+        PartialLayerTolerance = 4,
     }
-    private const DataVersion CURRENT_DATA_VERSION = DataVersion.MapTextureLayers;
+    private const DataVersion CURRENT_DATA_VERSION = DataVersion.PartialLayerTolerance;
 
     private static string GetExpectedWdtPath(string directory, string tail = ".wdt") => string.Format("world/maps/{0}/{0}{1}", directory, tail);
 
@@ -128,7 +129,7 @@ internal class ScanMapsService :
             "SELECT p.build_id, p.id, (ps.state != 'pending') as is_upgrade FROM product_scans ps " +
             "LEFT JOIN products p ON p.id = ps.product_id " +
             "WHERE ps.state = $1 " +
-            
+
             "   OR (ps.state IN ('full_decrypt', 'partial_decrypt') AND ps.data_version_attempt < $2) " +
             "ORDER BY " +
             "   CASE WHEN ps.state = 'pending' THEN 0 ELSE 1 END, " + // new scans first
@@ -281,6 +282,7 @@ internal class ScanMapsService :
         _logger.BeginScope($"ScanBuild:{productId}:{version}");
         _logger.LogInformation("Scanning maps for build {BuildVer} product {ProductId}", version, productId);
         _eventLog.Post($"Scan started: {productId}:{version}");
+        _resourceLocator.ResetDownloadCaches();
 
         // todo: transition to DB stored tact keys + service that updates & requeues prior encrypted builds/maps when discovering new keys
         var tactKeysTask = TACTKeys.LoadAsync(_serviceConfig.CachePath, _logger);
@@ -399,9 +401,9 @@ internal class ScanMapsService :
                     using var md5 = MD5.Create();
                     foreach (var h in hashList)
                     {
-                        if (h.HasValue) 
+                        if (h.HasValue)
                             h.Value.CopyTo(hashBytes);
-                        else 
+                        else
                             hashBytes.Clear();
                         md5.TransformBlock(hashBytes.ToArray(), 0, 16, null, 0);
                     }
@@ -489,7 +491,7 @@ internal class ScanMapsService :
 
         var encryptedMaps = new ConcurrentBag<EncryptedMap>();
         var compositions = new ConcurrentDictionary<int, MinimapComposition>(); // Build the tile composition of each map
-        var layerCompositions = new ConcurrentDictionary<(int MapId, string LayerType), MinimapComposition>();
+        var layerCandidates = new ConcurrentDictionary<(int MapId, string LayerType), (List<(TileCoord Pos, ContentHash Hash, uint FileId)> Resolved, HashSet<TileCoord> Missing)>();
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
 
         // map of hashed LOD0 tiles to their source FDID of the BLP
@@ -578,9 +580,13 @@ internal class ScanMapsService :
                         mapTexResolved.Add((pos, new ContentHash(ckey.AsSpan()), entry.MapTexture));
                     }
 
-                    var mapTexComp = BuildComposition(mapTexResolved, mapTexMissing, mapLOD0TileFDIDs, mapLODTileComponents);
-                    if (mapTexComp != null)
-                        layerCompositions.TryAdd((row.ID, "maptexture"), mapTexComp);
+                    if (mapTexResolved.Count > 0)
+                    {
+                        foreach (var tile in mapTexResolved)
+                            mapLOD0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
+
+                        layerCandidates.TryAdd((row.ID, "maptexture"), (mapTexResolved, mapTexMissing));
+                    }
 
                     // noliquid (hard-coded)
                     var noliquidTiles = version >= KnownBuilds.NoliquidIntroduced ? NoliquidTiles.GetTilesForMap(row.ID) : null;
@@ -599,9 +605,13 @@ internal class ScanMapsService :
                             nlResolved.Add((new(nlTile.X, nlTile.Y), new ContentHash(nlCkey.AsSpan()), nlTile.FileId));
                         }
 
-                        var nlComp = BuildComposition(nlResolved, nlMissing, mapLOD0TileFDIDs, mapLODTileComponents);
-                        if (nlComp != null)
-                            layerCompositions.TryAdd((row.ID, "noliquid"), nlComp);
+                        if (nlResolved.Count > 0)
+                        {
+                            foreach (var tile in nlResolved)
+                                mapLOD0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
+
+                            layerCandidates.TryAdd((row.ID, "noliquid"), (nlResolved, nlMissing));
+                        }
                     }
                 }
                 catch (DecryptionKeyMissingException ex)
@@ -614,6 +624,13 @@ internal class ScanMapsService :
                     _logger.LogError(ex, "Error processing minimap for map {MapId}", rowPair.Key);
                 }
             });
+
+        // Note the set of tiles associated with the LOD0 minimap specifically
+        var minimapTileHashes = new HashSet<ContentHash>(
+            compositions.Values
+                .Select(c => c.GetLOD(0))
+                .OfType<CompositionLOD>()
+                .SelectMany(lod => lod.Tiles.Values));
 
         // Current builds are around: 21348 unique tiles across 1122 maps / 39627 tiles
         _logger.LogInformation("{MapCount} maps ({EncCount} encrypted): Unique/Total LOD0 {Lod0Unique}/{Lod0Total} (Total {AllUnique})",
@@ -703,6 +720,7 @@ internal class ScanMapsService :
 
         // Phase 1 produce: LOD0 tiles
         var tileErrors = new ConcurrentDictionary<ContentHash, Exception>();
+        var layerTileFailures = new ConcurrentDictionary<ContentHash, byte>(); // layer-only tiles that failed (tolerable)
         var lod0Delta = tileDelta.Intersect(mapLOD0TileFDIDs.Keys);
         _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
 
@@ -759,10 +777,20 @@ internal class ScanMapsService :
                     catch (OperationCanceledException) { /* abort already in progress */ }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning("Failed LOD0 tile {TileHash} FDID {TileFDID}: {Error}", tileHash, tileFDID, ex.Message);
-                        tileErrors.TryAdd(tileHash, ex);
-                        if (tileErrors.Count >= 5)
-                            await tileAbortCts.CancelAsync();
+                        if (minimapTileHashes.Contains(tileHash))
+                        {
+                            // fatal, missing minimap
+                            _logger.LogWarning("Failed LOD0 tile {TileHash} FDID {TileFDID}: {Error}", tileHash, tileFDID, ex.Message);
+                            tileErrors.TryAdd(tileHash, ex);
+                            if (tileErrors.Count >= 5)
+                                await tileAbortCts.CancelAsync();
+                        }
+                        else
+                        {
+                            // Layer-only tile failure, not fatal
+                            _logger.LogDebug("Skipped unavailable layer tile {TileHash} FDID {TileFDID}", tileHash, tileFDID);
+                            layerTileFailures.TryAdd(tileHash, 0);
+                        }
                     }
                 });
         }
@@ -773,6 +801,59 @@ internal class ScanMapsService :
 
         if (tileErrors.Count > 0)
             throw new TileUnavailableException(tileErrors.Count, new AggregateException(tileErrors.Values));
+
+        // Build layer compositions now that we know which LOD0 tiles are actually available.
+        // Layer tiles that failed to download are excluded (missing tiles are not opptional for minimaps atm)
+        var layerCompositions = new ConcurrentDictionary<(int MapId, string LayerType), MinimapComposition>();
+        var partialLayers = new HashSet<(int MapId, string LayerType)>();
+        var failedHashes = layerTileFailures.Keys.ToHashSet();
+        foreach (var entry in layerCandidates)
+        {
+            var candidates = entry.Value.Resolved;
+            var missing = entry.Value.Missing;
+
+            var availableTiles = failedHashes.Count > 0
+                ? [.. candidates.Where(t => !failedHashes.Contains(t.Hash))]
+                : candidates;
+
+            if (availableTiles.Count == 0)
+                continue;
+
+            var comp = BuildComposition(availableTiles, missing, mapLOD0TileFDIDs, mapLODTileComponents);
+            if (comp == null)
+                continue;
+
+            layerCompositions.TryAdd(entry.Key, comp);
+
+            if (availableTiles.Count < candidates.Count)
+            {
+                partialLayers.Add(entry.Key);
+                _logger.LogInformation("Layer {LayerType} map {MapId}: {Removed} tiles unavailable, {Remaining} remaining",
+                    entry.Key.LayerType, entry.Key.MapId, candidates.Count - availableTiles.Count, availableTiles.Count);
+            }
+        }
+
+        if (layerTileFailures.Count > 0)
+            _logger.LogInformation("{PartialCount} partial layers, {FailCount} tiles unavailable",
+                partialLayers.Count, layerTileFailures.Count);
+
+        // layer LOD1+ hashes weren't in the original DB existence check, query them now
+        var layerLodHashes = mapLODTileComponents.Keys.Where(k => !tileHashSize.ContainsKey(k)).ToArray();
+        if (layerLodHashes.Length > 0)
+        {
+            using var layerLodCheck = new NpgsqlCommand("SELECT hash, tile_size FROM minimap_tiles WHERE hash = ANY($1)", conn);
+            layerLodCheck.Parameters.AddWithValue(layerLodHashes);
+            await using var reader = await layerLodCheck.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                tileHashSize.TryAdd(reader.GetFieldValue<ContentHash>(0), reader.GetInt16(1));
+            }
+
+            // only genuinely new layer LOD tiles need generating
+            foreach (var hash in layerLodHashes)
+                if (!tileHashSize.ContainsKey(hash))
+                    tileDelta.Add(hash);
+        }
 
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);
@@ -1020,12 +1101,13 @@ internal class ScanMapsService :
                     nlBatch.BatchCommands.Add(cmdComp);
 
                     var cmdLayer = nlBatch.CreateBatchCommand();
-                    cmdLayer.CommandText = "INSERT INTO build_map_layers (build_id, map_id, layer_type, composition_hash) VALUES ($1, $2, $3, $4) " +
-                        "ON CONFLICT (build_id, map_id, layer_type) DO UPDATE SET composition_hash = EXCLUDED.composition_hash";
+                    cmdLayer.CommandText = "INSERT INTO build_map_layers (build_id, map_id, layer_type, composition_hash, partial) VALUES ($1, $2, $3, $4, $5) " +
+                        "ON CONFLICT (build_id, map_id, layer_type) DO UPDATE SET composition_hash = EXCLUDED.composition_hash, partial = EXCLUDED.partial";
                     cmdLayer.Parameters.AddWithValue(version);
                     cmdLayer.Parameters.AddWithValue(mapId);
                     cmdLayer.Parameters.AddWithValue(layerType);
                     cmdLayer.Parameters.AddWithValue(comp.Hash);
+                    cmdLayer.Parameters.AddWithValue(partialLayers.Contains(entry.Key));
                     nlBatch.BatchCommands.Add(cmdLayer);
                 }
 

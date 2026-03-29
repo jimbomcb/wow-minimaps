@@ -535,6 +535,13 @@
     color: #e8d4b8;
 }
 
+.map-controls .layer-partial {
+    color: #e8a040;
+    font-weight: bold;
+    cursor: help;
+    margin-left: 2px;
+}
+
 .map-controls .layer-icon {
     width: 20px;
     height: 20px;

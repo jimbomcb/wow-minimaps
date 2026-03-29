@@ -23,6 +23,19 @@ public class ResourceLocService : IResourceLocator
     private readonly IHttpClientFactory _clientFactory;
     private readonly ResiliencePipeline<HttpResponseMessage> _acquisitionPipeline;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> _fileLocks = new();
+    // per-scan caches, cleared via ResetDownloadCaches() at scan start
+    private readonly ConcurrentDictionary<string, byte> _knownMissing = new(); // (host|remotePath) combos that returned 403/404
+    private readonly ConcurrentDictionary<string, int> _hostFailures = new(); // consecutive connection failures per host
+    private const int HOST_FAILURE_THRESHOLD = 10;
+
+    /// <summary>
+    /// Clear result cache, called at the start of each scan
+    /// </summary>
+    public void ResetDownloadCaches()
+    {
+        _knownMissing.Clear();
+        _hostFailures.Clear();
+    }
 
     private static readonly HttpStatusCode[] _retryStatusCodes =
     [
@@ -228,6 +241,22 @@ public class ResourceLocService : IResourceLocator
         foreach (var ep in endpoints)
         {
             token.ThrowIfCancellationRequested();
+
+            // known to not have this file (prior 403/404)
+            var missingKey = $"{ep.Host}|{descriptor.RemotePath}";
+            if (_knownMissing.ContainsKey(missingKey))
+            {
+                failedHosts.Add(ep.Host);
+                continue;
+            }
+
+            // too many connection failures (broken/unreachable endpoint)
+            if (_hostFailures.TryGetValue(ep.Host, out var failures) && failures >= HOST_FAILURE_THRESHOLD)
+            {
+                failedHosts.Add(ep.Host);
+                continue;
+            }
+
             try
             {
                 var response = await _acquisitionPipeline.ExecuteAsync(async (ct) =>
@@ -237,14 +266,30 @@ public class ResourceLocService : IResourceLocator
                 }, token);
                 if (response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.PartialContent)
                 {
+                    _hostFailures.TryRemove(ep.Host, out _); // reset failure count
                     if (failedHosts.Count > 0)
                         _logger.LogInformation("Fetched {Path} from {Host} (failed: {FailedHosts})", descriptor.RemotePath, ep.Host, string.Join(", ", failedHosts));
                     return await response.Content.ReadAsStreamAsync(token);
                 }
+
+                // 403/404 = file definitively not on this CDN, remember it
+                // (403 because level3 is backed by S3 and blizz's AWS IAM role doesn't have ListBucket,
+                //  missing object S3 requests redirect to a "ListBucket" command and it has no perms to do that,
+                //  so instead of just saying that the object doesn't exist. Normal S3 fun.)
+                if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+                {
+                    if (_knownMissing.TryAdd(missingKey, 0))
+                        _logger.LogInformation("{Path} not on {Host} ({Status}), will skip for future requests", descriptor.RemotePath, ep.Host, (int)response.StatusCode);
+                }
+
+                failedHosts.Add(ep.Host);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception)
             {
+                var count = _hostFailures.AddOrUpdate(ep.Host, 1, (_, c) => c + 1);
+                if (count == HOST_FAILURE_THRESHOLD)
+                    _logger.LogWarning("Host {Host} has failed {Count} consecutive times, skipping for remainder of scan", ep.Host, count);
                 failedHosts.Add(ep.Host);
             }
         }
