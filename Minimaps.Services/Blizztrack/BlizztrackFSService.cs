@@ -16,8 +16,9 @@ public class FileSystemEncryptedException(string keyName) : Exception($"Build en
     public string KeyName { get; } = keyName;
 }
 
-public class BlizztrackFSService(IRibbitClient ribbitClient, ResourceLocService resourceLocator)
+public class BlizztrackFSService(IRibbitClient ribbitClient, ResourceLocService resourceLocator, IConfiguration configuration)
 {
+    private readonly string[] _communityMirrors = configuration.GetSection("Blizztrack:CommunityMirrors").Get<string[]>() ?? [];
     public async Task<Stream?> OpenStreamFDID(uint fdid, IFileSystem fs, bool validate = false, Locale localeFilter = Root.AllWoW, CancellationToken cancellation = default)
     {
         var descriptors = fs.OpenFDID(fdid, localeFilter);
@@ -52,11 +53,30 @@ public class BlizztrackFSService(IRibbitClient ribbitClient, ResourceLocService 
         {
             var productCDNs = await ribbitClient.CDNsAsync(product);
 
-            // level3.blizzard.com is backed by Akamai and pings an average of 1ms, max of 2ms so not getting much better than that
-            // interesting how it can be quicker to stream data from Akamai servers than read from my NAS RAID...
-            // I have yet to encounter data that exists on one CDN but not another (even the china specific CDNs)
-            var cdnStems = productCDNs.Data.Select(x => (DataStem: x.Path, ConfigStem: x.ConfigPath)).Distinct();
-            resourceLocator.SetProductCDNs(product, cdnStems.Select(x => new ResourceCDN("level3.blizzard.com", x.DataStem, x.ConfigStem)));
+            // Build endpoint list from Ribbit CDN data: each region has hosts + path stems
+            // Hosts are space-separated (e.g. "level3.blizzard.com blzddist1-a.akamaihd.net")
+            var endpoints = new List<ResourceCDN>();
+            var seenHostStems = new HashSet<(string, string)>();
+            foreach (var cdn in productCDNs.Data)
+            {
+                foreach (var host in cdn.Hosts.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (seenHostStems.Add((host, cdn.Path)))
+                        endpoints.Add(new ResourceCDN(host, cdn.Path, cdn.ConfigPath));
+                }
+            }
+
+            foreach (var mirror in _communityMirrors)
+            {
+                var stems = productCDNs.Data.Select(x => (x.Path, x.ConfigPath)).Distinct();
+                foreach (var (path, configPath) in stems)
+                {
+                    if (seenHostStems.Add((mirror, path)))
+                        endpoints.Add(new ResourceCDN(mirror, path, configPath));
+                }
+            }
+
+            resourceLocator.SetProductCDNs(product, endpoints);
         }
 
         // temporary, apparently the resource handle stuff is going away anyway

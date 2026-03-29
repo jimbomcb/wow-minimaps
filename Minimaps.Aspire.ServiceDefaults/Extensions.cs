@@ -28,8 +28,7 @@ namespace Microsoft.Extensions.Hosting
 
 			builder.Services.ConfigureHttpClientDefaults(http =>
 			{
-				// Turn on resilience by default
-				http.AddStandardResilienceHandler();
+				// No default resilience handler — ResourceLocService has its own pipeline
 
 				// Turn on service discovery by default
 				http.AddServiceDiscovery();

@@ -224,6 +224,7 @@ public class ResourceLocService : IResourceLocator
     private async Task<Stream> Download(ResourceDescriptor descriptor, List<ResourceCDN> endpoints, CancellationToken token)
     {
         var client = _clientFactory.CreateClient();
+        var failedHosts = new List<string>();
         foreach (var ep in endpoints)
         {
             token.ThrowIfCancellationRequested();
@@ -231,19 +232,25 @@ public class ResourceLocService : IResourceLocator
             {
                 var response = await _acquisitionPipeline.ExecuteAsync(async (ct) =>
                 {
-                    // Build a fresh request per attempt
                     var request = BuildRequest(ep.Host, ep.DataStem, descriptor);
                     return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
                 }, token);
                 if (response.StatusCode == HttpStatusCode.OK || response.StatusCode == HttpStatusCode.PartialContent)
+                {
+                    if (failedHosts.Count > 0)
+                        _logger.LogInformation("Fetched {Path} from {Host} (failed: {FailedHosts})", descriptor.RemotePath, ep.Host, string.Join(", ", failedHosts));
                     return await response.Content.ReadAsStreamAsync(token);
+                }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogDebug(ex, "Endpoint fetch failed {Host} for {Path}", ep.Host, descriptor.RemotePath);
+                failedHosts.Add(ep.Host);
             }
         }
+
+        if (failedHosts.Count > 0)
+            _logger.LogDebug("All endpoints failed for {Path}: {Hosts}", descriptor.RemotePath, string.Join(", ", failedHosts));
         return Stream.Null;
     }
 

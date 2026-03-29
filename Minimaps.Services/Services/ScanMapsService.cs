@@ -27,6 +27,16 @@ public class UnsupportedBuildVersion(BuildVersion version, string message) : Exc
 }
 
 /// <summary>
+/// Thrown when tile downloads fail during scanning. Distinct from filesystem resolution failures
+/// so the retry loop can skip remaining sources (same CDN endpoints same result).
+/// </summary>
+public class TileUnavailableException(int errorCount, Exception inner)
+    : Exception($"{errorCount} tiles failed to download, CDN data likely unavailable", inner)
+{
+    public int ErrorCount { get; } = errorCount;
+}
+
+/// <summary>
 /// Scan in the map + minimap data from builds
 /// Publish tiles & map data to the backend
 /// </summary>
@@ -299,17 +309,27 @@ internal class ScanMapsService :
         if (sources.Count == 0)
             throw new Exception("No product sources found for product");
 
-        _logger.LogDebug("Found {Count} sources for this product", sources.Count);
+        // deduplicate by build config - different CDN configs for the same build resolve to the same download endpoints
+        var uniqueSources = sources
+            .GroupBy(s => s.BuildConfig)
+            .Select(g => g.First())
+            .ToList();
 
-        // Try each source until one works
+        _logger.LogDebug("Found {Count} sources ({UniqueCount} unique build configs) for this product", sources.Count, uniqueSources.Count);
+
+        // Try each unique source until one works
         Exception? lastException = null;
-        foreach (var source in sources)
+        foreach (var source in uniqueSources)
         {
             try
             {
                 _logger.LogInformation("Trying source: build={Build} cdn={Cdn} product={Product}",
                     source.BuildConfig[..8], source.CDNConfig[..8], source.ProductConfig[..8]);
                 return await ProcessBuild(conn, version, source, cancellation);
+            }
+            catch (TileUnavailableException ex)
+            {
+                throw new BuildProcessException(version, source, ex);
             }
             catch (Exception ex)
             {
@@ -320,7 +340,7 @@ internal class ScanMapsService :
         }
 
         // All sources failed
-        throw new BuildProcessException(version, sources.First(), lastException ?? new Exception("All sources failed"));
+        throw new BuildProcessException(version, uniqueSources.First(), lastException ?? new Exception("All sources failed"));
     }
 
     private enum ProcessStatus
@@ -739,6 +759,7 @@ internal class ScanMapsService :
                     catch (OperationCanceledException) { /* abort already in progress */ }
                     catch (Exception ex)
                     {
+                        _logger.LogWarning("Failed LOD0 tile {TileHash} FDID {TileFDID}: {Error}", tileHash, tileFDID, ex.Message);
                         tileErrors.TryAdd(tileHash, ex);
                         if (tileErrors.Count >= 5)
                             await tileAbortCts.CancelAsync();
@@ -751,7 +772,7 @@ internal class ScanMapsService :
         }
 
         if (tileErrors.Count > 0)
-            throw new AggregateException($"{tileErrors.Count} tiles failed to process", tileErrors.Values);
+            throw new TileUnavailableException(tileErrors.Count, new AggregateException(tileErrors.Values));
 
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);
