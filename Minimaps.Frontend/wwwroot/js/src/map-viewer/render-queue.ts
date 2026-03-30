@@ -23,9 +23,19 @@ export interface ChunkOverlayRenderCommand extends BaseRenderCommand {
     readonly getTileTexture: (gl: WebGL2RenderingContext) => WebGLTexture | null;
 }
 
-export type RenderCommand = TileRenderCommand | ChunkOverlayRenderCommand;
+export interface ChunkHighlightRenderCommand extends BaseRenderCommand {
+    readonly type: 'chunk-highlight';
+    readonly worldX: number;
+    readonly worldY: number;
+    readonly tileSize: number;
+    readonly color: [number, number, number];
+    readonly getTileTexture: (gl: WebGL2RenderingContext) => WebGLTexture | null;
+}
+
+export type RenderCommand = TileRenderCommand | ChunkOverlayRenderCommand | ChunkHighlightRenderCommand;
 export const isTileCommand = (cmd: RenderCommand): cmd is TileRenderCommand => cmd.type === 'tile';
 export const isChunkOverlayCommand = (cmd: RenderCommand): cmd is ChunkOverlayRenderCommand => cmd.type === 'chunk-overlay';
+export const isChunkHighlightCommand = (cmd: RenderCommand): cmd is ChunkHighlightRenderCommand => cmd.type === 'chunk-highlight';
 
 export class RenderQueue {
     private commands: RenderCommand[] = [];

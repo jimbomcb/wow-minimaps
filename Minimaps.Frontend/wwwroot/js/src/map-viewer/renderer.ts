@@ -1,5 +1,5 @@
-import type { RenderQueue, RenderCommand, TileRenderCommand, ChunkOverlayRenderCommand } from './render-queue.js';
-import { isChunkOverlayCommand } from './render-queue.js';
+import type { RenderQueue, RenderCommand, TileRenderCommand, ChunkOverlayRenderCommand, ChunkHighlightRenderCommand } from './render-queue.js';
+import { isChunkOverlayCommand, isChunkHighlightCommand } from './render-queue.js';
 import type { CameraPosition } from './types.js';
 import type { FlashQuad, ChangeType } from './flash-overlay.js';
 
@@ -34,6 +34,13 @@ export class Renderer {
     private impassTextureUniform!: WebGLUniformLocation;
     private impassOpacityUniform!: WebGLUniformLocation;
     private impassChunkPixelSizeUniform!: WebGLUniformLocation;
+    private highlightProgram: WebGLProgram;
+    private highlightPositionAttribute!: number;
+    private highlightTexCoordAttribute!: number;
+    private highlightTransformUniform!: WebGLUniformLocation;
+    private highlightTextureUniform!: WebGLUniformLocation;
+    private highlightOpacityUniform!: WebGLUniformLocation;
+    private highlightColorUniform!: WebGLUniformLocation;
 
     // Frame ticker for debug
     private frameTickerHue: number = 0;
@@ -64,6 +71,7 @@ export class Renderer {
         this.gridProgram = this.createGridShaderProgram();
         this.glowProgram = this.createBorderShaderProgram();
         this.impassProgram = this.createImpassShaderProgram();
+        this.highlightProgram = this.createHighlightShaderProgram();
         this.setupGLState();
         this.quadBuffer = this.createQuadBuffer();
         this.gridBuffer = this.createGridBuffer();
@@ -303,15 +311,15 @@ export class Renderer {
                     discard;
                 }
 
-                // 1px border in chunk-UV space
-                float borderWidth = 1.0 / max(u_chunkPixelSize, 1.0);
+                // border in chunk-UV space
+                float borderWidth = 2.0 / max(u_chunkPixelSize, 1.0);
                 float bx = min(chunkUV.x, 1.0 - chunkUV.x);
                 float by = min(chunkUV.y, 1.0 - chunkUV.y);
                 bool isBorder = min(bx, by) < borderWidth;
 
                 // hazard stripes fill
                 float stripe = sin((chunkUV.x + chunkUV.y) * 3.14159 * 6.0);
-                float stripeMask = step(0.3, stripe) * 0.15;
+                float stripeMask = step(0.3, stripe) * 0.55;
 
                 vec3 color = vec3(0.9, 0.3, 0.2);
 
@@ -331,6 +339,61 @@ export class Renderer {
 
         if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
             throw new Error('Failed to link impass shader program');
+        }
+
+        return program;
+    }
+
+    private createHighlightShaderProgram(): WebGLProgram {
+        const vertexShader = this.createShader(
+            this.gl.VERTEX_SHADER,
+            `#version 300 es
+            in vec2 a_position;
+            in vec2 a_texCoord;
+            uniform mat3 u_transform;
+            out vec2 v_texCoord;
+
+            void main() {
+                vec3 position = u_transform * vec3(a_position, 1.0);
+                gl_Position = vec4(position.xy, 0.0, 1.0);
+                v_texCoord = a_texCoord;
+            }
+        `
+        );
+
+        const fragmentShader = this.createShader(
+            this.gl.FRAGMENT_SHADER,
+            `#version 300 es
+            precision highp float;
+
+            in vec2 v_texCoord;
+            uniform sampler2D u_texture;
+            uniform float u_opacity;
+            uniform vec3 u_color;
+
+            out vec4 fragColor;
+
+            void main() {
+                vec2 chunkCoord = floor(v_texCoord * 16.0);
+                vec2 texelCoord = (chunkCoord + 0.5) / 16.0;
+                float mask = texture(u_texture, texelCoord).r;
+
+                if (mask < 0.5) {
+                    discard;
+                }
+
+                fragColor = vec4(u_color, 0.35 * u_opacity);
+            }
+        `
+        );
+
+        const program = this.gl.createProgram()!;
+        this.gl.attachShader(program, vertexShader);
+        this.gl.attachShader(program, fragmentShader);
+        this.gl.linkProgram(program);
+
+        if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+            throw new Error('Failed to link highlight shader program');
         }
 
         return program;
@@ -442,6 +505,13 @@ export class Renderer {
         this.impassOpacityUniform = this.gl.getUniformLocation(this.impassProgram, 'u_opacity')!;
         this.impassChunkPixelSizeUniform = this.gl.getUniformLocation(this.impassProgram, 'u_chunkPixelSize')!;
 
+        this.highlightPositionAttribute = this.gl.getAttribLocation(this.highlightProgram, 'a_position');
+        this.highlightTexCoordAttribute = this.gl.getAttribLocation(this.highlightProgram, 'a_texCoord');
+        this.highlightTransformUniform = this.gl.getUniformLocation(this.highlightProgram, 'u_transform')!;
+        this.highlightTextureUniform = this.gl.getUniformLocation(this.highlightProgram, 'u_texture')!;
+        this.highlightOpacityUniform = this.gl.getUniformLocation(this.highlightProgram, 'u_opacity')!;
+        this.highlightColorUniform = this.gl.getUniformLocation(this.highlightProgram, 'u_color')!;
+
         const vao = this.gl.createVertexArray()!;
         this.gl.bindVertexArray(vao);
 
@@ -479,6 +549,9 @@ export class Renderer {
 
         const chunkOverlayCommands = (commandsByType.get('chunk-overlay') as ChunkOverlayRenderCommand[]) || [];
         this.renderChunkOverlayCommands(chunkOverlayCommands, position);
+
+        const chunkHighlightCommands = (commandsByType.get('chunk-highlight') as ChunkHighlightRenderCommand[]) || [];
+        this.renderChunkHighlightCommands(chunkHighlightCommands, position);
     }
 
     private renderTileCommands(commands: TileRenderCommand[], position: CameraPosition): void {
@@ -531,6 +604,32 @@ export class Renderer {
             this.gl.uniform1f(this.impassOpacityUniform, command.opacity);
             this.gl.uniform1f(this.impassChunkPixelSizeUniform, chunkPixelSize);
             this.gl.uniformMatrix3fv(this.impassTransformUniform, false, transform);
+            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        }
+    }
+
+    private renderChunkHighlightCommands(commands: ChunkHighlightRenderCommand[], position: CameraPosition): void {
+        if (commands.length === 0) return;
+
+        this.gl.useProgram(this.highlightProgram);
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
+        this.gl.enableVertexAttribArray(this.highlightPositionAttribute);
+        this.gl.vertexAttribPointer(this.highlightPositionAttribute, 2, this.gl.FLOAT, false, 16, 0);
+        this.gl.enableVertexAttribArray(this.highlightTexCoordAttribute);
+        this.gl.vertexAttribPointer(this.highlightTexCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
+
+        for (const command of commands) {
+            const texture = command.getTileTexture(this.gl);
+            if (!texture) continue;
+
+            const transform = this.createTileTransform(command.worldX, command.worldY, command.tileSize, position);
+
+            this.gl.activeTexture(this.gl.TEXTURE0);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            this.gl.uniform1i(this.highlightTextureUniform, 0);
+            this.gl.uniform1f(this.highlightOpacityUniform, command.opacity);
+            this.gl.uniform3fv(this.highlightColorUniform, command.color);
+            this.gl.uniformMatrix3fv(this.highlightTransformUniform, false, transform);
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }
     }

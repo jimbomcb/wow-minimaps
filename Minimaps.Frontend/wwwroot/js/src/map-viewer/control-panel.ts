@@ -31,6 +31,8 @@ export interface ControlPanelOptions {
     onMapChange: (mapId: number) => void;
     onVersionChange: (version: BuildVersion | 'latest') => void;
     onLayerChange: () => void;
+    onZoneHover: (areaId: number | null) => void;
+    onZoneClick: (areaId: number) => void;
 }
 
 export class ControlPanel {
@@ -41,6 +43,8 @@ export class ControlPanel {
     private onMapChange: (mapId: number) => void;
     private onVersionChange: (version: BuildVersion | 'latest') => void;
     private onLayerChange: () => void;
+    private onZoneHover: (areaId: number | null) => void;
+    private onZoneClick: (areaId: number) => void;
 
     private controlElement: HTMLElement;
     private mapDisplay: HTMLDivElement;
@@ -88,6 +92,8 @@ export class ControlPanel {
         this.onMapChange = options.onMapChange;
         this.onVersionChange = options.onVersionChange;
         this.onLayerChange = options.onLayerChange;
+        this.onZoneHover = options.onZoneHover;
+        this.onZoneClick = options.onZoneClick;
 
         this.controlElement = document.getElementById('map-control-panel')!;
         if (!this.controlElement) {
@@ -1043,6 +1049,16 @@ export class ControlPanel {
 
             html += `<span class="zone-id">${node.id}</span><span class="zone-name">${node.name}</span>`;
             row.innerHTML = html;
+
+            row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
+            row.addEventListener('mouseleave', () => this.onZoneHover(null));
+            row.addEventListener('click', (e) => {
+                // skip nav click if clicking zone toggle
+                if ((e.target as HTMLElement).classList.contains('zone-toggle'))
+                    return;
+                this.onZoneClick(node.id);
+            });
+
             this.zonesTree.appendChild(row);
 
             let childContainer: HTMLDivElement | null = null;

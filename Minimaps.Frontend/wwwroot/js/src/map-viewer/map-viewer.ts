@@ -14,6 +14,7 @@ import { RenderQueue } from './render-queue.js';
 import { CoordinateTranslator } from './coordinate-translator.js';
 import { ControlPanel } from './control-panel.js';
 import { ImpassLayer } from './layers/impass-layer.js';
+import { AreaHighlightLayer } from './layers/area-highlight-layer.js';
 import type { ChunkDataDto } from './backend-types.js';
 import { MapDataManager } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
@@ -129,6 +130,7 @@ export class MapViewer {
     private flashOverlay: FlashOverlay;
     private currentComposition: MinimapComposition | null = null;
     private mapLoadGeneration: number = 0;
+    private areaHighlightLayer: AreaHighlightLayer | null = null;
 
     constructor(options: MapViewerOptions) {
         this.canvas = options.container;
@@ -182,6 +184,8 @@ export class MapViewer {
             onMapChange: (mapId) => this.handleMapChange(mapId),
             onVersionChange: (version) => this.handleVersionChange(version),
             onLayerChange: () => this.scheduleRender(),
+            onZoneHover: (areaId) => this.handleZoneHover(areaId),
+            onZoneClick: (areaId) => this.handleZoneClick(areaId),
         });
 
         const debugContainer = document.getElementById('debug-panel-container');
@@ -236,8 +240,9 @@ export class MapViewer {
                 this.layerManager.removeLayer(layer.id);
             }
 
-            // Clear zones until chunk data loads for the new map
+            // Clear zones and area highlight until chunk data loads for the new map
             this.controlPanel.setZones(null);
+            this.areaHighlightLayer = null;
 
             // Add a monochrome parent layer under the actual map data
             if (mapData.parentComposition && mapData.parentMapId !== null) {
@@ -349,6 +354,13 @@ export class MapViewer {
                 this.layerManager.addLayer(impassLayer);
             }
 
+            if (data.areaid) {
+                const highlightLayer = new AreaHighlightLayer(`area-highlight-${mapId}`);
+                highlightLayer.setData(data.areaid);
+                this.areaHighlightLayer = highlightLayer;
+                this.layerManager.addLayer(highlightLayer);
+            }
+
             this.controlPanel.setZones(data.areaid ?? null);
             this.controlPanel.updateLayers();
             this.scheduleRender();
@@ -406,6 +418,41 @@ export class MapViewer {
             this.updateURL();
         });
         this.scheduleRender();
+    }
+
+    private handleZoneHover(areaId: number | null): void {
+        if (!this.areaHighlightLayer) return;
+
+        if (areaId !== null) {
+            this.areaHighlightLayer.highlightArea(areaId);
+        } else {
+            this.areaHighlightLayer.clearHighlight();
+        }
+        this.scheduleRender();
+    }
+
+    private handleZoneClick(areaId: number): void {
+        if (!this.areaHighlightLayer) return;
+
+        const raw = this.areaHighlightLayer.getBoundsForArea(areaId);
+        if (!raw) return;
+
+        const bounds = {
+            ...raw,
+            width: raw.maxX - raw.minX,
+            height: raw.maxY - raw.minY,
+            centerX: (raw.minX + raw.maxX) / 2,
+            centerY: (raw.minY + raw.maxY) / 2,
+        };
+        this.cameraController.fitToBounds(bounds, 10);
+        this.areaHighlightLayer.highlightArea(areaId);
+        this.scheduleRender();
+
+        // Brief flash then clear
+        setTimeout(() => {
+            this.areaHighlightLayer?.clearHighlight();
+            this.scheduleRender();
+        }, 1500);
     }
 
     private updateURL(): void {

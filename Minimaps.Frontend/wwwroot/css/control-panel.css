@@ -594,12 +594,13 @@
     padding: 1px 6px;
     color: #c8b898;
     white-space: nowrap;
-    cursor: default;
+    cursor: pointer;
     line-height: 1.5;
 }
 
 .map-controls .zone-node:hover {
     background: #1a1510;
+    color: #e8d4b8;
 }
 
 .map-controls .zone-toggle {
