@@ -141,7 +141,6 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     }
 
     [HttpGet("chunks/v1/{mapId}/{buildVersion}")]
-    [ResponseCache(Duration = 31536000, Location = ResponseCacheLocation.Any)]
     public async Task<IActionResult> GetChunkData(int mapId, string buildVersion)
     {
         if (!BuildVersion.TryParse(buildVersion, out var version))
@@ -173,6 +172,8 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         if (layers.Count == 0)
             return NotFound();
 
+        // Only cache successful responses, 404s for not-yet-scanned builds must not be cached
+        Response.Headers.CacheControl = "public, max-age=31536000";
         return Ok(layers);
     }
 
