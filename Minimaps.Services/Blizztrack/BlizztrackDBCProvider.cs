@@ -10,11 +10,12 @@ internal class BlizztrackDBCProvider(IFileSystem filesystem, ResourceLocService 
     {
         uint fileDataID = tableName switch
         {
-            "Map" => 1349477, // TODO: Confirm that this is stable enough to hard-code?
+            "Map" => 1349477,
+            "AreaTable" => 1353545,
             _ => throw new NotImplementedException()
         };
 
-        foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS)) // todo: maybe just makes more sense to move locale to the whole filesystem level
+        foreach (var entry in filesystem.OpenFDID(fileDataID, Locale.enUS))
         {
             var dataHandle = resourceLocator.OpenHandle(entry, CancellationToken.None).Result;
             if (dataHandle.Exists)

@@ -1,5 +1,6 @@
 using Blizztrack.Framework.TACT;
 using Blizztrack.Framework.TACT.Implementation;
+using IFileSystem = Blizztrack.Framework.TACT.IFileSystem;
 using DBCD;
 using DBCD.Providers;
 using Minimaps.Services.Blizztrack;
@@ -74,6 +75,7 @@ internal class ScanMapsService :
         NoliquidLayers = 2,
         MapTextureLayers = 3,
         PartialLayerTolerance = 4,
+        ChunkDataLayers = 5, // not set to current until i'm done figuring out how i'm gonna best visualize the impass data
     }
     private const DataVersion CURRENT_DATA_VERSION = DataVersion.PartialLayerTolerance;
 
@@ -439,12 +441,27 @@ internal class ScanMapsService :
         }
 
         IDBCDStorage mapDB;
+        IDBCDStorage? areaTableDB = null;
         try
         {
             var dbcd = new DBCD.DBCD(new BlizztrackDBCProvider(filesystem, _resourceLocator), _dbdProvider);
             mapDB = dbcd.Load("Map");
             if (mapDB.Count == 0)
                 throw new Exception("No maps found in Map DBC");
+
+            try
+            {
+                areaTableDB = dbcd.Load("AreaTable");
+                _logger.LogInformation("Loaded {Count} AreaTable entries", areaTableDB.Count);
+            }
+            catch (DecryptionKeyMissingException ex)
+            {
+                _logger.LogWarning("AreaTable encrypted for {Ver}, key '{Key}' not available", version, ex.ExpectedKeyString);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Failed loading AreaTable for {Ver}: {Error}", version, ex.Message);
+            }
         }
         catch (DecryptionKeyMissingException ex)
         {
@@ -492,6 +509,8 @@ internal class ScanMapsService :
         var encryptedMaps = new ConcurrentBag<EncryptedMap>();
         var compositions = new ConcurrentDictionary<int, MinimapComposition>(); // Build the tile composition of each map
         var layerCandidates = new ConcurrentDictionary<(int MapId, string LayerType), (List<(TileCoord Pos, ContentHash Hash, uint FileId)> Resolved, HashSet<TileCoord> Missing)>();
+        // per-map grid of root ADT content hashes for chunk data extraction (impass, area IDs)
+        var mapAdtHashes = new ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>>();
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
 
         // map of hashed LOD0 tiles to their source FDID of the BLP
@@ -613,6 +632,20 @@ internal class ScanMapsService :
                             layerCandidates.TryAdd((row.ID, "noliquid"), (nlResolved, nlMissing));
                         }
                     }
+
+                    // collect root ADT content hashes for chunk data extraction (impass, area IDs)
+                    var adtTiles = new List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>();
+                    foreach (var (coord, entry) in maid)
+                    {
+                        if (entry.RootADT == 0)
+                            continue;
+                        var ckey = filesystem.GetFDIDContentKey(entry.RootADT);
+                        if (ckey.Length == 0)
+                            continue;
+                        adtTiles.Add((new(coord.X, coord.Y), new ContentHash(ckey.AsSpan()), entry.RootADT));
+                    }
+                    if (adtTiles.Count > 0)
+                        mapAdtHashes.TryAdd(row.ID, adtTiles);
                 }
                 catch (DecryptionKeyMissingException ex)
                 {
@@ -1115,12 +1148,358 @@ internal class ScanMapsService :
             }
         }
 
+        await ProcessChunkDataLayers(conn, version, mapAdtHashes, areaTableDB, filesystem, cancellation);
+
         _logger.LogInformation("Done!");
 
         if (!encryptedMaps.IsEmpty)
             return new(ProcessStatus.EncryptedMaps, product, null, encryptedMaps);
         else
             return new(ProcessStatus.FullDecrypt, product, null);
+    }
+
+    private static byte[] BrotliCompress(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var brotli = new System.IO.Compression.BrotliStream(output, System.IO.Compression.CompressionLevel.SmallestSize))
+            brotli.Write(data);
+        return output.ToArray();
+    }
+
+    private static byte[] BrotliDecompress(byte[] data)
+    {
+        using var input = new MemoryStream(data);
+        using var brotli = new System.IO.Compression.BrotliStream(input, System.IO.Compression.CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        brotli.CopyTo(output);
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Extract impass flags + area IDs from ADT files, assemble per-map blobs, store in data_blobs.
+    /// Uses two-hash dedup: ADT content hash avoids re-downloading, data blob hash avoids storing duplicates.
+    /// </summary>
+    private async Task ProcessChunkDataLayers(
+        NpgsqlConnection conn, BuildVersion version,
+        ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>> mapAdtHashes,
+        DBCD.IDBCDStorage? areaTableDB,
+        IFileSystem filesystem,
+        CancellationToken cancellation)
+    {
+        var allAdtHashes = mapAdtHashes.Values
+            .SelectMany(tiles => tiles.Select(t => t.AdtHash))
+            .Distinct()
+            .ToArray();
+
+        if (allAdtHashes.Length == 0)
+            return;
+
+        // check which ADTs we've already extracted
+        var knownAdtHashes = new HashSet<ContentHash>();
+        using (var checkCmd = new NpgsqlCommand(
+            "SELECT DISTINCT adt_hash FROM adt_data_extractions WHERE adt_hash = ANY($1)", conn))
+        {
+            checkCmd.Parameters.AddWithValue(allAdtHashes);
+            await using var checkReader = await checkCmd.ExecuteReaderAsync(cancellation);
+            while (await checkReader.ReadAsync(cancellation))
+                knownAdtHashes.Add(checkReader.GetFieldValue<ContentHash>(0));
+        }
+
+        var newAdtHashes = allAdtHashes.Where(h => !knownAdtHashes.Contains(h)).ToHashSet();
+        _logger.LogInformation("ADT chunk data: {Total} unique ADTs, {New} new to extract", allAdtHashes.Length, newAdtHashes.Count);
+
+        if (newAdtHashes.Count > 0)
+            await ExtractAndStoreAdtData(conn, mapAdtHashes, newAdtHashes, filesystem, cancellation);
+
+        // check which per-map blobs we already have for this build
+        var existingDataLayers = new HashSet<(int MapId, string LayerType)>();
+        using (var existCmd = new NpgsqlCommand(
+            "SELECT map_id, layer_type FROM build_map_layers WHERE build_id = $1 AND data_hash IS NOT NULL", conn))
+        {
+            existCmd.Parameters.AddWithValue(version);
+            await using var existReader = await existCmd.ExecuteReaderAsync(cancellation);
+            while (await existReader.ReadAsync(cancellation))
+                existingDataLayers.Add((existReader.GetInt32(0), existReader.GetString(1)));
+        }
+
+        var chunkDataLayerTypes = new[] { "impass", "areaid" };
+        var mapsNeedingAssembly = mapAdtHashes.Keys
+            .Where(mapId => chunkDataLayerTypes.Any(lt => !existingDataLayers.Contains((mapId, lt))))
+            .ToHashSet();
+
+        _logger.LogDebug("{NeedAssembly}/{Total} maps need chunk data assembly", mapsNeedingAssembly.Count, mapAdtHashes.Count);
+
+        if (mapsNeedingAssembly.Count == 0)
+        {
+            _logger.LogInformation("All chunk data layers already stored for this build");
+            return;
+        }
+
+        await AssembleAndStoreMapBlobs(conn, version, mapAdtHashes, mapsNeedingAssembly, existingDataLayers, areaTableDB, cancellation);
+    }
+
+    private async Task ExtractAndStoreAdtData(
+        NpgsqlConnection conn,
+        ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>> mapAdtHashes,
+        HashSet<ContentHash> newAdtHashes,
+        IFileSystem filesystem,
+        CancellationToken cancellation)
+    {
+        var adtHashToFdid = new Dictionary<ContentHash, uint>();
+        foreach (var tiles in mapAdtHashes.Values)
+            foreach (var tile in tiles)
+                adtHashToFdid.TryAdd(tile.AdtHash, tile.FileId);
+
+        var extractedData = new ConcurrentDictionary<ContentHash, (byte[] Impass, byte[] AreaIds)>();
+        await Parallel.ForEachAsync(newAdtHashes,
+            new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
+            async (adtHash, token) =>
+            {
+                var fdid = adtHashToFdid[adtHash];
+                try
+                {
+                    using var adtStream = await _blizztrack.OpenStreamFDID(fdid, filesystem, cancellation: token);
+                    if (adtStream == null || adtStream == Stream.Null)
+                        return;
+
+                    using var adtReader = new ADTReader(adtStream);
+                    var chunks = adtReader.ReadMCNKChunks();
+
+                    var impassBytes = new byte[32]; // 256 bits, one per chunk
+                    var areaIdBytes = new byte[1024]; // 256 x uint32
+
+                    foreach (var chunk in chunks)
+                    {
+                        var chunkIndex = (int)(chunk.Header.IndexY * 16 + chunk.Header.IndexX);
+                        if (chunkIndex < 0 || chunkIndex >= 256)
+                            continue;
+
+                        if (chunk.Header.Impass)
+                            impassBytes[chunkIndex / 8] |= (byte)(1 << (chunkIndex % 8));
+
+                        BitConverter.TryWriteBytes(areaIdBytes.AsSpan(chunkIndex * 4), chunk.Header.AreaId);
+                    }
+
+                    extractedData.TryAdd(adtHash, (impassBytes, areaIdBytes));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug("Failed extracting chunk data from ADT {Hash} FDID {FDID}: {Error}", adtHash, fdid, ex.Message);
+                }
+            });
+
+        _logger.LogInformation("Extracted chunk data from {Count} ADTs", extractedData.Count);
+
+        // batch store into data_blobs + adt_data_extractions
+        const int ADT_BATCH_SIZE = 200;
+        var extractedList = extractedData.ToList();
+        for (int batchStart = 0; batchStart < extractedList.Count; batchStart += ADT_BATCH_SIZE)
+        {
+            await using var insertBatch = new NpgsqlBatch(conn);
+            var batchEnd = Math.Min(batchStart + ADT_BATCH_SIZE, extractedList.Count);
+
+            for (int j = batchStart; j < batchEnd; j++)
+            {
+                var (adtHash, (impass, areaIds)) = extractedList[j];
+                var impassHash = new ContentHash(System.Security.Cryptography.MD5.HashData(impass));
+                var areaIdHash = new ContentHash(System.Security.Cryptography.MD5.HashData(areaIds));
+                var impassCompressed = BrotliCompress(impass);
+                var areaIdCompressed = BrotliCompress(areaIds);
+
+                var cmdImpassBlob = insertBatch.CreateBatchCommand();
+                cmdImpassBlob.CommandText = "INSERT INTO data_blobs (hash, data) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING";
+                cmdImpassBlob.Parameters.AddWithValue(impassHash);
+                cmdImpassBlob.Parameters.AddWithValue(impassCompressed);
+                insertBatch.BatchCommands.Add(cmdImpassBlob);
+
+                var cmdAreaBlob = insertBatch.CreateBatchCommand();
+                cmdAreaBlob.CommandText = "INSERT INTO data_blobs (hash, data) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING";
+                cmdAreaBlob.Parameters.AddWithValue(areaIdHash);
+                cmdAreaBlob.Parameters.AddWithValue(areaIdCompressed);
+                insertBatch.BatchCommands.Add(cmdAreaBlob);
+
+                var cmdImpassExtraction = insertBatch.CreateBatchCommand();
+                cmdImpassExtraction.CommandText = "INSERT INTO adt_data_extractions (adt_hash, layer_type, data_hash) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING";
+                cmdImpassExtraction.Parameters.AddWithValue(adtHash);
+                cmdImpassExtraction.Parameters.AddWithValue("impass");
+                cmdImpassExtraction.Parameters.AddWithValue(impassHash);
+                insertBatch.BatchCommands.Add(cmdImpassExtraction);
+
+                var cmdAreaExtraction = insertBatch.CreateBatchCommand();
+                cmdAreaExtraction.CommandText = "INSERT INTO adt_data_extractions (adt_hash, layer_type, data_hash) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING";
+                cmdAreaExtraction.Parameters.AddWithValue(adtHash);
+                cmdAreaExtraction.Parameters.AddWithValue("areaid");
+                cmdAreaExtraction.Parameters.AddWithValue(areaIdHash);
+                insertBatch.BatchCommands.Add(cmdAreaExtraction);
+            }
+
+            await insertBatch.ExecuteNonQueryAsync(cancellation);
+            _logger.LogDebug("Stored ADT extractions batch {Start}-{End}/{Total}", batchStart, batchEnd, extractedList.Count);
+        }
+    }
+
+    private async Task AssembleAndStoreMapBlobs(
+        NpgsqlConnection conn, BuildVersion version,
+        ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>> mapAdtHashes,
+        HashSet<int> mapsNeedingAssembly, HashSet<(int, string)> existingDataLayers,
+        DBCD.IDBCDStorage? areaTableDB,
+        CancellationToken cancellation)
+    {
+        // load per-tile blob data only for maps that need assembly
+        var neededAdtHashes = mapAdtHashes
+            .Where(kv => mapsNeedingAssembly.Contains(kv.Key))
+            .SelectMany(kv => kv.Value.Select(t => t.AdtHash))
+            .Distinct()
+            .ToArray();
+
+        var blobTimer = Stopwatch.StartNew();
+        var adtImpassData = new Dictionary<ContentHash, byte[]>();
+        var adtAreaIdData = new Dictionary<ContentHash, byte[]>();
+        using (var blobCmd = new NpgsqlCommand(
+            "SELECT e.adt_hash, e.layer_type, d.data FROM adt_data_extractions e " +
+            "JOIN data_blobs d ON d.hash = e.data_hash WHERE e.adt_hash = ANY($1)", conn))
+        {
+            blobCmd.Parameters.AddWithValue(neededAdtHashes);
+            await using var blobReader = await blobCmd.ExecuteReaderAsync(cancellation);
+            while (await blobReader.ReadAsync(cancellation))
+            {
+                var adtHash = blobReader.GetFieldValue<ContentHash>(0);
+                var layerType = blobReader.GetString(1);
+                var compressedData = (byte[])blobReader[2];
+                var data = BrotliDecompress(compressedData);
+
+                if (layerType == "impass")
+                    adtImpassData[adtHash] = data;
+                else if (layerType == "areaid")
+                    adtAreaIdData[adtHash] = data;
+            }
+        }
+        _logger.LogDebug("Loaded {Count} ADT blobs in {Ms}ms", adtImpassData.Count + adtAreaIdData.Count, blobTimer.ElapsedMilliseconds);
+
+        // build AreaTable lookup for embedding in areaid blobs
+        var areaTableLookup = new Dictionary<uint, JsonElement>();
+        if (areaTableDB != null)
+        {
+            foreach (var row in areaTableDB.Values)
+            {
+                var id = (uint)row.Field<int>("ID");
+                var name = row.Field<string>("AreaName_lang") ?? "";
+                var parentId = (uint)row.Field<int>("ParentAreaID");
+                var json = JsonSerializer.SerializeToElement(new { id, name, parentId });
+                areaTableLookup[id] = json;
+            }
+        }
+
+        var assemblyTimer = Stopwatch.StartNew();
+        const int MAP_BATCH_SIZE = 10;
+        var chunkLayerCount = 0;
+        var mapsToProcess = mapAdtHashes.Where(kv => mapsNeedingAssembly.Contains(kv.Key)).ToList();
+
+        for (int batchStart = 0; batchStart < mapsToProcess.Count; batchStart += MAP_BATCH_SIZE)
+        {
+            await using var chunkBatch = new NpgsqlBatch(conn);
+            var batchEnd = Math.Min(batchStart + MAP_BATCH_SIZE, mapsToProcess.Count);
+
+            for (int mi = batchStart; mi < batchEnd; mi++)
+            {
+                var (mapId, adtTiles) = mapsToProcess[mi];
+
+                // impass data
+                if (!existingDataLayers.Contains((mapId, "impass")))
+                {
+                    var impassTiles = new Dictionary<string, string>();
+                    foreach (var tile in adtTiles)
+                    {
+                        if (adtImpassData.TryGetValue(tile.AdtHash, out var data))
+                            impassTiles[$"{tile.Pos.X},{tile.Pos.Y}"] = Convert.ToBase64String(data);
+                    }
+
+                    if (impassTiles.Count > 0)
+                    {
+                        var blob = JsonSerializer.SerializeToUtf8Bytes(new { tiles = impassTiles });
+                        var hash = new ContentHash(System.Security.Cryptography.MD5.HashData(blob));
+                        AddDataBlobCommands(chunkBatch, version, mapId, "impass", hash, BrotliCompress(blob));
+                        chunkLayerCount++;
+                    }
+                }
+
+                // full per-chunk area IDs + names of referenced AreaTable rows
+                if (!existingDataLayers.Contains((mapId, "areaid")))
+                {
+                    var areaTiles = new Dictionary<string, uint[]>();
+                    var referencedAreaIds = new HashSet<uint>();
+                    foreach (var tile in adtTiles)
+                    {
+                        if (!adtAreaIdData.TryGetValue(tile.AdtHash, out var data))
+                            continue;
+
+                        var areaIds = new uint[256];
+                        for (int j = 0; j < 256; j++)
+                            areaIds[j] = BitConverter.ToUInt32(data, j * 4);
+
+                        areaTiles[$"{tile.Pos.X},{tile.Pos.Y}"] = areaIds;
+                        foreach (var id in areaIds)
+                        {
+                            if (id != 0)
+                                referencedAreaIds.Add(id);
+                        }
+                    }
+
+                    if (areaTiles.Count > 0)
+                    {
+                        // resolve parent chain for full hierarchy
+                        var areasToInclude = new HashSet<uint>(referencedAreaIds);
+                        var queue = new Queue<uint>(referencedAreaIds);
+                        while (queue.Count > 0)
+                        {
+                            var id = queue.Dequeue();
+                            if (areaTableLookup.TryGetValue(id, out var entry))
+                            {
+                                var parentId = entry.GetProperty("parentId").GetUInt32();
+                                if (parentId != 0 && areasToInclude.Add(parentId))
+                                    queue.Enqueue(parentId);
+                            }
+                        }
+
+                        var areas = new Dictionary<string, JsonElement>();
+                        foreach (var id in areasToInclude)
+                        {
+                            if (areaTableLookup.TryGetValue(id, out var entry))
+                                areas[id.ToString()] = entry;
+                        }
+
+                        var blob = JsonSerializer.SerializeToUtf8Bytes(new { tiles = areaTiles, areas });
+                        var hash = new ContentHash(System.Security.Cryptography.MD5.HashData(blob));
+                        AddDataBlobCommands(chunkBatch, version, mapId, "areaid", hash, BrotliCompress(blob));
+                        chunkLayerCount++;
+                    }
+                }
+            }
+
+            if (chunkBatch.BatchCommands.Count > 0)
+                await chunkBatch.ExecuteNonQueryAsync(cancellation);
+        }
+
+        _logger.LogInformation("Stored {Count} chunk data layers in {Ms}ms", chunkLayerCount, assemblyTimer.ElapsedMilliseconds);
+    }
+
+    private static void AddDataBlobCommands(NpgsqlBatch batch, BuildVersion version, int mapId, string layerType, ContentHash hash, byte[] compressed)
+    {
+        var cmdBlob = batch.CreateBatchCommand();
+        cmdBlob.CommandText = "INSERT INTO data_blobs (hash, data) VALUES ($1, $2) ON CONFLICT (hash) DO NOTHING";
+        cmdBlob.Parameters.AddWithValue(hash);
+        cmdBlob.Parameters.AddWithValue(compressed);
+        batch.BatchCommands.Add(cmdBlob);
+
+        var cmdLayer = batch.CreateBatchCommand();
+        cmdLayer.CommandText = "INSERT INTO build_map_layers (build_id, map_id, layer_type, data_hash, partial) VALUES ($1, $2, $3, $4, $5) " +
+            "ON CONFLICT (build_id, map_id, layer_type) DO UPDATE SET data_hash = EXCLUDED.data_hash, composition_hash = NULL, partial = EXCLUDED.partial";
+        cmdLayer.Parameters.AddWithValue(version);
+        cmdLayer.Parameters.AddWithValue(mapId);
+        cmdLayer.Parameters.AddWithValue(layerType);
+        cmdLayer.Parameters.AddWithValue(hash);
+        cmdLayer.Parameters.AddWithValue(false);
+        batch.BatchCommands.Add(cmdLayer);
     }
 
     private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) :
