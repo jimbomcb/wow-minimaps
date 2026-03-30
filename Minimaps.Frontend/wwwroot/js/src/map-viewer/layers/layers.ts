@@ -40,6 +40,6 @@ export interface TileLayer extends BaseLayer {
     dispose(): void;
 }
 
-export type Layer = TileLayer;
+export type Layer = TileLayer | BaseLayer;
 
 export const isTileLayer = (layer: Layer): layer is TileLayer => layer.type === 'tile';

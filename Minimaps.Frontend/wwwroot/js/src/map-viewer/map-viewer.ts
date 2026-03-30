@@ -13,6 +13,8 @@ import type { RenderContext } from './layers/layers.js';
 import { RenderQueue } from './render-queue.js';
 import { CoordinateTranslator } from './coordinate-translator.js';
 import { ControlPanel } from './control-panel.js';
+import { ImpassLayer } from './layers/impass-layer.js';
+import type { ChunkDataDto } from './backend-types.js';
 import { MapDataManager } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
 import { DebugPanel } from './debug-panel.js';
@@ -223,11 +225,14 @@ export class MapViewer {
                 return;
             }
 
-            this.currentVersion = mapData.version;
+            // Only update currentVersion if this wasn't a fallback, so that navigating
+            // back to a map that has the original version will use it correctly.
+            if (!mapData.isFallback) {
+                this.currentVersion = mapData.version;
+            }
 
-            const tileLayers = this.layerManager.getLayersOfType(isTileLayer);
-            for (const layer of tileLayers) {
-                layer.dispose();
+            for (const layer of this.layerManager.getAllLayers()) {
+                layer.dispose?.();
                 this.layerManager.removeLayer(layer.id);
             }
 
@@ -280,8 +285,9 @@ export class MapViewer {
             this.scheduleRender();
             console.log(`Map ${mapId} loaded successfully`);
 
-            // Main layer loaded, stream in any additional layers
+            // Main layer loaded, stream in any additional layers + chunk data
             this.loadAdditionalLayers(mapId, mapData.version, thisGeneration);
+            this.loadChunkDataLayers(mapId, mapData.version, thisGeneration);
         } catch (error) {
             if (thisGeneration === this.mapLoadGeneration) {
                 console.error(`Failed to load map ${mapId}:`, error);
@@ -302,6 +308,7 @@ export class MapViewer {
 
                 this.addTileLayerForComposition(mapId, composition, {
                     id: `${layerType}-${mapId}`,
+                    visible: false,
                     zIndex: 1,
                     opacity: 0.85,
                     residentLodLevel: 4,
@@ -315,6 +322,36 @@ export class MapViewer {
             }
         } catch (error) {
             console.warn(`Failed to load additional layers for map ${mapId}:`, error);
+        }
+    }
+
+    private async loadChunkDataLayers(mapId: number, version: BuildVersion, generation: number): Promise<void> {
+        try {
+            const response = await fetch(`/data/chunks/v1/${mapId}/${version}`);
+            if (!response.ok || generation !== this.mapLoadGeneration)
+                return;
+
+            const data = (await response.json()) as ChunkDataDto;
+            if (generation !== this.mapLoadGeneration)
+                return;
+
+            if (data.impass) {
+                const impassLayer = new ImpassLayer({
+                    id: `impass-${mapId}`,
+                    visible: true,
+                    zIndex: 10,
+                    opacity: 0.8,
+                });
+                impassLayer.setData(data.impass);
+                this.layerManager.addLayer(impassLayer);
+            }
+
+            this.controlPanel.updateLayers();
+            this.scheduleRender();
+        } catch (error) {
+            // chunk data is optional, don't log 404s
+            if (error instanceof Error && !error.message.includes('404'))
+                console.warn(`Failed to load chunk data for map ${mapId}:`, error);
         }
     }
 
@@ -344,10 +381,10 @@ export class MapViewer {
     private handleMapChange(mapId: number): void {
         console.log(`Map changed to: ${mapId}`);
         this.currentMapId = mapId;
-        this.requestedVersion = this.currentVersion;
         this.flashOverlay.clear();
 
-        // Reload the map with the new map, auto-zoom to fit
+        // Load with the resolved version (not 'latest') so fallback detection works properly.
+        // requestedVersion is preserved for URL display.
         this.loadMap(mapId, this.currentVersion, true).then(() => {
             this.updateURL();
         });

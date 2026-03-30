@@ -43,3 +43,18 @@ export interface MapLayerEntryDto {
 export interface MapLayersDto {
     layers: Record<string, Record<string, MapLayerEntryDto>>; // layerType -> encodedVersion -> entry
 }
+
+// chunk data from /data/chunks/v1/{mapId}/{buildVersion}
+export interface ChunkDataDto {
+    impass?: ImpassDataDto;
+    areaid?: AreaIdDataDto;
+}
+
+export interface ImpassDataDto {
+    tiles: Record<string, string>; // "x,y" -> base64 encoded 32 bytes (256 bits, one per chunk)
+}
+
+export interface AreaIdDataDto {
+    tiles: Record<string, number[]>; // "x,y" -> 256 uint32 area IDs
+    areas: Record<string, { id: number; name: string; parentId: number }>; // referenced AreaTable rows
+}

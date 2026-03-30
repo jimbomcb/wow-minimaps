@@ -15,8 +15,17 @@ export interface TileRenderCommand extends BaseRenderCommand {
     readonly monochrome: boolean;
 }
 
-export type RenderCommand = TileRenderCommand; // | other types... text render? lines?
+export interface ChunkOverlayRenderCommand extends BaseRenderCommand {
+    readonly type: 'chunk-overlay';
+    readonly worldX: number;
+    readonly worldY: number;
+    readonly tileSize: number;
+    readonly getTileTexture: (gl: WebGL2RenderingContext) => WebGLTexture | null;
+}
+
+export type RenderCommand = TileRenderCommand | ChunkOverlayRenderCommand;
 export const isTileCommand = (cmd: RenderCommand): cmd is TileRenderCommand => cmd.type === 'tile';
+export const isChunkOverlayCommand = (cmd: RenderCommand): cmd is ChunkOverlayRenderCommand => cmd.type === 'chunk-overlay';
 
 export class RenderQueue {
     private commands: RenderCommand[] = [];

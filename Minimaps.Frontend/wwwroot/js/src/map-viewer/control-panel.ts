@@ -802,6 +802,7 @@ export class ControlPanel {
     private static readonly LAYER_TYPE_LABELS: Record<string, string> = {
         'noliquid': 'Underwater',
         'maptexture': 'maptexture',
+        'impass': 'Impassable',
     };
 
     public updateLayers(): void {
@@ -814,15 +815,17 @@ export class ControlPanel {
             : this.currentVersion;
 
         for (const layer of layers) {
-            if (!isTileLayer(layer)) continue;
-
             let mapId: number;
             let isParent = false;
             let layerType: string | null = null;
 
             if (layer.id === 'main') {
+                if (!isTileLayer(layer))
+                    continue;
                 mapId = this.currentMapId;
             } else if (layer.id.startsWith('parent-')) {
+                if (!isTileLayer(layer))
+                    continue;
                 mapId = parseInt(layer.id.replace('parent-', ''));
                 isParent = true;
             } else {
@@ -850,7 +853,7 @@ export class ControlPanel {
                 mapId,
                 mapName,
                 visible: layer.visible,
-                monochrome: layer.monochrome,
+                monochrome: isTileLayer(layer) ? layer.monochrome : false,
                 isParent,
                 layerType,
                 partial,

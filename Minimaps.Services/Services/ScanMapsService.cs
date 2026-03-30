@@ -1274,6 +1274,7 @@ internal class ScanMapsService :
                         if (chunkIndex < 0 || chunkIndex >= 256)
                             continue;
 
+                        // map idx 0-256 impass state bits to the 32 bytes
                         if (chunk.Header.Impass)
                             impassBytes[chunkIndex / 8] |= (byte)(1 << (chunkIndex % 8));
 
@@ -1410,8 +1411,11 @@ internal class ScanMapsService :
                     var impassTiles = new Dictionary<string, string>();
                     foreach (var tile in adtTiles)
                     {
-                        if (adtImpassData.TryGetValue(tile.AdtHash, out var data))
-                            impassTiles[$"{tile.Pos.X},{tile.Pos.Y}"] = Convert.ToBase64String(data);
+                        if (!adtImpassData.TryGetValue(tile.AdtHash, out var data))
+                            continue;
+                        if (!data.Any(b => b != 0)) // Skip scanning impass layers when all 0
+                            continue;
+                        impassTiles[$"{tile.Pos.X},{tile.Pos.Y}"] = Convert.ToBase64String(data);
                     }
 
                     if (impassTiles.Count > 0)

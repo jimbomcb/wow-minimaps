@@ -1,4 +1,5 @@
-import type { RenderQueue, RenderCommand, TileRenderCommand } from './render-queue.js';
+import type { RenderQueue, RenderCommand, TileRenderCommand, ChunkOverlayRenderCommand } from './render-queue.js';
+import { isChunkOverlayCommand } from './render-queue.js';
 import type { CameraPosition } from './types.js';
 import type { FlashQuad, ChangeType } from './flash-overlay.js';
 
@@ -26,6 +27,13 @@ export class Renderer {
     private borderOpacityUniform!: WebGLUniformLocation;
     private borderTimeUniform!: WebGLUniformLocation;
     private borderSizeUniform!: WebGLUniformLocation;
+    private impassProgram: WebGLProgram;
+    private impassPositionAttribute!: number;
+    private impassTexCoordAttribute!: number;
+    private impassTransformUniform!: WebGLUniformLocation;
+    private impassTextureUniform!: WebGLUniformLocation;
+    private impassOpacityUniform!: WebGLUniformLocation;
+    private impassChunkPixelSizeUniform!: WebGLUniformLocation;
 
     // Frame ticker for debug
     private frameTickerHue: number = 0;
@@ -55,6 +63,7 @@ export class Renderer {
         this.program = this.createShaderProgram();
         this.gridProgram = this.createGridShaderProgram();
         this.glowProgram = this.createBorderShaderProgram();
+        this.impassProgram = this.createImpassShaderProgram();
         this.setupGLState();
         this.quadBuffer = this.createQuadBuffer();
         this.gridBuffer = this.createGridBuffer();
@@ -254,6 +263,79 @@ export class Renderer {
         return program;
     }
 
+    private createImpassShaderProgram(): WebGLProgram {
+        const vertexShader = this.createShader(
+            this.gl.VERTEX_SHADER,
+            `#version 300 es
+            in vec2 a_position;
+            in vec2 a_texCoord;
+            uniform mat3 u_transform;
+            out vec2 v_texCoord;
+
+            void main() {
+                vec3 position = u_transform * vec3(a_position, 1.0);
+                gl_Position = vec4(position.xy, 0.0, 1.0);
+                v_texCoord = a_texCoord;
+            }
+        `
+        );
+
+        const fragmentShader = this.createShader(
+            this.gl.FRAGMENT_SHADER,
+            `#version 300 es
+            precision highp float;
+
+            in vec2 v_texCoord;
+            uniform sampler2D u_texture; // 16x16 R8 texture, 255 = impassable
+            uniform float u_opacity;
+            uniform float u_chunkPixelSize;
+
+            out vec4 fragColor;
+
+            void main() {
+                vec2 chunkCoord = floor(v_texCoord * 16.0);
+                vec2 chunkUV = fract(v_texCoord * 16.0);
+
+                vec2 texelCoord = (chunkCoord + 0.5) / 16.0;
+                float impass = texture(u_texture, texelCoord).r;
+
+                if (impass < 0.5) {
+                    discard;
+                }
+
+                // 1px border in chunk-UV space
+                float borderWidth = 1.0 / max(u_chunkPixelSize, 1.0);
+                float bx = min(chunkUV.x, 1.0 - chunkUV.x);
+                float by = min(chunkUV.y, 1.0 - chunkUV.y);
+                bool isBorder = min(bx, by) < borderWidth;
+
+                // hazard stripes fill
+                float stripe = sin((chunkUV.x + chunkUV.y) * 3.14159 * 6.0);
+                float stripeMask = step(0.3, stripe) * 0.15;
+
+                vec3 color = vec3(0.9, 0.3, 0.2);
+
+                if (isBorder) {
+                    fragColor = vec4(color, 0.85 * u_opacity);
+                } else {
+                    fragColor = vec4(color, stripeMask * u_opacity);
+                }
+            }
+        `
+        );
+
+        const program = this.gl.createProgram()!;
+        this.gl.attachShader(program, vertexShader);
+        this.gl.attachShader(program, fragmentShader);
+        this.gl.linkProgram(program);
+
+        if (!this.gl.getProgramParameter(program, this.gl.LINK_STATUS)) {
+            throw new Error('Failed to link impass shader program');
+        }
+
+        return program;
+    }
+
     private setupGLState(): void {
         this.gl.enable(this.gl.BLEND);
         this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
@@ -353,6 +435,13 @@ export class Renderer {
         this.borderTimeUniform = this.gl.getUniformLocation(this.glowProgram, 'u_time')!;
         this.borderSizeUniform = this.gl.getUniformLocation(this.glowProgram, 'u_borderSize')!;
 
+        this.impassPositionAttribute = this.gl.getAttribLocation(this.impassProgram, 'a_position');
+        this.impassTexCoordAttribute = this.gl.getAttribLocation(this.impassProgram, 'a_texCoord');
+        this.impassTransformUniform = this.gl.getUniformLocation(this.impassProgram, 'u_transform')!;
+        this.impassTextureUniform = this.gl.getUniformLocation(this.impassProgram, 'u_texture')!;
+        this.impassOpacityUniform = this.gl.getUniformLocation(this.impassProgram, 'u_opacity')!;
+        this.impassChunkPixelSizeUniform = this.gl.getUniformLocation(this.impassProgram, 'u_chunkPixelSize')!;
+
         const vao = this.gl.createVertexArray()!;
         this.gl.bindVertexArray(vao);
 
@@ -388,7 +477,8 @@ export class Renderer {
         const tileCommands = (commandsByType.get('tile') as TileRenderCommand[]) || [];
         this.renderTileCommands(tileCommands, position);
 
-        // todo: text overlay
+        const chunkOverlayCommands = (commandsByType.get('chunk-overlay') as ChunkOverlayRenderCommand[]) || [];
+        this.renderChunkOverlayCommands(chunkOverlayCommands, position);
     }
 
     private renderTileCommands(commands: TileRenderCommand[], position: CameraPosition): void {
@@ -411,6 +501,36 @@ export class Renderer {
             this.gl.uniform1f(this.opacityUniform, command.opacity);
             this.gl.uniform1i(this.monochromeUniform, command.monochrome ? 1 : 0);
             this.gl.uniformMatrix3fv(this.transformUniform, false, transform);
+            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        }
+    }
+
+    private renderChunkOverlayCommands(commands: ChunkOverlayRenderCommand[], position: CameraPosition): void {
+        if (commands.length === 0) return;
+
+        this.gl.useProgram(this.impassProgram);
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
+        this.gl.enableVertexAttribArray(this.impassPositionAttribute);
+        this.gl.vertexAttribPointer(this.impassPositionAttribute, 2, this.gl.FLOAT, false, 16, 0);
+        this.gl.enableVertexAttribArray(this.impassTexCoordAttribute);
+        this.gl.vertexAttribPointer(this.impassTexCoordAttribute, 2, this.gl.FLOAT, false, 16, 8);
+
+        // one tile = 1 world unit, one chunk = 1/16 world unit
+        const pixelsPerUnit = 512 / position.zoom;
+        const chunkPixelSize = pixelsPerUnit / 16.0;
+
+        for (const command of commands) {
+            const texture = command.getTileTexture(this.gl);
+            if (!texture) continue;
+
+            const transform = this.createTileTransform(command.worldX, command.worldY, command.tileSize, position);
+
+            this.gl.activeTexture(this.gl.TEXTURE0);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+            this.gl.uniform1i(this.impassTextureUniform, 0);
+            this.gl.uniform1f(this.impassOpacityUniform, command.opacity);
+            this.gl.uniform1f(this.impassChunkPixelSizeUniform, chunkPixelSize);
+            this.gl.uniformMatrix3fv(this.impassTransformUniform, false, transform);
             this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
         }
     }
