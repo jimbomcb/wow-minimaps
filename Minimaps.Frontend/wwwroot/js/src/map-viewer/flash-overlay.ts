@@ -17,14 +17,14 @@ interface FlashState {
 
 export class FlashOverlay {
     private flashTimers: Map<string, FlashState> = new Map(); // coord -> flash state
-    private flashDuration: number = 15000; // total flash duration in ms
-    private holdDuration: number = 1500;
-    private maxIntensity: number = 0.75;
+    private flashDuration: number = 4000; // total flash duration in ms
+    private holdDuration: number = 500;
+    private maxIntensity: number = 0.45;
     private needsRender: boolean = false;
 
     triggerFlash(
         changes: { added: Set<string>; modified: Set<string>; removed: Set<string> },
-        duration: number = 15000
+        duration: number = 4000
     ): void {
         this.flashTimers.clear();
         this.flashDuration = duration;

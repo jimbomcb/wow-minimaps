@@ -52,7 +52,7 @@ export class CameraController {
         this.cameraMovedCallbacks.forEach((callback) => callback(this.position));
     }
 
-    fitToBounds(bounds: CompositionBounds, marginPercent: number = 10): void {
+    fitToBounds(bounds: CompositionBounds, marginPercent: number = 10, minZoom?: number): void {
         if (!this.canvas) {
             // no canvas?
             return;
@@ -64,7 +64,10 @@ export class CameraController {
 
         const zoomX = (paddedWidth * 512) / this.canvas.width;
         const zoomY = (paddedHeight * 512) / this.canvas.height;
-        const targetZoom = Math.max(zoomX, zoomY);
+        let targetZoom = Math.max(zoomX, zoomY);
+        if (minZoom !== undefined) {
+            targetZoom = Math.max(targetZoom, minZoom);
+        }
 
         this.setPos({
             centerX: bounds.centerX,

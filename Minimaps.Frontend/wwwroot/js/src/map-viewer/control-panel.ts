@@ -830,6 +830,9 @@ export class ControlPanel {
             let isParent = false;
             let layerType: string | null = null;
 
+            if (layer.transient)
+                continue;
+
             if (layer.id === 'main') {
                 if (!isTileLayer(layer))
                     continue;
@@ -1004,14 +1007,14 @@ export class ControlPanel {
         const areas = areaData.areas;
         const nodeMap = new Map<number, AreaNode>();
         for (const [idStr, area] of Object.entries(areas)) {
-            nodeMap.set(Number(idStr), { id: area.id, name: area.name, children: [] });
+            nodeMap.set(Number(idStr), { id: area.ID, name: area.AreaName_lang, children: [] });
         }
 
         // Find roots: areas whose parent is 0 or not in the dataset
         const roots: AreaNode[] = [];
         for (const [idStr, area] of Object.entries(areas)) {
             const node = nodeMap.get(Number(idStr))!;
-            const parentNode = area.parentId ? nodeMap.get(area.parentId) : null;
+            const parentNode = area.ParentAreaID ? nodeMap.get(area.ParentAreaID) : null;
             if (parentNode) {
                 parentNode.children.push(node);
             } else {

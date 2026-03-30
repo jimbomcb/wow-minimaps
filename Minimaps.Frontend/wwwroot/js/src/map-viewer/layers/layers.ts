@@ -17,6 +17,7 @@ export interface BaseLayer {
     visible: boolean;
     opacity: number;
     zIndex: number;
+    readonly transient?: boolean; // transient layers are not controllable, just temp layers for effects/ui
 
     queueRenderCommands(renderQueue: RenderQueue, context: RenderContext): void;
     dispose?(): void;

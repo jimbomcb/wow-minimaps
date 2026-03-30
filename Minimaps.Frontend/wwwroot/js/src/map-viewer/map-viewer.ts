@@ -444,7 +444,8 @@ export class MapViewer {
             centerX: (raw.minX + raw.maxX) / 2,
             centerY: (raw.minY + raw.maxY) / 2,
         };
-        this.cameraController.fitToBounds(bounds, 10);
+        this.cameraController.fitToBounds(bounds, 10, 1.0);
+
         this.areaHighlightLayer.highlightArea(areaId);
         this.scheduleRender();
 

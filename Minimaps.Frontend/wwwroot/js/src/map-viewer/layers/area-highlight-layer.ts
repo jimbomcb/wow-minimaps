@@ -13,6 +13,7 @@ interface TileAreaData {
  */
 export class AreaHighlightLayer implements BaseLayer {
     readonly type = 'chunk-highlight' as const;
+    readonly transient = true;
     id: string;
     visible: boolean = false;
     opacity: number = 1.0;

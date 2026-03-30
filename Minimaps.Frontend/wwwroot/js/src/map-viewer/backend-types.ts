@@ -54,7 +54,14 @@ export interface ImpassDataDto {
     tiles: Record<string, string>; // "x,y" -> base64 encoded 32 bytes (256 bits, one per chunk)
 }
 
+export interface AreaTableRow {
+    ID: number;
+    AreaName_lang: string;
+    ParentAreaID: number;
+    [key: string]: unknown; // full DB2 row, additional fields vary by build
+}
+
 export interface AreaIdDataDto {
     tiles: Record<string, number[]>; // "x,y" -> 256 uint32 area IDs
-    areas: Record<string, { id: number; name: string; parentId: number }>; // referenced AreaTable rows
+    areas: Record<string, AreaTableRow>; // referenced AreaTable rows keyed by area ID
 }

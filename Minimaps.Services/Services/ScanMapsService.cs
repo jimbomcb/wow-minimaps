@@ -1384,10 +1384,21 @@ internal class ScanMapsService :
             foreach (var row in areaTableDB.Values)
             {
                 var id = (uint)row.Field<int>("ID");
-                var name = row.Field<string>("AreaName_lang") ?? "";
-                var parentId = (uint)row.Field<int>("ParentAreaID");
-                var json = JsonSerializer.SerializeToElement(new { id, name, parentId });
-                areaTableLookup[id] = json;
+                var dict = new Dictionary<string, object>();
+                foreach (var fieldName in row.GetDynamicMemberNames())
+                {
+                    var value = row[fieldName];
+                    if (value is Array arr) // arrays get flattened out
+                    {
+                        for (int i = 0; i < arr.Length; i++)
+                            dict[$"{fieldName}_{i}"] = arr.GetValue(i)!;
+                    }
+                    else
+                    {
+                        dict[fieldName] = value;
+                    }
+                }
+                areaTableLookup[id] = JsonSerializer.SerializeToElement(dict);
             }
         }
 
@@ -1459,7 +1470,7 @@ internal class ScanMapsService :
                             var id = queue.Dequeue();
                             if (areaTableLookup.TryGetValue(id, out var entry))
                             {
-                                var parentId = entry.GetProperty("parentId").GetUInt32();
+                                var parentId = entry.GetProperty("ParentAreaID").GetUInt32();
                                 if (parentId != 0 && areasToInclude.Add(parentId))
                                     queue.Enqueue(parentId);
                             }
