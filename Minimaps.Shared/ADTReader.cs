@@ -11,12 +11,21 @@ public class ADTReader : IDisposable
     public readonly record struct ChunkHeader(string Ident, uint Size);
 
     public readonly record struct MCNKHeader(
+        uint Flags,
         uint IndexX,
         uint IndexY,
+        uint AreaId,
         float PositionX,
         float PositionY,
         float PositionZ
-    );
+    )
+    {
+        public bool Impass => (Flags & 0x2) != 0;
+        public bool LiquidRiver => (Flags & 0x4) != 0;
+        public bool LiquidOcean => (Flags & 0x8) != 0;
+        public bool LiquidMagma => (Flags & 0x10) != 0;
+        public bool LiquidSlime => (Flags & 0x20) != 0;
+    };
 
     private readonly Stream _baseStream;
     private readonly BinaryReader _reader;
@@ -57,11 +66,15 @@ public class ADTReader : IDisposable
         var headerStartPos = _baseStream.Position;
 
         // https://wowdev.wiki/ADT/v18#MCNK_chunk
-        _reader.ReadUInt32(); // 0x000: flags
+        var flags = _reader.ReadUInt32(); // 0x000: flags
         var indexX = _reader.ReadUInt32(); // 0x004: IndexX
         var indexY = _reader.ReadUInt32(); // 0x008: IndexY
 
-        // 0x068 (Position)
+        // 0x034: areaid
+        _baseStream.Position = headerStartPos + 0x034;
+        var areaId = _reader.ReadUInt32();
+
+        // 0x068: position
         _baseStream.Position = headerStartPos + 0x068;
         var positionX = _reader.ReadSingle(); // not sure why it's here when it always seems 0, and just implicit from index anyway
         var positionY = _reader.ReadSingle();
@@ -71,8 +84,10 @@ public class ADTReader : IDisposable
         _baseStream.Position = headerStartPos + 128;
 
         var mcnkHeader = new MCNKHeader(
+            Flags: flags,
             IndexX: indexX,
             IndexY: indexY,
+            AreaId: areaId,
             PositionX: positionX,
             PositionY: positionY,
             PositionZ: positionZ
