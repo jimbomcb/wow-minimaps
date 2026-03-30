@@ -236,6 +236,9 @@ export class MapViewer {
                 this.layerManager.removeLayer(layer.id);
             }
 
+            // Clear zones until chunk data loads for the new map
+            this.controlPanel.setZones(null);
+
             // Add a monochrome parent layer under the actual map data
             if (mapData.parentComposition && mapData.parentMapId !== null) {
                 this.addTileLayerForComposition(mapData.parentMapId, mapData.parentComposition, {
@@ -346,6 +349,7 @@ export class MapViewer {
                 this.layerManager.addLayer(impassLayer);
             }
 
+            this.controlPanel.setZones(data.areaid ?? null);
             this.controlPanel.updateLayers();
             this.scheduleRender();
         } catch (error) {

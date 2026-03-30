@@ -576,3 +576,66 @@
     width: 14px;
     height: 14px;
 }
+
+/* Zones Section */
+.map-controls .zones-tree {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #5c4a36 #0d0a08;
+}
+
+.map-controls .zone-node {
+    display: flex;
+    align-items: baseline;
+    padding: 1px 6px;
+    color: #c8b898;
+    white-space: nowrap;
+    cursor: default;
+    line-height: 1.5;
+}
+
+.map-controls .zone-node:hover {
+    background: #1a1510;
+}
+
+.map-controls .zone-toggle {
+    width: 14px;
+    flex-shrink: 0;
+    color: #7a6a56;
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+    font-size: 10px;
+}
+
+.map-controls .zone-toggle:hover {
+    color: #c9a558;
+}
+
+.map-controls .zone-indent {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+.map-controls .zone-id {
+    color: #5c4e3e;
+    margin-right: 6px;
+    font-size: 10px;
+    flex-shrink: 0;
+    min-width: 32px;
+    text-align: right;
+}
+
+.map-controls .zone-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.map-controls .zone-node.has-children > .zone-name {
+    color: #e8d4b8;
+}
