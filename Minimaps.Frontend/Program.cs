@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using Microsoft.AspNetCore.ResponseCompression;
 using Minimaps.Database;
 using Minimaps.Frontend.Components;
 using Minimaps.Shared.TileStores;
@@ -11,6 +13,17 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddControllers();
+
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = CompressionLevel.Fastest;
+});
 
 var tileStoreProvider = builder.Configuration["TileStoreProvider"];
 if (string.Equals(tileStoreProvider, "R2", StringComparison.OrdinalIgnoreCase))
@@ -33,6 +46,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+app.UseResponseCompression();
 app.UseHttpsRedirection();
 app.UseAntiforgery();
 
