@@ -140,6 +140,42 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         return new MapLayersDto(layers);
     }
 
+    [HttpGet("chunks/v1/{mapId}/{buildVersion}")]
+    [ResponseCache(Duration = 31536000, Location = ResponseCacheLocation.Any)]
+    public async Task<IActionResult> GetChunkData(int mapId, string buildVersion)
+    {
+        if (!BuildVersion.TryParse(buildVersion, out var version))
+            return BadRequest("Invalid build version");
+
+        await using var conn = await dataSource.OpenConnectionAsync();
+        await using var cmd = new NpgsqlCommand(@"
+            SELECT bml.layer_type, d.data
+            FROM build_map_layers bml
+            JOIN data_blobs d ON d.hash = bml.data_hash
+            WHERE bml.build_id = $1 AND bml.map_id = $2 AND bml.data_hash IS NOT NULL", conn);
+        cmd.Parameters.AddWithValue(version);
+        cmd.Parameters.AddWithValue(mapId);
+
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var layers = new Dictionary<string, System.Text.Json.JsonElement>();
+        while (await reader.ReadAsync())
+        {
+            var layerType = reader.GetString(0);
+            var compressedData = (byte[])reader[1];
+
+            using var input = new MemoryStream(compressedData);
+            using var brotli = new System.IO.Compression.BrotliStream(input, System.IO.Compression.CompressionMode.Decompress);
+            using var output = new MemoryStream();
+            brotli.CopyTo(output);
+            layers[layerType] = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(output.ToArray());
+        }
+
+        if (layers.Count == 0)
+            return NotFound();
+
+        return Ok(layers);
+    }
+
     [HttpGet("tile/{hash}")]
     [ResponseCache(Duration = 31536000, Location = ResponseCacheLocation.Any)] // 1 year cache
     public async Task<IActionResult> GetTile(string hash)
