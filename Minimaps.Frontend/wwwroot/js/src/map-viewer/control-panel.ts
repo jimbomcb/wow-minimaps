@@ -1172,6 +1172,8 @@ export class ControlPanel {
 
             if (continentId !== this.currentMapId)
                 header.title += "\nIt's uncommon but still possible for a chunks AreaID to be associated with a different map than the currently active.";
+            else
+                header.title += "\nEach area has an owning 'continent', the top level map (i.e. Kalimdor, Eastern Kingdoms, Outlands)."
 
             this.zonesTree.appendChild(header);
 
@@ -1214,7 +1216,7 @@ export class ControlPanel {
 
             if (hasChildren) {
                 html += `<span class="zone-toggle">${startExpanded ? '▼' : '▶'}</span>`;
-            } else if (depth > 0) {
+            } else if (depth === 0) {
                 html += '<span class="zone-line-pad"></span>';
             }
 
