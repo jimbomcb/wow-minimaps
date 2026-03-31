@@ -578,10 +578,47 @@
 }
 
 /* Zones Section */
+.map-controls .zones-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.map-controls .zones-header .layers-title {
+    margin-bottom: 0;
+}
+
+.map-controls .zones-toolbar {
+    display: flex;
+    gap: 2px;
+}
+
+.map-controls .zones-toolbar-btn {
+    background: transparent;
+    border: 1px solid #3d3228;
+    color: #7a6a56;
+    font-size: 11px;
+    padding: 1px 5px;
+    cursor: pointer;
+    line-height: 1.4;
+}
+
+.map-controls .zones-toolbar-btn:hover {
+    border-color: #5c4a36;
+    color: #c9a558;
+}
+
+.map-controls .zones-toolbar-btn.active {
+    color: #c9a558;
+    border-color: #5c4a36;
+    background: #1a1510;
+}
+
 .map-controls .zones-tree {
     display: flex;
     flex-direction: column;
-    font-size: 12px;
+    font-size: 13px;
     max-height: 300px;
     overflow-y: auto;
     scrollbar-width: thin;
@@ -623,6 +660,22 @@
     flex-shrink: 0;
 }
 
+.map-controls .zone-line {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+    color: #5c4a36;
+    font-family: monospace;
+    text-align: center;
+    user-select: none;
+}
+
+.map-controls .zone-line-pad {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+}
+
 .map-controls .zone-id {
     color: #5c4e3e;
     margin-right: 6px;
@@ -633,10 +686,45 @@
 }
 
 .map-controls .zone-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
+    flex-shrink: 0;
 }
 
 .map-controls .zone-node.has-children > .zone-name {
     color: #e8d4b8;
+}
+
+.map-controls .zone-node.zone-ref-only {
+    opacity: 0.4;
+    cursor: default;
+    font-style: italic;
+}
+
+.map-controls .zone-node.zone-ref-only:hover {
+    background: transparent;
+    color: #c8b898;
+}
+
+.map-controls .zone-continent-header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #a89880;
+    padding: 6px 6px 2px;
+    border-bottom: 1px solid #3d3228;
+    margin-bottom: 2px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.map-controls .zone-continent-header:not(:first-child) {
+    margin-top: 6px;
+}
+
+.map-controls .zone-internal {
+    color: #8a7a66;
+    margin-left: 6px;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }

@@ -5,6 +5,15 @@ import { isTileLayer } from './layers/layers.js';
 import { BuildVersion } from './build-version.js';
 import type { AreaIdDataDto } from './backend-types.js';
 
+interface AreaNode {
+    id: number;
+    name: string;
+    internalName: string;
+    continentId: number;
+    hasChunks: boolean; // true if this area has actual chunks on this map, false if only a parent reference
+    children: AreaNode[];
+}
+
 export interface VersionInfo {
     version: BuildVersion;
     displayName: string;
@@ -67,6 +76,8 @@ export class ControlPanel {
     private mapAliases: HTMLDivElement;
     private zonesSection: HTMLDivElement;
     private zonesTree: HTMLDivElement;
+    private zonesTreeMode: boolean = localStorage.getItem('zones-tree-mode') !== 'flat';
+    private currentAreaData: AreaIdDataDto | null = null;
 
     private allMaps: MapInfo[] = [];
     private filteredMaps: MapInfo[] = [];
@@ -159,6 +170,38 @@ export class ControlPanel {
         this.mapAliases = document.getElementById('map-aliases') as HTMLDivElement;
         this.zonesSection = document.getElementById('zones-section') as HTMLDivElement;
         this.zonesTree = document.getElementById('zones-tree') as HTMLDivElement;
+
+        const treeToggle = document.getElementById('zones-toggle-tree') as HTMLButtonElement;
+        if (treeToggle) {
+            treeToggle.classList.toggle('active', this.zonesTreeMode);
+            treeToggle.addEventListener('click', () => {
+                this.zonesTreeMode = !this.zonesTreeMode;
+                treeToggle.classList.toggle('active', this.zonesTreeMode);
+                localStorage.setItem('zones-tree-mode', this.zonesTreeMode ? 'tree' : 'flat');
+                this.renderZones();
+            });
+        }
+
+        document.getElementById('zones-expand-all')?.addEventListener('click', () => {
+            const storageKey = `zones-collapsed-${this.currentMapId}`;
+            localStorage.removeItem(storageKey);
+            this.renderZones();
+        });
+
+        document.getElementById('zones-collapse-all')?.addEventListener('click', () => {
+            if (!this.currentAreaData) return;
+            // all area IDs that have children
+            const areas = this.currentAreaData.areas;
+            const hasChildren = new Set<number>();
+            for (const area of Object.values(areas)) {
+                if (area.ParentAreaID) {
+                    hasChildren.add(area.ParentAreaID);
+                }
+            }
+            const storageKey = `zones-collapsed-${this.currentMapId}`;
+            localStorage.setItem(storageKey, JSON.stringify([...hasChildren]));
+            this.renderZones();
+        });
 
         this.setupEventListeners();
         this.setupKeyboardShortcuts();
@@ -985,11 +1028,17 @@ export class ControlPanel {
     }
 
     public setZones(areaData: AreaIdDataDto | null): void {
+        this.currentAreaData = areaData;
+        this.renderZones();
+    }
+
+    private renderZones(): void {
         if (!this.zonesSection || !this.zonesTree)
             return;
 
         this.zonesTree.replaceChildren();
 
+        const areaData = this.currentAreaData;
         if (!areaData || Object.keys(areaData.areas).length === 0) {
             this.zonesSection.style.display = 'none';
             return;
@@ -997,20 +1046,27 @@ export class ControlPanel {
 
         this.zonesSection.style.display = '';
 
-        // Build a tree from the flat parent references
-        interface AreaNode {
-            id: number;
-            name: string;
-            children: AreaNode[];
+        const areas = areaData.areas;
+
+        // Determine which area IDs actually have chunks on this map
+        const areasWithChunks = new Set<number>();
+        if (areaData.tiles) {
+            for (const areaIds of Object.values(areaData.tiles)) {
+                for (const id of areaIds) {
+                    if (id !== 0) areasWithChunks.add(id);
+                }
+            }
         }
 
-        const areas = areaData.areas;
         const nodeMap = new Map<number, AreaNode>();
         for (const [idStr, area] of Object.entries(areas)) {
-            nodeMap.set(Number(idStr), { id: area.ID, name: area.AreaName_lang, children: [] });
+            const internalName = (area['ZoneName'] as string) ?? '';
+            const continentId = (area['ContinentID'] as number) ?? -1;
+            const hasChunks = areasWithChunks.has(area.ID);
+            nodeMap.set(Number(idStr), { id: area.ID, name: area.AreaName_lang, internalName, continentId, hasChunks, children: [] });
         }
 
-        // Find roots: areas whose parent is 0 or not in the dataset
+        // Build parent-child relationships
         const roots: AreaNode[] = [];
         for (const [idStr, area] of Object.entries(areas)) {
             const node = nodeMap.get(Number(idStr))!;
@@ -1022,78 +1078,182 @@ export class ControlPanel {
             }
         }
 
-        // Sort children alphabetically at each level
         const sortChildren = (nodes: AreaNode[]) => {
             nodes.sort((a, b) => a.name.localeCompare(b.name));
             for (const n of nodes) sortChildren(n.children);
         };
         sortChildren(roots);
 
-        // Render the tree with collapsible parent nodes
-        const renderNode = (node: AreaNode, depth: number) => {
-            const hasChildren = node.children.length > 0;
-            const startExpanded = hasChildren;
-
-            const row = document.createElement('div');
-            row.className = 'zone-node';
-            if (hasChildren) row.classList.add('has-children');
-            row.title = `Area ${node.id}: ${node.name}`;
-
-            let html = '';
-            for (let i = 0; i < depth; i++) {
-                html += '<span class="zone-indent"></span>';
-            }
-
-            if (hasChildren) {
-                html += `<span class="zone-toggle">${startExpanded ? '▼' : '▶'}</span>`;
+        // Group roots by continent
+        const continentGroups = new Map<number, AreaNode[]>();
+        for (const root of roots) {
+            const group = continentGroups.get(root.continentId);
+            if (group) {
+                group.push(root);
             } else {
-                html += '<span class="zone-indent"></span>';
+                continentGroups.set(root.continentId, [root]);
             }
+        }
 
-            html += `<span class="zone-id">${node.id}</span><span class="zone-name">${node.name}</span>`;
-            row.innerHTML = html;
+        if (this.zonesTreeMode) {
+            this.renderZonesGrouped(continentGroups, (groupRoots) => this.renderZonesTree(groupRoots));
+        } else {
+            this.renderZonesGrouped(continentGroups, (groupRoots) => {
+                // Collect all descendants flat for this continent group
+                const collect = (nodes: AreaNode[]): AreaNode[] => {
+                    const result: AreaNode[] = [];
+                    for (const n of nodes) {
+                        result.push(n);
+                        result.push(...collect(n.children));
+                    }
+                    return result;
+                };
+                const flat = collect(groupRoots).sort((a, b) => a.name.localeCompare(b.name));
+                for (const node of flat) {
+                    const row = this.createZoneRow(node);
+                    let label = `<span class="zone-name">${node.name}</span>`;
+                    if (node.internalName && node.internalName !== node.name) {
+                        label += `<span class="zone-internal">${node.internalName}</span>`;
+                    }
+                    row.innerHTML = `<span class="zone-indent"></span>${label}`;
+                    this.zonesTree.appendChild(row);
+                }
+            });
+        }
+    }
+
+    private createZoneRow(node: AreaNode): HTMLDivElement {
+        const row = document.createElement('div');
+        row.className = 'zone-node';
+
+        if (!node.hasChunks) {
+            row.classList.add('zone-ref-only');
+            row.title = node.internalName && node.internalName !== node.name
+                ? `${node.name} — ${node.internalName} (${node.id})\nParent reference only — no chunks on this map`
+                : `${node.name} (${node.id})\nParent reference only — no chunks on this map`;
+        } else {
+            row.title = node.internalName && node.internalName !== node.name
+                ? `${node.name} — ${node.internalName} (${node.id})`
+                : `${node.name} (${node.id})`;
 
             row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
             row.addEventListener('mouseleave', () => this.onZoneHover(null));
             row.addEventListener('click', (e) => {
-                // skip nav click if clicking zone toggle
                 if ((e.target as HTMLElement).classList.contains('zone-toggle'))
                     return;
                 this.onZoneClick(node.id);
             });
+        }
 
+        return row;
+    }
+
+    private renderZonesGrouped(groups: Map<number, AreaNode[]>, renderContent: (roots: AreaNode[]) => void): void {
+        // Sort continent groups by name
+        const sortedGroups = [...groups.entries()].sort((a, b) => {
+            const nameA = this.allMaps.find(m => m.mapId === a[0])?.name ?? `Map ${a[0]}`;
+            const nameB = this.allMaps.find(m => m.mapId === b[0])?.name ?? `Map ${b[0]}`;
+            return nameA.localeCompare(nameB);
+        });
+
+        for (const [continentId, groupRoots] of sortedGroups) {
+            const mapInfo = this.allMaps.find(m => m.mapId === continentId);
+            const name = mapInfo?.name ?? `Map ${continentId}`;
+
+            const header = document.createElement('div');
+            header.className = 'zone-continent-header';
+            header.textContent = name;
+            const dir = mapInfo?.directory ?? '';
+            header.title = dir && dir !== name
+                ? `${name}: ${dir} (Map ${continentId})`
+                : `${name} (Map ${continentId})`;
+            this.zonesTree.appendChild(header);
+
+            renderContent(groupRoots);
+        }
+    }
+
+    private renderZonesTree(roots: AreaNode[]): void {
+        // Persisted expand/collapse state keyed by area ID
+        const storageKey = `zones-collapsed-${this.currentMapId}`;
+        const collapsedSet = new Set<number>(
+            JSON.parse(localStorage.getItem(storageKey) ?? '[]') as number[]
+        );
+
+        const saveCollapsed = () => {
+            localStorage.setItem(storageKey, JSON.stringify([...collapsedSet]));
+        };
+
+        // continuations[i] = true means ancestor at depth i has more siblings after this branch
+        const renderNode = (node: AreaNode, isLast: boolean, continuations: boolean[]) => {
+            const hasChildren = node.children.length > 0;
+            const startExpanded = hasChildren && !collapsedSet.has(node.id);
+            const depth = continuations.length;
+
+            const row = this.createZoneRow(node);
+            if (hasChildren) row.classList.add('has-children');
+
+            let html = '';
+
+            // Tree connectors for ancestor levels
+            for (let i = 0; i < depth; i++) {
+                if (i === depth - 1) {
+                    // This node's own connector
+                    html += `<span class="zone-line">${isLast ? '└' : '├'}</span>`;
+                } else {
+                    // Ancestor continuation line
+                    html += `<span class="zone-line">${continuations[i] ? '│' : ' '}</span>`;
+                }
+            }
+
+            if (hasChildren) {
+                html += `<span class="zone-toggle">${startExpanded ? '▼' : '▶'}</span>`;
+            } else if (depth > 0) {
+                html += '<span class="zone-line-pad"></span>';
+            }
+
+            html += `<span class="zone-name">${node.name}</span>`;
+            if (node.internalName && node.internalName !== node.name) {
+                html += `<span class="zone-internal">${node.internalName}</span>`;
+            }
+            row.innerHTML = html;
             this.zonesTree.appendChild(row);
 
             let childContainer: HTMLDivElement | null = null;
             if (hasChildren) {
                 childContainer = document.createElement('div');
-                childContainer.style.display = startExpanded ? '' : 'none';
+                if (!startExpanded) childContainer.style.display = 'none';
                 this.zonesTree.appendChild(childContainer);
             }
 
-            // Toggle expand/collapse
             if (hasChildren && childContainer) {
                 const toggle = row.querySelector('.zone-toggle')!;
                 toggle.addEventListener('click', () => {
                     const collapsed = childContainer!.style.display === 'none';
                     childContainer!.style.display = collapsed ? '' : 'none';
                     toggle.textContent = collapsed ? '▼' : '▶';
+                    if (collapsed) {
+                        collapsedSet.delete(node.id);
+                    } else {
+                        collapsedSet.add(node.id);
+                    }
+                    saveCollapsed();
                 });
             }
 
-            // Render children into the child container
             if (hasChildren && childContainer) {
                 const savedParent = this.zonesTree;
                 this.zonesTree = childContainer;
-                for (const child of node.children) {
-                    renderNode(child, depth + 1);
+                const childConts = [...continuations, !isLast];
+                for (let i = 0; i < node.children.length; i++) {
+                    renderNode(node.children[i]!, i === node.children.length - 1, childConts);
                 }
                 this.zonesTree = savedParent;
             }
         };
 
-        for (const root of roots) {
-            renderNode(root, 0);
+        for (let i = 0; i < roots.length; i++) {
+            renderNode(roots[i]!, i === roots.length - 1, []);
         }
     }
 

@@ -83,9 +83,16 @@ public class ResourceLocService : IResourceLocator
                     { Exception: TaskCanceledException } => PredicateResult.True(),
                     { Result: { StatusCode: var code } } when _retryStatusCodes.Contains(code) => PredicateResult.True(),
                     _ => PredicateResult.False()
+                },
+                OnRetry = args =>
+                {
+                    // only log at debug since the host-level outcome is what matters, not individual retry attempts.
+                    var reason = args.Outcome.Exception?.Message ?? $"HTTP {args.Outcome.Result?.StatusCode}";
+                    _logger.LogDebug("Retry attempt {Attempt} after {Delay}ms: {Reason}",
+                        args.AttemptNumber, args.RetryDelay.TotalMilliseconds, reason);
+                    return ValueTask.CompletedTask;
                 }
             })
-            .ConfigureTelemetry(new TelemetryOptions { LoggerFactory = sp.GetRequiredService<ILoggerFactory>() })
             .Build();
 
     private static bool IsZero(in OwnedContentKey key) => key.AsSpan().Length == 0;

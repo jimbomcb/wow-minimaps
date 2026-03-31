@@ -75,9 +75,9 @@ internal class ScanMapsService :
         NoliquidLayers = 2,
         MapTextureLayers = 3,
         PartialLayerTolerance = 4,
-        ChunkDataLayers = 5, // not set to current until i'm done figuring out how i'm gonna best visualize the impass data
+        ChunkDataLayers = 5,
     }
-    private const DataVersion CURRENT_DATA_VERSION = DataVersion.PartialLayerTolerance;
+    private const DataVersion CURRENT_DATA_VERSION = DataVersion.ChunkDataLayers;
 
     private static string GetExpectedWdtPath(string directory, string tail = ".wdt") => string.Format("world/maps/{0}/{0}{1}", directory, tail);
 
