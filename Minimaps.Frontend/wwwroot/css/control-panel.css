@@ -599,9 +599,11 @@
     border: 1px solid #3d3228;
     color: #7a6a56;
     font-size: 11px;
-    padding: 1px 5px;
+    padding: 2px 4px;
     cursor: pointer;
-    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .map-controls .zones-toolbar-btn:hover {
@@ -713,7 +715,6 @@
     padding: 6px 6px 2px;
     border-bottom: 1px solid #3d3228;
     margin-bottom: 2px;
-    cursor: pointer;
     user-select: none;
 }
 

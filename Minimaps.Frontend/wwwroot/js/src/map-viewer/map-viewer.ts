@@ -310,18 +310,22 @@ export class MapViewer {
             if (generation !== this.mapLoadGeneration) return;
 
             for (const layerType of layerTypes) {
-                const composition = await this.mapDataManager.getLayerComposition(mapId, version, layerType);
-                if (generation !== this.mapLoadGeneration) return;
-                if (!composition) continue;
+                try {
+                    const composition = await this.mapDataManager.getLayerComposition(mapId, version, layerType);
+                    if (generation !== this.mapLoadGeneration) return;
+                    if (!composition) continue;
 
-                this.addTileLayerForComposition(mapId, composition, {
-                    id: `${layerType}-${mapId}`,
-                    visible: false,
-                    zIndex: 1,
-                    opacity: 0.85,
-                    residentLodLevel: 4,
-                    debugSkipLODs: [],
-                });
+                    this.addTileLayerForComposition(mapId, composition, {
+                        id: `${layerType}-${mapId}`,
+                        visible: false,
+                        zIndex: 1,
+                        opacity: 0.85,
+                        residentLodLevel: 4,
+                        debugSkipLODs: [],
+                    });
+                } catch {
+                    console.warn(`Failed to load layer ${layerType} for map ${mapId}`);
+                }
             }
 
             if (layerTypes.length > 0) {

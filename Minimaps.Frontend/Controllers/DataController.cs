@@ -111,11 +111,11 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     {
         await using var conn = await dataSource.OpenConnectionAsync();
         await using var cmd = new NpgsqlCommand(@"
-            SELECT bml.build_id, bml.layer_type, COALESCE(bml.composition_hash, bml.data_hash), bml.partial
+            SELECT bml.build_id, bml.layer_type, bml.composition_hash, bml.partial
             FROM build_map_layers bml
-            WHERE bml.map_id = $1
+            WHERE bml.map_id = $1 AND bml.composition_hash IS NOT NULL
             ORDER BY bml.layer_type, bml.build_id ASC", conn);
-        cmd.Parameters.AddWithValue(mapId);
+        cmd.Parameters.AddWithValue(mapId); // TODO: Only returning composition only layers for now. If we have data layers that need to be part of this, reconsidr..
 
         await using var reader = await cmd.ExecuteReaderAsync();
         var layers = new Dictionary<string, Dictionary<BuildVersion, MapLayerEntryDto>>();
