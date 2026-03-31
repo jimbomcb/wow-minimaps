@@ -1165,12 +1165,13 @@ export class ControlPanel {
             header.textContent = name;
             const dir = mapInfo?.directory ?? '';
             header.title = dir && dir !== name
-                ? `${name}: Internal Name: ${dir}, Map ${continentId}`
-                : `${name}, Map ${continentId}`;
+                ? `Owning Continent: ${name}, Internal Name: ${dir}, Map ${continentId}`
+                : `Owning Continent: ${name}, Map ${continentId}`;
 
             // note abt why it might differ
+
             if (continentId !== this.currentMapId)
-                header.title += "\nAreas are associated with a parent 'continent' map ID, but this does not always match the current map.";
+                header.title += "\nIt's uncommon but still possible for a chunks AreaID to be associated with a different map than the currently active.";
 
             this.zonesTree.appendChild(header);
 
