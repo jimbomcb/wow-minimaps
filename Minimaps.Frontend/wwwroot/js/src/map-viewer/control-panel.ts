@@ -955,7 +955,7 @@ export class ControlPanel {
         // Layer info
         const info = document.createElement('span');
         info.className = 'layer-info';
-        const partialBadge = layer.partial ? ' <span class="layer-partial" title="Incomplete — some tiles not available at archive time">!</span>' : '';
+        const partialBadge = layer.partial ? ' <span class="layer-partial" title="Incomplete layer — some tiles not available at archive time">!</span>' : '';
         info.innerHTML = `<span class="id-highlight">${layer.mapId}</span> <span class="layer-name">${layer.mapName}</span>${partialBadge}`;
         item.appendChild(info);
 
@@ -1129,12 +1129,12 @@ export class ControlPanel {
         if (!node.hasChunks) {
             row.classList.add('zone-ref-only');
             row.title = node.internalName && node.internalName !== node.name
-                ? `${node.name} — ${node.internalName} (${node.id})\nParent reference only — no chunks on this map`
-                : `${node.name} (${node.id})\nParent reference only — no chunks on this map`;
+                ? `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}\nParent reference only — no chunks on this map`
+                : `${node.name}, AreaID: ${node.id}\nParent reference only — no chunks on this map`;
         } else {
             row.title = node.internalName && node.internalName !== node.name
-                ? `${node.name} — ${node.internalName} (${node.id})`
-                : `${node.name} (${node.id})`;
+                ? `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`
+                : `${node.name}, AreaID: ${node.id}`;
 
             row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
             row.addEventListener('mouseleave', () => this.onZoneHover(null));
@@ -1165,8 +1165,13 @@ export class ControlPanel {
             header.textContent = name;
             const dir = mapInfo?.directory ?? '';
             header.title = dir && dir !== name
-                ? `${name}: ${dir} (Map ${continentId})`
-                : `${name} (Map ${continentId})`;
+                ? `${name}: Internal Name: ${dir}, Map ${continentId}`
+                : `${name}, Map ${continentId}`;
+
+            // note abt why it might differ
+            if (continentId !== this.currentMapId)
+                header.title += "\nAreas are associated with a parent 'continent' map ID, but this does not always match the current map.";
+
             this.zonesTree.appendChild(header);
 
             renderContent(groupRoots);
