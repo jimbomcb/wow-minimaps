@@ -46,18 +46,24 @@
         </div>
 
         <div class="control-section">
-            <div class="version-settings">
-                <button id="version-toggle-unique" class="version-setting-btn" title="Show only unique compositions">
-                    <span class="setting-icon">◇</span>
-                    <span class="setting-label">Unique</span>
-                </button>
-            </div>
-            <div class="version-dropdown-wrapper">
-                <button id="version-dropdown-btn" class="version-dropdown-btn">
-                    <span id="version-dropdown-label">Loading...</span>
-                    <span class="dropdown-arrow">▼</span>
-                </button>
-                <div id="version-dropdown" class="version-dropdown" style="display: none;"></div>
+            <div class="dropdown-wrapper">
+                <div id="version-display" class="map-display">Loading...</div>
+                <input
+                    id="version-search-input"
+                    type="text"
+                    class="map-search-input"
+                    style="display: none;"
+                    placeholder="Filter versions..."
+                    autocomplete="off" />
+                <div id="version-dropdown" class="dropdown-menu" style="display: none;">
+                    <div class="version-dropdown-toolbar">
+                        <button id="version-toggle-unique" class="version-setting-btn" title="Show only unique compositions">
+                            <span class="setting-icon">◇</span>
+                            <span class="setting-label">Unique</span>
+                        </button>
+                    </div>
+                    <div id="version-dropdown-list" class="version-dropdown-list"></div>
+                </div>
             </div>
             <div class="map-nav-buttons">
                 <button id="version-nav-prev" class="map-nav-btn" title="Previous version (Z)">
@@ -85,7 +91,7 @@
 
         <div class="control-section zones-section" id="zones-section" style="display: none;">
             <div class="zones-header">
-                <h3 class="layers-title">Zones</h3>
+                <h3 class="layers-title">AreaTable</h3>
                 <div class="zones-toolbar">
                     <button id="zones-collapse-all" class="zones-toolbar-btn" title="Collapse all">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/></svg>

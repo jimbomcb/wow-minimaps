@@ -319,12 +319,6 @@
     cursor: help;
 }
 
-.map-controls .version-settings {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 6px;
-}
-
 .map-controls .version-setting-btn {
     display: flex;
     align-items: center;
@@ -356,107 +350,24 @@
 }
 
 /* Version Dropdown */
-.map-controls .version-dropdown-wrapper {
-    position: relative;
-}
 
-.map-controls .version-dropdown-btn {
-    width: 100%;
-    padding: 4px 12px;
-    background: #0d0a08;
-    border: 1px solid #5c4a36;
-    border-radius: 0;
-    color: #e8d4b8;
-    font-size: 14px;
-    font-family: inherit;
-    cursor: pointer;
-    outline: none;
-    box-shadow: inset 1px 1px 2px #000;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    text-align: left;
-}
-
-.map-controls .version-dropdown-btn:hover {
-    background: #12100c;
-    border-color: #7a6248;
-}
-
-.map-controls .version-dropdown-btn:focus {
-    background: #12100c;
-    border-color: #c9a558;
-}
-
-.map-controls .version-dropdown-btn .dropdown-arrow {
-    font-size: 10px;
-    color: #a89880;
-}
-
-.map-controls .version-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 100%;
-    width: max-content;
-    max-height: 350px;
-    overflow-y: auto;
+.map-controls .version-dropdown-toolbar {
+    padding: 4px 6px;
+    border-bottom: 1px solid #3d3228;
+    position: sticky;
+    top: 0;
     background: #1a1410;
-    border: 2px solid #5c4a36;
-    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
-    z-index: 1001;
+    z-index: 1;
 }
 
-.map-controls .version-item {
-    padding: 4px 10px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #e8d4b8;
-    border-left: 3px solid transparent;
-}
-
-.map-controls .version-item:hover {
-    background: #2a2218;
-}
-
-.map-controls .version-item.selected {
-    background: #2a2218;
-    border-left-color: #c9a558;
-}
-
-.map-controls .version-item.group-first {
-    padding-top: 6px;
-}
-
-.map-controls .version-item.group-member {
+.map-controls .dropdown-item.group-member {
     padding-left: 20px;
     font-size: 11px;
     color: #6d5f4e;
 }
 
-.map-controls .version-item.group-member:hover {
+.map-controls .dropdown-item.group-member:hover {
     color: #a89880;
-}
-
-.map-controls .version-item .version-text {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.map-controls .version-item .version-products {
-    font-size: 10px;
-    color: #5c4a36;
-    flex-shrink: 0;
-}
-
-.map-controls .version-item.group-first .version-products {
-    color: #7a6248;
 }
 
 .map-controls .version-warning {

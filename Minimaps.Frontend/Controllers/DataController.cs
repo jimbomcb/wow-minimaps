@@ -186,8 +186,23 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
 
         try
         {
-            var tileInfo = await tileStore.GetAsync(contentHash);
-            return File(tileInfo, "image/webp"); // just hardcoding for now, no other foramts
+            var tileStream = await tileStore.GetAsync(contentHash);
+
+            // detect format from magic bytes
+            // given we only use this in development it's not a big concern...
+            // in production we push tiles to R2 and it gets served with the correct ContentType
+            var header = new byte[12];
+            var read = await tileStream.ReadAsync(header.AsMemory(0, 12));
+            tileStream.Position = 0;
+
+            var contentType = "application/octet-stream";
+            if (read >= 12 && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
+                           && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P')
+                contentType = "image/webp";
+            else if (read >= 12 && header[4] == 'f' && header[5] == 't' && header[6] == 'y' && header[7] == 'p')
+                contentType = "image/avif";
+
+            return File(tileStream, contentType);
         }
         catch (FileNotFoundException)
         {

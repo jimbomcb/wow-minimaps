@@ -9,6 +9,8 @@ using Minimaps.Shared.TileStores;
 using Minimaps.Shared.Types;
 using NodaTime;
 using Npgsql;
+using System.Runtime.InteropServices;
+using LibHeifSharp;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -44,8 +46,30 @@ public class TileUnavailableException(int errorCount, Exception inner)
 internal class ScanMapsService :
     IntervalBackgroundService
 {
-    private readonly record struct CompressionConfig(WebpFileFormatType Type, WebpEncodingMethod Level, int Quality);
-    private readonly record struct CompressionConfigs(CompressionConfig Baseline, CompressionConfig LOD);
+    private enum ImageFormat { WebP, AVIF }
+
+    private class CompressionConfig
+    {
+        public ImageFormat Format { get; set; } = ImageFormat.WebP;
+        // WebP settings
+        public WebpFileFormatType Type { get; set; } = WebpFileFormatType.Lossless;
+        public WebpEncodingMethod Level { get; set; } = WebpEncodingMethod.Level6;
+        public int Quality { get; set; } = 95;
+        // AVIF settings
+        public int AvifQuality { get; set; } = 85;
+        public int AvifEffort { get; set; } = 4;
+    }
+
+    /// <summary>
+    /// Per-layer compression settings. LOD0 and LOD1+ are configured independently for each layer type.
+    /// LOD0 is usually lossless (one reason being LOD0 is used to build all subsequent LOD levels)
+    /// </summary>
+    private class LayerCompressionConfig
+    {
+        public CompressionConfig LOD0 { get; set; } = new();
+        public CompressionConfig LOD { get; set; } = new();
+    }
+
     private class Configuration
     {
         public string CachePath { get; set; } = "./cache";
@@ -61,7 +85,13 @@ internal class ScanMapsService :
         /// False when debugging so exceptions during map processing bubble up and don't get caught and logged in DB
         /// </summary>
         public bool CatchScanExceptions { get; set; } = true;
-        public CompressionConfigs Compression { get; set; } = new();
+
+        /// <summary>
+        /// Compression settings per layer type
+        /// "minimap", "maptexture", "noliquid"
+        /// </summary>
+        public Dictionary<string, LayerCompressionConfig> Compression { get; set; } = new();
+
         public List<int> LODLevels { get; set; } = [];
     }
 
@@ -105,9 +135,17 @@ internal class ScanMapsService :
         _dbdProvider = new CachedGithubDBDProvider(_serviceConfig.CachePath, _logger);
         _listfile = listfile;
 
-        // TODO: Do I want to lock in only lossless for LOD0?
-        if (_serviceConfig.Compression.Baseline.Type != WebpFileFormatType.Lossless)
-            throw new Exception("Not yet supporting anything except lossless for LOD0");
+        // todo: handling new layers
+        var requiredLayers = new[] { "minimap", "maptexture", "noliquid" };
+        foreach (var layer in requiredLayers)
+        {
+            if (!_serviceConfig.Compression.ContainsKey(layer))
+                throw new Exception($"Missing compression config for layer type '{layer}'. Each layer type must be explicitly configured.");
+        }
+
+        // for now just enforce LOD0 lossless, working under this assumption forfuture work around accurate per-pixel diffs etc
+        if (_serviceConfig.Compression["minimap"].LOD0.Type != WebpFileFormatType.Lossless)
+            throw new Exception("Minimap LOD0 must be lossless");
 
         if (!_serviceConfig.LODLevels.Contains(0))
             throw new Exception("Must always generate the base LOD0");
@@ -356,24 +394,22 @@ internal class ScanMapsService :
     }
     private readonly record struct EncryptedMap(int MapId, string KeyName);
     private readonly record struct ProcessResult(ProcessStatus Status, BuildProductDto Product, string? EncryptKey, IEnumerable<EncryptedMap>? EncryptedMaps = null);
+    private readonly record struct LOD0TileInfo(uint FileId, string LayerType);
     private readonly record struct LODTileInfo(int Level, List<ContentHash?> ComponentHashes);
 
     /// <summary>
     /// Build a MinimapComposition (LOD0 + LOD pyramid) from a set of LOD0 tiles.
-    /// Tile and LOD hashes written out for phase 1/2 processing.
+    /// LOD0 tiles must already be registered in mapLOD0Tiles before calling this.
+    /// LOD component hashes are registered in lodTileComponents as a side effect.
     /// </summary>
     private MinimapComposition? BuildComposition(
         IEnumerable<(TileCoord Pos, ContentHash Hash, uint FileId)> lod0Tiles,
         HashSet<TileCoord> missingTiles,
-        ConcurrentDictionary<ContentHash, uint> lod0TileFDIDs,
         ConcurrentDictionary<ContentHash, LODTileInfo> lodTileComponents)
     {
         var lod0 = new Dictionary<TileCoord, ContentHash>();
         foreach (var tile in lod0Tiles)
-        {
             lod0[tile.Pos] = tile.Hash;
-            lod0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
-        }
 
         if (lod0.Count == 0)
             return null;
@@ -513,9 +549,9 @@ internal class ScanMapsService :
         var mapAdtHashes = new ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>>();
         var mapList = mapDB.AsReadOnly().Where(x => _serviceConfig.SpecificMaps.Count == 0 || _serviceConfig.SpecificMaps.Contains(x.Key)).ToList();
 
-        // map of hashed LOD0 tiles to their source FDID of the BLP
-        var mapLOD0TileFDIDs = new ConcurrentDictionary<ContentHash, uint>();
-        // map of hashed LOD1+ tiles to the list of hashes that were concatenated to produce it
+        // LOD0 tile metadata: source FDID and which layer type it belongs to (for compression config)
+        var mapLOD0Tiles = new ConcurrentDictionary<ContentHash, LOD0TileInfo>();
+        // LOD1+ tile metadata: the list of LOD0 hashes that compose it
         var mapLODTileComponents = new ConcurrentDictionary<ContentHash, LODTileInfo>();
 
         // Initial phase, scan the map WDTs for minimap tile data, build the composite LOD tiles that scale from LOD1 (32x32 tiles) to LOD6 (1x1)
@@ -577,7 +613,10 @@ internal class ScanMapsService :
                         minimapResolved.Add((pos, new ContentHash(ckey.AsSpan()), entry.MinimapTexture));
                     }
 
-                    var minimapComp = BuildComposition(minimapResolved, minimapMissing, mapLOD0TileFDIDs, mapLODTileComponents);
+                    foreach (var tile in minimapResolved)
+                        mapLOD0Tiles.TryAdd(tile.Hash, new LOD0TileInfo(tile.FileId, "minimap"));
+
+                    var minimapComp = BuildComposition(minimapResolved, minimapMissing, mapLODTileComponents);
                     if (minimapComp != null)
                         compositions.TryAdd(row.ID, minimapComp);
 
@@ -602,8 +641,7 @@ internal class ScanMapsService :
                     if (mapTexResolved.Count > 0)
                     {
                         foreach (var tile in mapTexResolved)
-                            mapLOD0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
-
+                            mapLOD0Tiles.TryAdd(tile.Hash, new LOD0TileInfo(tile.FileId, "maptexture"));
                         layerCandidates.TryAdd((row.ID, "maptexture"), (mapTexResolved, mapTexMissing));
                     }
 
@@ -627,8 +665,7 @@ internal class ScanMapsService :
                         if (nlResolved.Count > 0)
                         {
                             foreach (var tile in nlResolved)
-                                mapLOD0TileFDIDs.TryAdd(tile.Hash, tile.FileId);
-
+                                mapLOD0Tiles.TryAdd(tile.Hash, new LOD0TileInfo(tile.FileId, "noliquid"));
                             layerCandidates.TryAdd((row.ID, "noliquid"), (nlResolved, nlMissing));
                         }
                     }
@@ -680,7 +717,7 @@ internal class ScanMapsService :
 
         // Send out the list of tiles we've seen, get the list of tiles we already have and push the tiles we're missing
         var tileHashSize = new ConcurrentDictionary<ContentHash, int>();
-        var tileHashSet = mapLOD0TileFDIDs.Keys.Union(mapLODTileComponents.Keys).ToHashSet(); // LOD0 union LOD1+ hashes;
+        var tileHashSet = mapLOD0Tiles.Keys.Union(mapLODTileComponents.Keys).ToHashSet(); // LOD0 union LOD1+ hashes;
         var tileDelta = new HashSet<ContentHash>(tileHashSet);
         using (var existingTilesCmd = new NpgsqlCommand("SELECT hash, tile_size  FROM minimap_tiles WHERE hash = ANY($1)", conn))
         {
@@ -754,7 +791,7 @@ internal class ScanMapsService :
         // Phase 1 produce: LOD0 tiles
         var tileErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var layerTileFailures = new ConcurrentDictionary<ContentHash, byte>(); // layer-only tiles that failed (tolerable)
-        var lod0Delta = tileDelta.Intersect(mapLOD0TileFDIDs.Keys);
+        var lod0Delta = tileDelta.Intersect(mapLOD0Tiles.Keys);
         _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
 
         using var tileAbortCts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -764,7 +801,8 @@ internal class ScanMapsService :
                 new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = tileAbortCts.Token },
                 async (tileHash, token) =>
                 {
-                    var tileFDID = mapLOD0TileFDIDs[tileHash];
+                    var tileInfo = mapLOD0Tiles[tileHash];
+                    var tileFDID = tileInfo.FileId;
 
                     try
                     {
@@ -785,20 +823,14 @@ internal class ScanMapsService :
 
                         tileHashSize.TryAdd(tileHash, width);
 
-                        await using var webpStream = new MemoryStream();
-                        using (var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height))
-                        {
-                            image.Save(webpStream, new WebpEncoder()
-                            {
-                                FileFormat = _serviceConfig.Compression.Baseline.Type,
-                                Method = _serviceConfig.Compression.Baseline.Level,
-                                EntropyPasses = 10,
-                                Quality = _serviceConfig.Compression.Baseline.Quality
-                            });
-                        }
+                        var lod0Config = _serviceConfig.Compression[tileInfo.LayerType].LOD0;
 
-                        webpStream.Position = 0;
-                        await _tileStore.SaveAsync(tileHash, webpStream, "image/webp");
+                        using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
+                        var (encodedStream, contentType) = EncodeImage(image, lod0Config);
+                        await using (encodedStream)
+                        {
+                            await _tileStore.SaveAsync(tileHash, encodedStream, contentType);
+                        }
                         await channel.Writer.WriteAsync(new()
                         {
                             hash = tileHash,
@@ -852,7 +884,7 @@ internal class ScanMapsService :
             if (availableTiles.Count == 0)
                 continue;
 
-            var comp = BuildComposition(availableTiles, missing, mapLOD0TileFDIDs, mapLODTileComponents);
+            var comp = BuildComposition(availableTiles, missing, mapLODTileComponents);
             if (comp == null)
                 continue;
 
@@ -890,7 +922,6 @@ internal class ScanMapsService :
 
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);
-        //var lodDelta = mapLODTileComponents.Keys;
         _logger.LogInformation("Processing {Count} LOD1+ tiles", lodDelta.Count());
         await Parallel.ForEachAsync(lodDelta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -900,6 +931,12 @@ internal class ScanMapsService :
                 var componentHashes = lodTileInfo.ComponentHashes;
                 var lodLevel = lodTileInfo.Level;
                 var tilesPerSide = 1 << lodLevel;
+
+                // determine layer type from the first real component tile
+                var firstComponent = componentHashes.FirstOrDefault(h => h.HasValue);
+                if (!firstComponent.HasValue || !mapLOD0Tiles.TryGetValue(firstComponent.Value, out var compInfo))
+                    throw new Exception($"LOD tile {lodTileHash} has no resolvable component in mapLOD0Tiles");
+                var lodLayerType = compInfo.LayerType;
 
                 try
                 {
@@ -940,17 +977,12 @@ internal class ScanMapsService :
                         outputImage.Mutate(ctx => ctx.DrawImage(resizedSource, new Point(targetX, targetY), 1.0f));
                     }
 
-                    await using var outputStream = new MemoryStream();
-                    await outputImage.SaveAsWebpAsync(outputStream, new WebpEncoder()
+                    var lodConfig = _serviceConfig.Compression[lodLayerType].LOD;
+                    var (lodEncodedStream, lodContentType) = EncodeImage(outputImage, lodConfig);
+                    await using (lodEncodedStream)
                     {
-                        FileFormat = _serviceConfig.Compression.LOD.Type,
-                        Method = _serviceConfig.Compression.LOD.Level,
-                        EntropyPasses = 10,
-                        Quality = _serviceConfig.Compression.LOD.Quality
-                    }, token);
-
-                    outputStream.Position = 0;
-                    await _tileStore.SaveAsync(lodTileHash, outputStream, "image/webp");
+                        await _tileStore.SaveAsync(lodTileHash, lodEncodedStream, lodContentType);
+                    }
 
                     // Pass off to the consumer channel
                     await channel.Writer.WriteAsync(new()
@@ -959,8 +991,6 @@ internal class ScanMapsService :
                         tile_size = (short)tileSize,
                     }, token);
 
-                    _logger.LogTrace("Generated LOD{Level} tile {Hash} from {ComponentCount} components ({Width})",
-                        lodLevel, lodTileHash, componentHashes.Count, tileSize);
                 }
                 catch (Exception ex)
                 {
@@ -1515,6 +1545,76 @@ internal class ScanMapsService :
         cmdLayer.Parameters.AddWithValue(hash);
         cmdLayer.Parameters.AddWithValue(false);
         batch.BatchCommands.Add(cmdLayer);
+    }
+
+    /// <summary>
+    /// Encode an ImageSharp image using the given compression config.
+    /// Returns the encoded bytes and the appropriate MIME content type.
+    /// </summary>
+    private static (MemoryStream Stream, string ContentType) EncodeImage(Image<Bgra32> image, CompressionConfig config)
+    {
+        var ms = new MemoryStream();
+
+        switch (config.Format)
+        {
+            case ImageFormat.WebP:
+                image.Save(ms, new WebpEncoder()
+                {
+                    FileFormat = config.Type,
+                    Method = config.Level,
+                    EntropyPasses = 10,
+                    Quality = config.Quality
+                });
+                ms.Position = 0;
+                return (ms, "image/webp");
+
+            case ImageFormat.AVIF:
+                var w = image.Width;
+                var h = image.Height;
+                var pixelData = new byte[w * h * 4];
+                image.CopyPixelDataTo(pixelData);
+
+                // swap BGRA -> RGBA in place
+                for (int px = 0; px < pixelData.Length; px += 4)
+                    (pixelData[px], pixelData[px + 2]) = (pixelData[px + 2], pixelData[px]);
+
+                // LibHeifSharp doesn't support writing to a stream directly,
+                // so we write to a temp file and read it back.
+                // TODO: Think about how we'll be best handling this, good enough for now
+                using (var ctx = new HeifContext())
+                using (var encoder = ctx.GetEncoder(HeifCompressionFormat.Av1))
+                {
+                    encoder.SetLossyQuality(config.AvifQuality);
+                    encoder.SetParameter("speed", config.AvifEffort);
+
+                    using var heifImage = new HeifImage(w, h, HeifColorspace.Rgb, HeifChroma.InterleavedRgba32);
+                    heifImage.AddPlane(HeifChannel.Interleaved, w, h, 32);
+                    var plane = heifImage.GetPlane(HeifChannel.Interleaved);
+
+                    for (int y = 0; y < h; y++)
+                        Marshal.Copy(pixelData, y * w * 4, plane.Scan0 + y * plane.Stride, w * 4);
+
+                    ctx.EncodeImage(heifImage, encoder);
+
+                    var tmpPath = Path.GetTempFileName();
+                    try
+                    {
+                        ctx.WriteToFile(tmpPath);
+                        using var fs = File.OpenRead(tmpPath);
+                        fs.CopyTo(ms);
+                        ms.Position = 0;
+                    }
+                    finally
+                    {
+                        File.Delete(tmpPath);
+                    }
+                }
+
+                return (ms, "image/avif");
+
+            default:
+                throw new ArgumentException($"Unknown image format: {config.Format}");
+        }
     }
 
     private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) :

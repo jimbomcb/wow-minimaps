@@ -59,10 +59,12 @@ export class ControlPanel {
     private mapDisplay: HTMLDivElement;
     private mapSearchInput: HTMLInputElement;
     private mapDropdown: HTMLDivElement;
-    private versionDropdownBtn: HTMLButtonElement;
-    private versionDropdownLabel: HTMLSpanElement;
+    private versionDisplay: HTMLDivElement;
+    private versionSearchInput: HTMLInputElement;
     private versionDropdown: HTMLDivElement;
+    private versionDropdownList: HTMLDivElement;
     private versionToggleUnique: HTMLButtonElement;
+    private versionFilterText: string = '';
     private versionWarning: HTMLDivElement | null = null;
     private layersTree: HTMLDivElement;
     private mapNavPrevBtn: HTMLButtonElement;
@@ -78,6 +80,7 @@ export class ControlPanel {
     private zonesTree: HTMLDivElement;
     private zonesTreeMode: boolean = localStorage.getItem('zones-tree-mode') !== 'flat';
     private currentAreaData: AreaIdDataDto | null = null;
+    private zoneNameCount = new Map<string, number>();
 
     private allMaps: MapInfo[] = [];
     private filteredMaps: MapInfo[] = [];
@@ -126,20 +129,10 @@ export class ControlPanel {
             throw new Error('#map-dropdown not found');
         }
 
-        this.versionDropdownBtn = document.getElementById('version-dropdown-btn') as HTMLButtonElement;
-        if (!this.versionDropdownBtn) {
-            throw new Error('#version-dropdown-btn not found');
-        }
-
-        this.versionDropdownLabel = document.getElementById('version-dropdown-label') as HTMLSpanElement;
-        if (!this.versionDropdownLabel) {
-            throw new Error('#version-dropdown-label not found');
-        }
-
+        this.versionDisplay = document.getElementById('version-display') as HTMLDivElement;
+        this.versionSearchInput = document.getElementById('version-search-input') as HTMLInputElement;
         this.versionDropdown = document.getElementById('version-dropdown') as HTMLDivElement;
-        if (!this.versionDropdown) {
-            throw new Error('#version-dropdown not found');
-        }
+        this.versionDropdownList = document.getElementById('version-dropdown-list') as HTMLDivElement;
 
         this.versionToggleUnique = document.getElementById('version-toggle-unique') as HTMLButtonElement;
         if (this.versionToggleUnique && this.showUniqueOnly) {
@@ -363,21 +356,33 @@ export class ControlPanel {
             this.renderMapDropdown();
         });
 
-        this.versionDropdownBtn.addEventListener('click', () => {
-            this.showVersionDropdown = !this.showVersionDropdown;
-            this.renderVersionDropdown();
-            if (this.showVersionDropdown) {
-                this.scrollToCurrentVersionInDropdown();
-            }
+        this.versionDisplay.addEventListener('click', () => {
+            this.versionDisplay.style.display = 'none';
+            this.versionSearchInput.style.display = 'block';
+            this.versionSearchInput.value = '';
+            this.versionFilterText = '';
+            this.versionSearchInput.focus();
         });
 
-        document.addEventListener('click', (e) => {
-            if (this.showVersionDropdown &&
-                !this.versionDropdownBtn.contains(e.target as Node) &&
-                !this.versionDropdown.contains(e.target as Node)) {
+        this.versionSearchInput.addEventListener('focus', () => {
+            this.showVersionDropdown = true;
+            this.renderVersionDropdown();
+            this.scrollToCurrentVersionInDropdown();
+        });
+
+        this.versionSearchInput.addEventListener('blur', () => {
+            setTimeout(() => {
                 this.showVersionDropdown = false;
                 this.renderVersionDropdown();
-            }
+                this.versionSearchInput.style.display = 'none';
+                this.versionDisplay.style.display = 'block';
+                this.updateVersionDropdownLabel();
+            }, 200);
+        });
+
+        this.versionSearchInput.addEventListener('input', () => {
+            this.versionFilterText = this.versionSearchInput.value.trim().toLowerCase();
+            this.renderVersionDropdown();
         });
 
         // Unique toggle button
@@ -498,11 +503,20 @@ export class ControlPanel {
         this.versionDropdown.style.display = 'block';
 
         if (this.versionGroups.length === 0) {
-            this.versionDropdown.innerHTML = '<div class="version-item">No versions available</div>';
+            this.versionDropdownList.innerHTML = '<div class="version-item">No versions available</div>';
             return;
         }
 
-        let html = '';
+        const filter = this.versionFilterText;
+
+        let html = `
+            <div class="dropdown-header">
+                <span class="col-name">Version</span>
+                <span class="col-version">Products</span>
+            </div>
+        `;
+
+        let visibleCount = 0;
         for (const group of this.versionGroups) {
             const isMultiple = group.versions.length > 1;
 
@@ -513,15 +527,26 @@ export class ControlPanel {
             for (let i = 0; i < group.versions.length; i++) {
                 const version = group.versions[i]!;
                 const isFirst = i === 0;
-                const isGroupRepresentative = isFirst;
 
-                // In unique-only mode only the oldest (first) version in a group
                 if (this.showUniqueOnly && !isFirst) continue;
 
+                if (filter) {
+                    const versionStr = version.displayName.toLowerCase();
+                    const productsStr = version.products.join(' ').toLowerCase();
+                    if (!versionStr.includes(filter) && !productsStr.includes(filter))
+                        continue;
+                }
+
+                visibleCount++;
+
+                const isSelected = this.showUniqueOnly
+                    ? groupIsSelected
+                    : (this.currentVersion !== 'latest' && version.version.equals(this.currentVersion as BuildVersion));
+
                 const classes = [
-                    'version-item',
-                    (this.showUniqueOnly ? groupIsSelected : (this.currentVersion !== 'latest' && version.version.equals(this.currentVersion as BuildVersion))) ? 'selected' : '',
-                    isGroupRepresentative ? 'group-first' : 'group-member',
+                    'dropdown-item',
+                    isSelected ? 'current' : '',
+                    isFirst ? 'group-first' : 'group-member',
                 ].filter(Boolean).join(' ');
 
                 const productsStr = version.products.length > 0 ? version.products.join(', ') : '';
@@ -535,18 +560,23 @@ export class ControlPanel {
 
                 html += `
                     <div class="${classes}" data-version="${version.version.encodedValueString}">
-                        <span class="version-text">${displayHtml}</span>
-                        <span class="version-products">${productsStr}</span>
+                        <span class="col-name">${displayHtml}</span>
+                        <span class="col-version">${productsStr}</span>
                     </div>
                 `;
             }
         }
 
-        this.versionDropdown.innerHTML = html;
+        if (visibleCount === 0) {
+            html += '<div class="dropdown-item">No matching versions</div>';
+        }
 
-        const items = this.versionDropdown.querySelectorAll('.version-item[data-version]');
+        this.versionDropdownList.innerHTML = html;
+
+        const items = this.versionDropdownList.querySelectorAll('.dropdown-item[data-version]');
         items.forEach((item) => {
-            item.addEventListener('click', () => {
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault();
                 const encodedStr = item.getAttribute('data-version')!;
                 try {
                     const version = new BuildVersion(BigInt(encodedStr));
@@ -560,7 +590,7 @@ export class ControlPanel {
 
     private scrollToCurrentVersionInDropdown(): void {
         setTimeout(() => {
-            const selectedItem = this.versionDropdown.querySelector('.version-item.selected');
+            const selectedItem = this.versionDropdownList.querySelector('.dropdown-item.current');
             if (selectedItem) {
                 selectedItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
             }
@@ -578,7 +608,7 @@ export class ControlPanel {
 
     private updateVersionDropdownLabel(): void {
         if (this.availableVersions.length === 0) {
-            this.versionDropdownLabel.textContent = 'No versions';
+            this.versionDisplay.textContent = 'No versions';
             return;
         }
 
@@ -587,15 +617,15 @@ export class ControlPanel {
             const currentGroupIndex = this.findCurrentGroupIndex();
             if (currentGroupIndex >= 0) {
                 const currentGroup = this.versionGroups[currentGroupIndex]!;
-                this.versionDropdownLabel.innerHTML = this.getGroupDisplayRangeHtml(currentGroup);
+                this.versionDisplay.innerHTML = this.getGroupDisplayRangeHtml(currentGroup);
                 return;
             }
         }
 
         if (this.currentVersion === 'latest') {
-            this.versionDropdownLabel.innerHTML = this.formatVersionHtml(this.availableVersions[this.availableVersions.length - 1]!.displayName);
+            this.versionDisplay.innerHTML = this.formatVersionHtml(this.availableVersions[this.availableVersions.length - 1]!.displayName);
         } else {
-            this.versionDropdownLabel.innerHTML = this.formatVersionHtml(this.currentVersion.toString());
+            this.versionDisplay.innerHTML = this.formatVersionHtml(this.currentVersion.toString());
         }
     }
 
@@ -1066,6 +1096,22 @@ export class ControlPanel {
             nodeMap.set(Number(idStr), { id: area.ID, name: area.AreaName_lang, internalName, continentId, hasChunks, children: [] });
         }
 
+        // Track the count of the specific AreaIDs/names seen, this helps disambiguate
+        // because otherwise you have just The Great Sea, The Great Sea, and.. The Great Sea that are all different underlying zones.
+        this.zoneNameCount.clear();
+        const seenNameIds = new Map<string, Set<number>>();
+        for (const node of nodeMap.values()) {
+            let ids = seenNameIds.get(node.name);
+            if (!ids) {
+                ids = new Set();
+                seenNameIds.set(node.name, ids);
+            }
+            ids.add(node.id);
+        }
+        for (const [name, ids] of seenNameIds) {
+            this.zoneNameCount.set(name, ids.size);
+        }
+
         // Build parent-child relationships
         const roots: AreaNode[] = [];
         for (const [idStr, area] of Object.entries(areas)) {
@@ -1128,14 +1174,9 @@ export class ControlPanel {
 
         if (!node.hasChunks) {
             row.classList.add('zone-ref-only');
-            row.title = node.internalName && node.internalName !== node.name
-                ? `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}\nParent reference only — no chunks on this map`
-                : `${node.name}, AreaID: ${node.id}\nParent reference only — no chunks on this map`;
+            row.title = `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}\nThis AreaID is not used directly, but it is the parent of an AreaID that is.`
         } else {
-            row.title = node.internalName && node.internalName !== node.name
-                ? `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`
-                : `${node.name}, AreaID: ${node.id}`;
-
+            row.title = `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`;
             row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
             row.addEventListener('mouseleave', () => this.onZoneHover(null));
             row.addEventListener('click', (e) => {
@@ -1164,16 +1205,13 @@ export class ControlPanel {
             header.className = 'zone-continent-header';
             header.textContent = name;
             const dir = mapInfo?.directory ?? '';
-            header.title = dir && dir !== name
-                ? `Owning Continent: ${name}, Internal Name: ${dir}, Map ${continentId}`
-                : `Owning Continent: ${name}, Map ${continentId}`;
 
-            // note abt why it might differ
+            header.title = "Each AreaID has a parent 'continent' map:";
+            header.title += `\nName: ${name}\nInternal Name: ${dir}, Map ${continentId}`;
 
+            // note about why it might differ
             if (continentId !== this.currentMapId)
-                header.title += "\nIt's uncommon but still possible for a chunks AreaID to be associated with a different map than the currently active.";
-            else
-                header.title += "\nEach area has an owning 'continent', the top level map (i.e. Kalimdor, Eastern Kingdoms, Outlands)."
+                header.title += `\nThese zones are associated with a different map '${name}', we are map ${this.currentMapId}.`;
 
             this.zonesTree.appendChild(header);
 
@@ -1221,9 +1259,28 @@ export class ControlPanel {
             }
 
             html += `<span class="zone-name">${node.name}</span>`;
+
             if (node.internalName && node.internalName !== node.name) {
-                html += `<span class="zone-internal">${node.internalName}</span>`;
+                // show internal name if it's genuinely different (not just whitespace/punctuation stripped ie "Arathi's End" vs "ArathisEnd")
+                // also show if multiple distinct AreaIDs share a common name to disambiguate.
+                const catchRegex = /[\s':.\\-]/g;
+                const isNonWhitespaceMatch = node.internalName.replaceAll(catchRegex, '').toLowerCase() === node.name.replaceAll(catchRegex, '').toLowerCase();
+                const isAmbiguous = (this.zoneNameCount.get(node.name) ?? 0) > 1;
+
+                let chosenName = '';
+
+                if (!isNonWhitespaceMatch)
+                    chosenName += node.internalName;
+
+                if (isAmbiguous) {
+                    if (chosenName !== '') chosenName += ' ';
+                    chosenName += `(${node.id})`;
+                }
+
+                if (chosenName !== '')
+                    html += `<span class="zone-internal">${chosenName}</span>`;
             }
+
             row.innerHTML = html;
             this.zonesTree.appendChild(row);
 

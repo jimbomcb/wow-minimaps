@@ -11,6 +11,7 @@ public class LocalTileStore : ITileStore
         { "image/webp", ".webp" },
         { "image/png", ".png" },
         { "image/jpeg", ".jpg" },
+        { "image/avif", ".avif" },
     };
 
     public LocalTileStore(IConfiguration configuration)
@@ -66,11 +67,22 @@ public class LocalTileStore : ITileStore
         if (!_contentTypeToExtension.TryGetValue(contentType, out var extension))
             throw new ArgumentException($"Unsupported content type: {contentType}", nameof(contentType));
 
-        var filePath = GetBaseFilePath(hash) + extension;
+        var basePath = GetBaseFilePath(hash);
+        var filePath = basePath + extension;
         var directory = Path.GetDirectoryName(filePath);
 
         if (!Directory.Exists(directory))
             Directory.CreateDirectory(directory!);
+
+        // remove any existing tile with a different format at the same hash
+        // ugly but only used in dev, this will just stomp any other older formats keeping most recent saved
+        foreach (var ext in _contentTypeToExtension.Values)
+        {
+            if (ext == extension) continue;
+            var oldPath = basePath + ext;
+            if (File.Exists(oldPath))
+                File.Delete(oldPath);
+        }
 
         using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
         await stream.CopyToAsync(fileStream);

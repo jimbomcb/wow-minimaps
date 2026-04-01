@@ -15,3 +15,6 @@ Inspired by [Marlamin](https://github.com/Marlamin)'s [WoWTools.Minimaps](https:
 - Minimaps.Aspire.AppHost: Dev orchestration, runs a local dev database, migrates, runs individual components.
 - Minimaps.Frontend: Blazor frontend serving map data in a WebGL renderer.
 - Minimaps.Services: Service worker monitoring for builds, scanning and publishing new/modified minimap data.
+
+### Dependencies
+- https://github.com/strukturag/libheif 1.21.2: `vcpkg install libheif[aom]:x64-windows` Used for AVIF encoding, WebP Lossy (even at Q100) was resulting in noticable checkerboard patterns on solid colour maptextures.
