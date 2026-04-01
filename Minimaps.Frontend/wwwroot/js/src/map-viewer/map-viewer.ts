@@ -319,7 +319,6 @@ export class MapViewer {
                         id: `${layerType}-${mapId}`,
                         visible: false,
                         zIndex: 1,
-                        opacity: 0.85,
                         residentLodLevel: 4,
                         debugSkipLODs: [],
                     });

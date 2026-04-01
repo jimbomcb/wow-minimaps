@@ -401,7 +401,10 @@ export class Renderer {
 
     private setupGLState(): void {
         this.gl.enable(this.gl.BLEND);
-        this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+        this.gl.blendFuncSeparate(
+            this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA,
+            this.gl.ONE, this.gl.ONE_MINUS_SRC_ALPHA
+        );
         this.gl.useProgram(this.program);
         this.gl.clearColor(0.0, 0.0, 0.0, 0.0);
     }
