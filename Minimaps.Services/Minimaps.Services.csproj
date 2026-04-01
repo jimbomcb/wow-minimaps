@@ -42,7 +42,7 @@
     </None>
   </ItemGroup>
 
-  <!-- libheif + libaom built via vcpkg -->
+  <!-- libheif + libaom + libde265 built via vcpkg -->
   <ItemGroup>
     <None Include="native\win-x64\libheif.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -51,6 +51,10 @@
     <None Include="native\win-x64\aom.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>aom.dll</Link>
+    </None>
+    <None Include="native\win-x64\libde265.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>libde265.dll</Link>
     </None>
   </ItemGroup>
 
