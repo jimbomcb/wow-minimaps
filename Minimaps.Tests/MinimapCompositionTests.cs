@@ -242,6 +242,56 @@ public class MinimapCompositionTests
     }
 
     [Fact]
+    public void AllMissing_ValidComposition()
+    {
+        // Map where WDT references tiles but none exist in the build
+        var tiles = new Dictionary<TileCoord, ContentHash>();
+        var missing = new HashSet<TileCoord> { new(30, 30), new(31, 30), new(30, 31) };
+
+        var comp = new MinimapComposition(tiles, missing);
+
+        Assert.NotNull(comp.Hash);
+        Assert.True(comp.Hash.Length == 16);
+        Assert.Equal(3, comp.CountTiles());
+        Assert.Equal(0, comp.GetLOD(0)!.Tiles.Count);
+        Assert.Equal(3, comp.MissingTiles.Count);
+    }
+
+    [Fact]
+    public void AllMissing_HasExtents()
+    {
+        var tiles = new Dictionary<TileCoord, ContentHash>();
+        var missing = new HashSet<TileCoord> { new(30, 25), new(35, 31) };
+
+        var comp = new MinimapComposition(tiles, missing);
+        var extents = comp.CalcExtents();
+
+        Assert.NotNull(extents);
+        Assert.Equal(30, extents.Value.Min.X);
+        Assert.Equal(25, extents.Value.Min.Y);
+        Assert.Equal(35, extents.Value.Max.X);
+        Assert.Equal(31, extents.Value.Max.Y);
+    }
+
+    [Fact]
+    public void AllMissing_RoundTrips()
+    {
+        var tiles = new Dictionary<TileCoord, ContentHash>();
+        var missing = new HashSet<TileCoord> { new(10, 20), new(11, 20) };
+
+        var comp = new MinimapComposition(tiles, missing);
+        comp.TileSize = 512;
+
+        var json = System.Text.Json.JsonSerializer.Serialize(comp);
+        var deserialized = System.Text.Json.JsonSerializer.Deserialize<MinimapComposition>(json);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(comp.Hash, deserialized.Hash);
+        Assert.Equal(2, deserialized.MissingTiles.Count);
+        Assert.Equal(0, deserialized.GetLOD(0)!.Tiles.Count);
+    }
+
+    [Fact]
     public void Hash_UniqueDiffCoordSameTileHash()
     {
         var tiles1 = new Dictionary<TileCoord, ContentHash>

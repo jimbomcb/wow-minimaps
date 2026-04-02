@@ -61,20 +61,33 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
     public CompositionExtents? CalcExtents()
     {
         var lod0 = _lods[0];
-        if (lod0?.Tiles.Count == 0)
+        if ((lod0?.Tiles.Count ?? 0) == 0 && _missingTiles.Count == 0)
             return null;
 
         int minX = int.MaxValue;
         int minY = int.MaxValue;
         int maxX = int.MinValue;
         int maxY = int.MinValue;
-        foreach (var coord in lod0!.Tiles.Keys)
+
+        if (lod0 != null)
+        {
+            foreach (var coord in lod0.Tiles.Keys)
+            {
+                if (coord.X < minX) minX = coord.X;
+                if (coord.Y < minY) minY = coord.Y;
+                if (coord.X > maxX) maxX = coord.X;
+                if (coord.Y > maxY) maxY = coord.Y;
+            }
+        }
+
+        foreach (var coord in _missingTiles)
         {
             if (coord.X < minX) minX = coord.X;
             if (coord.Y < minY) minY = coord.Y;
             if (coord.X > maxX) maxX = coord.X;
             if (coord.Y > maxY) maxY = coord.Y;
         }
+
         return new(new(minX, minY), new(maxX, maxY));
     }
 
