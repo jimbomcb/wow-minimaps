@@ -29,10 +29,10 @@ var migrationService = builder.AddProject<Projects.Minimaps_CLI>("migration")
 
 builder.AddProject<Projects.Minimaps_Services>("services")
     .WithReference(minimapsDb)
-    .WaitFor(migrationService);
+    .WaitForCompletion(migrationService);
 
 builder.AddProject<Projects.Minimaps_Frontend>("minimaps-frontend", launchProfileName: "httpsAlt")
     .WithReference(minimapsDb)
-    .WaitFor(migrationService);
+    .WaitForCompletion(migrationService);
 
 builder.Build().Run();

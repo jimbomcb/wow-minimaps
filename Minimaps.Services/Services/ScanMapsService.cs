@@ -181,7 +181,7 @@ internal class ScanMapsService :
             "   OR (ps.state IN ('full_decrypt', 'partial_decrypt') AND ps.data_version_attempt < $2) " +
             "ORDER BY " +
             "   CASE WHEN ps.state = 'pending' THEN 0 ELSE 1 END, " + // new scans first
-            "   p.build_id ASC " +
+            "   p.first_seen ASC " +
             "LIMIT 1 " +
             "FOR UPDATE OF ps SKIP LOCKED", conn, transaction))
         {
@@ -777,7 +777,8 @@ internal class ScanMapsService :
         }, cancellation);
 
         // Phase 1 produce: LOD0 tiles
-        var tileFailures = new ConcurrentDictionary<ContentHash, byte>();
+        var cdnMissingTiles = new ConcurrentDictionary<ContentHash, byte>();
+        var processingErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var lod0Delta = tileDelta.Intersect(mapLOD0Tiles.Keys);
         _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
 
@@ -788,61 +789,80 @@ internal class ScanMapsService :
                 var tileInfo = mapLOD0Tiles[tileHash];
                 var tileFDID = tileInfo.FileId;
 
+                Stream? tileStream;
                 try
                 {
-                    using var tileStream = await _blizztrack.OpenStreamFDID(tileFDID, filesystem, validate: true, cancellation: token);
-                    if (tileStream == null || tileStream == Stream.Null)
+                    tileStream = await _blizztrack.OpenStreamFDID(tileFDID, filesystem, validate: true, cancellation: token);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception)
+                {
+                    // CDN mirrors failed to serve this file
+                    _logger.LogDebug("Tile cdn-missing {TileHash} FDID {TileFDID}", tileHash, tileFDID);
+                    cdnMissingTiles.TryAdd(tileHash, 0);
+                    return;
+                }
+
+                if (tileStream == null || tileStream == Stream.Null)
+                {
+                    // FDID not in builds file index, should never be possible because we only aggregate tiles that have GetFDIDContentKey results (implied exists)
+                    processingErrors.TryAdd(tileHash, new Exception($"Tile FDID {tileFDID} returned null from OpenStreamFDID despite having a content key"));
+                    return;
+                }
+
+                try
+                {
+                    using (tileStream)
                     {
-                        _logger.LogDebug("Tile unavailable {TileHash} FDID {TileFDID}", tileHash, tileFDID);
-                        tileFailures.TryAdd(tileHash, 0);
-                        return;
+                        using var blpFile = new BLPSharp.BLPFile(tileStream);
+                        var mapBytes = blpFile.GetPixels(0, out int width, out int height) ??
+                            throw new Exception($"Failed to decode BLP (len:{tileStream.Length})");
+                        Debug.Assert(width == height);
+
+                        if (width > 2048)
+                            throw new Exception("Unexpected tile size");
+
+                        tileHashSize.TryAdd(tileHash, width);
+
+                        var lod0Config = _serviceConfig.GetCompressionConfig(tileInfo.LayerType).LOD0;
+
+                        using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
+                        var (encodedStream, contentType) = EncodeImage(image, lod0Config);
+                        await using (encodedStream)
+                        {
+                            await _tileStore.SaveAsync(tileHash, encodedStream, contentType);
+                        }
+                        await channel.Writer.WriteAsync(new()
+                        {
+                            hash = tileHash,
+                            tile_size = (short)width,
+                        }, token);
+
+                        _logger.LogTrace("Uploaded LOD0 tile {TileHash} FDID {TileFDID} ({Width}x{Height})", tileHash, tileFDID, width, height);
                     }
-
-                    using var blpFile = new BLPSharp.BLPFile(tileStream);
-                    var mapBytes = blpFile.GetPixels(0, out int width, out int height) ??
-                        throw new Exception($"Failed to decode BLP (len:{tileStream.Length})");
-                    Debug.Assert(width == height);
-
-                    if (width > 2048)
-                        throw new Exception("Unexpected tile size");
-
-                    tileHashSize.TryAdd(tileHash, width);
-
-                    var lod0Config = _serviceConfig.GetCompressionConfig(tileInfo.LayerType).LOD0;
-
-                    using var image = Image.LoadPixelData<Bgra32>(mapBytes, width, height);
-                    var (encodedStream, contentType) = EncodeImage(image, lod0Config);
-                    await using (encodedStream)
-                    {
-                        await _tileStore.SaveAsync(tileHash, encodedStream, contentType);
-                    }
-                    await channel.Writer.WriteAsync(new()
-                    {
-                        hash = tileHash,
-                        tile_size = (short)width,
-                    }, token);
-
-                    _logger.LogTrace("Uploaded LOD0 tile {TileHash} FDID {TileFDID} ({Width}x{Height})", tileHash, tileFDID, width, height);
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug("Failed LOD0 tile {TileHash} FDID {TileFDID}: {Error}", tileHash, tileFDID, ex.Message);
-                    tileFailures.TryAdd(tileHash, 0);
+                    _logger.LogError(ex, "Failed processing LOD0 tile {TileHash} FDID {TileFDID}", tileHash, tileFDID);
+                    processingErrors.TryAdd(tileHash, ex);
                 }
             });
 
-        // Build layer compositions from available tiles. Failed tiles are excluded from the composition
+        if (processingErrors.Count > 0)
+            throw new AggregateException($"{processingErrors.Count} LOD0 tile(s) failed processing", processingErrors.Values);
+
+        // Build layer compositions from available tiles. CDN-missing tiles are excluded from the composition
         // but tracked as cdn_missing on the layer entry.
         var layerCompositions = new ConcurrentDictionary<(int MapId, LayerType LayerType), MinimapComposition>();
-        var failedHashes = tileFailures.Keys.ToHashSet();
+        var cdnMissingHashSet = cdnMissingTiles.Keys.ToHashSet();
         foreach (var entry in layerCandidates)
         {
             var candidates = entry.Value.Resolved;
             var missing = entry.Value.Missing;
 
-            var availableTiles = failedHashes.Count > 0
-                ? [.. candidates.Where(t => !failedHashes.Contains(t.Hash))]
+            var availableTiles = cdnMissingHashSet.Count > 0
+                ? [.. candidates.Where(t => !cdnMissingHashSet.Contains(t.Hash))]
                 : candidates;
 
             if (availableTiles.Count == 0)
@@ -861,8 +881,8 @@ internal class ScanMapsService :
             }
         }
 
-        if (tileFailures.Count > 0)
-            _logger.LogInformation("{FailCount} tiles cdn-missing across layers", tileFailures.Count);
+        if (cdnMissingTiles.Count > 0)
+            _logger.LogInformation("{FailCount} tiles cdn-missing across layers", cdnMissingTiles.Count);
 
         // layer LOD1+ hashes weren't in the original DB existence check, query them now
         var layerLodHashes = mapLODTileComponents.Keys.Where(k => !tileHashSize.ContainsKey(k)).ToArray();
@@ -970,6 +990,23 @@ internal class ScanMapsService :
         if (lodErrors.Count > 0)
             throw new AggregateException($"{lodErrors.Count} LOD tile(s) failed generation - this is a bug", lodErrors.Values);
 
+        // cdn_missing sweep: tiles we just downloaded may resolve cdn_missing entries on OTHER builds/layers
+        var newlyDownloadedHashes = lod0Delta.Except(cdnMissingTiles.Keys).ToArray();
+        if (newlyDownloadedHashes.Length > 0)
+        {
+            await using var sweepCmd = new NpgsqlCommand(@"
+                UPDATE build_map_layers
+                SET cdn_missing = (
+                    SELECT NULLIF(array_agg(h), '{}') FROM unnest(cdn_missing) AS h
+                    WHERE h != ALL($1)
+                )
+                WHERE cdn_missing IS NOT NULL AND cdn_missing && $1", conn);
+            sweepCmd.Parameters.AddWithValue(newlyDownloadedHashes);
+            var swept = await sweepCmd.ExecuteNonQueryAsync(cancellation);
+            if (swept > 0)
+                _logger.LogInformation("cdn_missing sweep: {Count} layer entries updated from newly downloaded tiles", swept);
+        }
+
         // Tile size finalization for all layer compositions, remove empty ones
         var emptyLayerKeys = new List<(int, LayerType)>();
         foreach (var entry in layerCompositions)
@@ -1008,8 +1045,7 @@ internal class ScanMapsService :
                     "ON CONFLICT (build_id, map_id) DO UPDATE SET wdt_tile_count = EXCLUDED.wdt_tile_count";
                 cmd.Parameters.AddWithValue(version);
                 cmd.Parameters.AddWithValue(map.Key);
-                var wdtTileCount = mapWdtTileCounts.GetValueOrDefault(map.Key, 0);
-                cmd.Parameters.AddWithValue(wdtTileCount > 0 ? (short)wdtTileCount : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue((short)mapWdtTileCounts.GetValueOrDefault(map.Key, 0));
                 buildMapsBatch.BatchCommands.Add(cmd);
             }
             await buildMapsBatch.ExecuteNonQueryAsync(cancellation);
@@ -1044,18 +1080,12 @@ internal class ScanMapsService :
                     cmdComp.Parameters.AddWithValue(extents != null ? (short)extents.Value.Max.Y : (object)DBNull.Value);
                     nlBatch.BatchCommands.Add(cmdComp);
 
-                    // cdn_missing: candidate tiles that failed to download (content key known, CDN unavailable)
-                    ContentHash[]? cdnMissing = null;
-                    if (failedHashes.Count > 0)
-                    {
-                        var candidates = layerCandidates.GetValueOrDefault((mapId, layerType));
-                        if (candidates.Resolved != null)
-                        {
-                            var missing = candidates.Resolved.Where(t => failedHashes.Contains(t.Hash)).Select(t => t.Hash).Distinct().ToArray();
-                            if (missing.Length > 0)
-                                cdnMissing = missing;
-                        }
-                    }
+                    // note the layers tiles that were cdn-missing (content key known, no CDN mirror)
+                    var cdnMissing = layerCandidates[(mapId, layerType)].Resolved
+                        .Where(t => cdnMissingHashSet.Contains(t.Hash))
+                        .Select(t => t.Hash)
+                        .Distinct()
+                        .ToArray();
 
                     var cmdLayer = nlBatch.CreateBatchCommand();
                     cmdLayer.CommandText = "INSERT INTO build_map_layers (build_id, map_id, layer_type, composition_hash, cdn_missing) VALUES ($1, $2, $3, $4, $5) " +
@@ -1064,7 +1094,7 @@ internal class ScanMapsService :
                     cmdLayer.Parameters.AddWithValue(mapId);
                     cmdLayer.Parameters.AddWithValue(layerType);
                     cmdLayer.Parameters.AddWithValue(comp.Hash);
-                    cmdLayer.Parameters.AddWithValue(cdnMissing != null ? cdnMissing : (object)DBNull.Value);
+                    cmdLayer.Parameters.AddWithValue(cdnMissing != null && cdnMissing.Length > 0 ? cdnMissing : (object)DBNull.Value);
                     nlBatch.BatchCommands.Add(cmdLayer);
                 }
 
