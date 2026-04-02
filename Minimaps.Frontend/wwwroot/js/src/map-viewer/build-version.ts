@@ -21,6 +21,7 @@ export class BuildVersion {
     private static readonly MAJOR_SHIFT = 42n;
     private static readonly EXPANSION_SHIFT = 52n;
 
+    /** Construct from either a version string (1.2.3.456) or a bigint (encoded version) */
     constructor(value: bigint | string | number) {
         if (typeof value === 'string') {
             this._value = BuildVersion.parseVersionString(value);
@@ -60,6 +61,7 @@ export class BuildVersion {
         return new BuildVersion(value);
     }
 
+    /** Parse a dotted version string like "12.0.5.66741" */
     private static parseVersionString(version: string): bigint {
         if (!version || version.trim() === '') {
             throw new Error('Version string cannot be null or empty');
@@ -87,8 +89,12 @@ export class BuildVersion {
         return new BuildVersion(version);
     }
 
-    /** Construct from an encoded int64 string (as returned by the API) like "54043195548172345" */
-    static fromEncodedString(encodedInt64: string): BuildVersion {
+    /**
+     * Parse from an encoded int64 string (as returned by the API) like "54043195548172345"
+     * This is non-standard and not used in most cases, ONLY when we are specifically transferring
+     * an encoded BuildVerison over the wire. We do this because fuck JSON number support.
+     */
+    static parseEncodedString(encodedInt64: string): BuildVersion {
         return new BuildVersion(BigInt(encodedInt64));
     }
 

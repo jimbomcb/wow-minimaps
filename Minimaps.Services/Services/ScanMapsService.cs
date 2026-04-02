@@ -526,8 +526,8 @@ internal class ScanMapsService :
 
                 // upsert the map entry, merge maps, prioritize data of the most recent build we see
                 var command = mapBatch.CreateBatchCommand();
-                command.CommandText = "INSERT INTO maps (id, json, directory, name, name_history, first_seen, last_seen) " +
-                    "VALUES (@Id, @Json::JSONB, @Directory, @Name, jsonb_build_object(@BuildVersion::TEXT, @Name), @BuildVersion, @BuildVersion) " +
+                command.CommandText = "INSERT INTO maps (id, json, directory, name, name_history, first_seen, last_seen, layer_mask) " +
+                    "VALUES (@Id, @Json::JSONB, @Directory, @Name, jsonb_build_object(@BuildVersion::TEXT, @Name), @BuildVersion, @BuildVersion, 0) " +
                     "ON CONFLICT (id) DO UPDATE SET " +
                         "json = CASE WHEN EXCLUDED.last_seen > maps.last_seen THEN EXCLUDED.json ELSE maps.json END, " +
                         "directory = CASE WHEN EXCLUDED.last_seen > maps.last_seen THEN EXCLUDED.directory ELSE maps.directory END, " +
@@ -1102,7 +1102,26 @@ internal class ScanMapsService :
             }
         }
 
-        await ProcessChunkDataLayers(conn, version, mapAdtHashes, areaTableDB, filesystem, cancellation);
+        // Track the per-map layer presence bitmasks
+        var mapLayerBits = new Dictionary<int, int>();
+        foreach (var (key, _) in layerCompositions)
+            mapLayerBits[key.MapId] = mapLayerBits.GetValueOrDefault(key.MapId) | (1 << (int)key.LayerType);
+
+        await ProcessChunkDataLayers(conn, version, mapAdtHashes, areaTableDB, filesystem, cancellation, mapLayerBits);
+
+        if (mapLayerBits.Count > 0)
+        {
+            await using var maskBatch = new NpgsqlBatch(conn);
+            foreach (var (mapId, bits) in mapLayerBits)
+            {
+                var cmd = maskBatch.CreateBatchCommand();
+                cmd.CommandText = "UPDATE maps SET layer_mask = layer_mask | $1 WHERE id = $2";
+                cmd.Parameters.AddWithValue((short)bits);
+                cmd.Parameters.AddWithValue(mapId);
+                maskBatch.BatchCommands.Add(cmd);
+            }
+            await maskBatch.ExecuteNonQueryAsync(cancellation);
+        }
 
         _logger.LogInformation("Done!");
 
@@ -1138,7 +1157,8 @@ internal class ScanMapsService :
         ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>> mapAdtHashes,
         DBCD.IDBCDStorage? areaTableDB,
         IFileSystem filesystem,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        Dictionary<int, int> mapLayerBits)
     {
         var allAdtHashes = mapAdtHashes.Values
             .SelectMany(tiles => tiles.Select(t => t.AdtHash))
@@ -1189,7 +1209,7 @@ internal class ScanMapsService :
             return;
         }
 
-        await AssembleAndStoreMapBlobs(conn, version, mapAdtHashes, mapsNeedingAssembly, existingDataLayers, areaTableDB, cancellation);
+        await AssembleAndStoreMapBlobs(conn, version, mapAdtHashes, mapsNeedingAssembly, existingDataLayers, areaTableDB, cancellation, mapLayerBits);
     }
 
     private async Task ExtractAndStoreAdtData(
@@ -1298,7 +1318,8 @@ internal class ScanMapsService :
         ConcurrentDictionary<int, List<(TileCoord Pos, ContentHash AdtHash, uint FileId)>> mapAdtHashes,
         HashSet<int> mapsNeedingAssembly, HashSet<(int MapId, LayerType LayerType)> existingDataLayers,
         DBCD.IDBCDStorage? areaTableDB,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        Dictionary<int, int> mapLayerBits)
     {
         // load per-tile blob data only for maps that need assembly
         var neededAdtHashes = mapAdtHashes
@@ -1388,6 +1409,7 @@ internal class ScanMapsService :
                         var blob = JsonSerializer.SerializeToUtf8Bytes(new { tiles = impassTiles });
                         var hash = new ContentHash(System.Security.Cryptography.MD5.HashData(blob));
                         AddDataBlobCommands(chunkBatch, version, mapId, LayerType.Impass, hash, BrotliCompress(blob));
+                        mapLayerBits[mapId] = mapLayerBits.GetValueOrDefault(mapId) | (1 << (int)LayerType.Impass);
                         chunkLayerCount++;
                     }
                 }
@@ -1440,6 +1462,7 @@ internal class ScanMapsService :
                         var blob = JsonSerializer.SerializeToUtf8Bytes(new { tiles = areaTiles, areas });
                         var hash = new ContentHash(System.Security.Cryptography.MD5.HashData(blob));
                         AddDataBlobCommands(chunkBatch, version, mapId, LayerType.AreaId, hash, BrotliCompress(blob));
+                        mapLayerBits[mapId] = mapLayerBits.GetValueOrDefault(mapId) | (1 << (int)LayerType.AreaId);
                         chunkLayerCount++;
                     }
                 }

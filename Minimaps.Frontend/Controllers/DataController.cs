@@ -98,17 +98,20 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     public async Task<ActionResult<MapListDto>> GetMaps()
     {
         await using var conn = await dataSource.OpenConnectionAsync();
+        var baseLayerMask = LayerTypeExtensions.BaseLayerMask;
+
+        // Tile count intentionally pulled from sub-select rather than join, the ANALYZE showed this 
+        // reliably scaling with the map count rather than the planner falling back and doing 115k row scans etc.
+        // Joining was taking 50ms for 115k rows from the questionable planner scaling it with O(build_maps count),
+        // sub-select is 10ms and also only scales at O(map count).
         await using var cmd = new NpgsqlCommand(@"
-            SELECT m.id, m.directory, m.name, m.name_history, m.parent,
-                MIN(bml.build_id) as first_build,
-                MAX(bml.build_id) as last_build,
-                COALESCE((SELECT bm.wdt_tile_count FROM build_maps bm WHERE bm.map_id = m.id AND bm.build_id = MAX(bml.build_id)), 0) as wdt_tile_count,
-                COUNT(DISTINCT bml.build_id) as version_count,
-                COUNT(DISTINCT bml.composition_hash) as unique_count
+            SELECT m.id, m.directory, m.name, m.name_history, 
+                   m.parent, m.first_seen, m.last_seen, m.layer_mask,
+                   COALESCE((SELECT bm.wdt_tile_count FROM build_maps bm WHERE bm.map_id = m.id AND bm.build_id = m.last_seen), 0)
             FROM maps m
-            JOIN build_map_layers bml ON bml.map_id = m.id AND bml.composition_hash IS NOT NULL
-            GROUP BY m.id
+            WHERE m.layer_mask & $1 != 0
             ORDER BY m.id ASC;", conn);
+        cmd.Parameters.AddWithValue((short)baseLayerMask);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
@@ -117,18 +120,17 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
         var maps = new List<MapListEntryDto>();
         do
         {
-            var id = reader.GetInt32(0);
-            var directory = reader.GetString(1);
-            var name = reader.GetString(2);
-            var nameHistory = reader.GetFieldValue<Dictionary<BuildVersion, string>>(3);
-            int? parent = reader.IsDBNull(4) ? null : reader.GetInt32(4);
-            var first = reader.GetFieldValue<BuildVersion>(5);
-            var last = reader.GetFieldValue<BuildVersion>(6);
-            var tileCount = reader.GetInt16(7);
-            var versionCount = reader.GetInt32(8);
-            var uniqueCount = reader.GetInt32(9);
-
-            maps.Add(new MapListEntryDto(id, directory, name, nameHistory, first, last, parent, tileCount, versionCount, uniqueCount));
+            maps.Add(new MapListEntryDto(
+                reader.GetInt32(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetFieldValue<Dictionary<BuildVersion, string>>(3),
+                reader.IsDBNull(4) ? null : reader.GetInt32(4),
+                reader.GetFieldValue<BuildVersion>(5),
+                reader.GetFieldValue<BuildVersion>(6),
+                reader.GetInt16(7),
+                reader.GetInt16(8)
+            ));
         } while (await reader.ReadAsync());
 
         return new MapListDto(maps);
@@ -136,9 +138,9 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
 
     public readonly record struct MapListDto(List<MapListEntryDto> Maps);
     public readonly record struct MapListEntryDto(
-        int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory, BuildVersion First, BuildVersion Last,
+        int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Parent,
-        int WdtTileCount, int VersionCount, int UniqueCount);
+        BuildVersion First, BuildVersion Last, int LayerMask, int WdtTileCount);
 
     /// <summary>
     /// Serves a composition's JSONB as raw JSON. Immutable, cache forever.

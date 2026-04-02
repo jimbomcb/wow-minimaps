@@ -189,6 +189,10 @@ export class MapViewer {
             onLayerChange: () => this.scheduleRender(),
             onBaseLayerChange: (lt) => this.setActiveBaseLayer(lt),
             getAvailableBaseLayers: () => this.getAvailableBaseLayers(),
+            isLayerCdnIncomplete: (lt) => {
+                const layer = this.currentMapData?.layers[lt];
+                return layer?.cdnMissing !== null && layer?.cdnMissing !== undefined && layer.cdnMissing.size > 0;
+            },
             onZoneHover: (areaId) => this.handleZoneHover(areaId),
             onZoneClick: (areaId) => this.handleZoneClick(areaId),
         });

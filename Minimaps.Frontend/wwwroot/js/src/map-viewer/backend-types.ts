@@ -54,12 +54,11 @@ export interface MapListEntryDto {
     directory: string;
     name: string;
     nameHistory: Record<string, string>;
-    first: string; // encoded BuildVersion string
-    last: string;
+    first: string; // string encoded int64 of BuildVersion 
+    last: string; // string encoded int64 of BuildVersion
     parent?: number;
+    layerMask: number;
     wdtTileCount: number;
-    versionCount: number;
-    uniqueCount: number;
 }
 
 export interface ImpassDataDto {

@@ -44,6 +44,7 @@ export interface ControlPanelOptions {
     onLayerChange: () => void;
     onBaseLayerChange: (layerType: LayerType) => void;
     getAvailableBaseLayers: () => LayerType[];
+    isLayerCdnIncomplete: (layerType: LayerType) => boolean;
     onZoneHover: (areaId: number | null) => void;
     onZoneClick: (areaId: number) => void;
 }
@@ -58,6 +59,7 @@ export class ControlPanel {
     private onLayerChange: () => void;
     private onBaseLayerChange: (layerType: LayerType) => void;
     private getAvailableBaseLayers: () => LayerType[];
+    private isLayerCdnIncomplete: (layerType: LayerType) => boolean;
     private onZoneHover: (areaId: number | null) => void;
     private onZoneClick: (areaId: number) => void;
 
@@ -114,6 +116,7 @@ export class ControlPanel {
         this.onLayerChange = options.onLayerChange;
         this.onBaseLayerChange = options.onBaseLayerChange;
         this.getAvailableBaseLayers = options.getAvailableBaseLayers;
+        this.isLayerCdnIncomplete = options.isLayerCdnIncomplete;
         this.onZoneHover = options.onZoneHover;
         this.onZoneClick = options.onZoneClick;
 
@@ -484,8 +487,6 @@ export class ControlPanel {
                     <span class="col-name">${map.name}</span>
                     <span class="col-version">${map.first.toString()}</span>
                     <span class="col-version">${map.last.toString()}</span>
-                    <span class="col-count-unique">${map.uniqueCount}</span>
-                    <span class="col-count-total">${map.versionCount}</span>
                 </div>
             `;
         }
@@ -588,7 +589,7 @@ export class ControlPanel {
                 e.preventDefault();
                 const encodedStr = item.getAttribute('data-version')!;
                 try {
-                    const version = BuildVersion.fromEncodedString(encodedStr);
+                    const version = BuildVersion.parseEncodedString(encodedStr);
                     this.selectVersion(version);
                 } catch (error) {
                     console.error('Failed to parse version:', error);
@@ -983,8 +984,11 @@ export class ControlPanel {
             for (const lt of availableBaseLayers) {
                 const btn = document.createElement('button');
                 btn.className = 'base-layer-btn';
-                btn.textContent = lt === LayerType.Minimap ? 'Minimap' : 'MapTexture';
-                // Check if this base layer's tile layer is currently visible
+                const name = lt === LayerType.Minimap ? 'Minimap' : 'MapTexture';
+                const incomplete = this.isLayerCdnIncomplete(lt);
+                btn.innerHTML = incomplete
+                    ? `${name} <span class="layer-partial" title="This partial layer is missing tiles, this is usually historical builds for which only partial data is available.">!</span>`
+                    : name;
                 const tileLayer = this.layerManager.getLayer(`base-${LayerType[lt]}`);
                 if (tileLayer?.visible) {
                     btn.classList.add('active');

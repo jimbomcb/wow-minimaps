@@ -11,9 +11,8 @@ export interface MapInfo {
     first: BuildVersion;
     last: BuildVersion;
     parent: number | null;
+    layerMask: number;
     wdtTileCount: number;
-    versionCount: number;
-    uniqueCount: number;
 }
 
 export interface MapVersionInfo {
@@ -78,7 +77,7 @@ export class MapDataManager {
         for (const map of data.maps) {
             const nameHistoryMap = new Map<BuildVersion, string>();
             for (const [encodedStr, name] of Object.entries(map.nameHistory)) {
-                nameHistoryMap.set(BuildVersion.fromEncodedString(encodedStr), name);
+                nameHistoryMap.set(BuildVersion.parseEncodedString(encodedStr), name);
             }
 
             this.mapsCache.set(map.mapId, {
@@ -86,12 +85,11 @@ export class MapDataManager {
                 directory: map.directory,
                 name: map.name,
                 nameHistory: nameHistoryMap,
-                first: BuildVersion.fromEncodedString(map.first),
-                last: BuildVersion.fromEncodedString(map.last),
+                first: BuildVersion.parseEncodedString(map.first),
+                last: BuildVersion.parseEncodedString(map.last),
                 parent: map.parent ?? null,
+                layerMask: map.layerMask,
                 wdtTileCount: map.wdtTileCount,
-                versionCount: map.versionCount,
-                uniqueCount: map.uniqueCount,
             });
         }
 
@@ -142,7 +140,7 @@ export class MapDataManager {
         const result: MapVersionInfo[] = [];
         for (const [encodedStr, entry] of entryMap.entries()) {
             result.push({
-                version: BuildVersion.fromEncodedString(encodedStr),
+                version: BuildVersion.parseEncodedString(encodedStr),
                 layers: entry.l,
                 cdnMissing: entry.m,
                 products: entry.p,
@@ -174,7 +172,7 @@ export class MapDataManager {
                 return aBig < bBig ? 1 : aBig > bBig ? -1 : 0;
             });
             const latestKey = sorted[0]!;
-            resolvedVersion = BuildVersion.fromEncodedString(latestKey);
+            resolvedVersion = BuildVersion.parseEncodedString(latestKey);
             versionEntry = versionMap.get(latestKey)!;
         } else {
             const entry = versionMap.get(version.encodedValueString);
@@ -308,7 +306,7 @@ export class MapDataManager {
         let bestDistance = Infinity;
 
         for (const [encodedStr, entry] of versionMap.entries()) {
-            const version = BuildVersion.fromEncodedString(encodedStr);
+            const version = BuildVersion.parseEncodedString(encodedStr);
             const diff = requestedValue > version.encodedValue
                 ? requestedValue - version.encodedValue
                 : version.encodedValue - requestedValue;
