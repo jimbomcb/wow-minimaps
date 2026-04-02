@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Minimaps.Database.Tables;
 using Minimaps.Database.TypeHandlers;
+using Minimaps.Shared.Types;
 using Npgsql;
 
 namespace Minimaps.Database;
@@ -17,6 +18,7 @@ public static class HostBuilderExtensions
             x.AddTypeInfoResolverFactory(new NpgsqlTypeResolverFactory());
 #pragma warning restore NPG9001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
             x.MapEnum<ScanState>();
+            x.MapEnum<LayerType>("layer_type_enum");
         });
         return builder;
     }
