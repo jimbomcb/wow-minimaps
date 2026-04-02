@@ -1,5 +1,4 @@
 ﻿using Blizztrack.Framework.TACT.Implementation;
-using Blizztrack.Framework.TACT.Resources;
 using BLPSharp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.RibbitClient;
-using System.Security.Cryptography;
 
 namespace Minimaps.Tests;
 

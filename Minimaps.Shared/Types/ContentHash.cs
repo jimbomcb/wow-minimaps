@@ -83,7 +83,7 @@ public readonly struct ContentHash : IEquatable<ContentHash>, IComparable<Conten
     /// Sentinel value used in LOD hash computation when a tile is cdn_missing
     /// (content key is known but tile couldn't be downloaded from CDN).
     /// This is distinct from all zeros, where the LOD tile has a genuine hole
-    /// from a gap in the world, not a CDN failure.
+    /// from a gap in the world, not a CDN failure (0x00 bytes).
     /// </summary>
     public static readonly ContentHash CdnMissingSentinel = new(new byte[] {
         0x67, 0x67, 0x67, 0x67, 0x67, 0x67, 0x67, 0x67,

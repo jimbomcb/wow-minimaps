@@ -1,8 +1,8 @@
-using System.IO.Compression;
 using Microsoft.AspNetCore.ResponseCompression;
 using Minimaps.Database;
 using Minimaps.Frontend.Components;
 using Minimaps.Shared.TileStores;
+using System.IO.Compression;
 
 var builder = WebApplication.CreateBuilder(args);
 

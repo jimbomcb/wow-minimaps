@@ -10,7 +10,6 @@ using Minimaps.Shared.RibbitClient;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using System.CommandLine;
-using System.IO.Compression;
 
 namespace Minimaps.CLI.Commands;
 

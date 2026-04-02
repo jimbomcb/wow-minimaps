@@ -1,5 +1,4 @@
 ﻿using Minimaps.Shared;
-using Minimaps.Shared.Types;
 
 namespace Minimaps.Database.Tables;
 

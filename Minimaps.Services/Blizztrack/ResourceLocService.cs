@@ -2,7 +2,6 @@
 using Blizztrack.Framework.TACT.Resources;
 using Polly;
 using Polly.Retry;
-using Polly.Telemetry;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
