@@ -4,6 +4,7 @@ using Minimaps.Shared;
 using Minimaps.Shared.TileStores;
 using Minimaps.Shared.Types;
 using Npgsql;
+using System.Text.Json.Serialization;
 
 namespace Minimaps.Frontend.Controllers;
 
@@ -11,46 +12,103 @@ namespace Minimaps.Frontend.Controllers;
 [Route("data")]
 public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) : ControllerBase
 {
+    /// <summary>
+    /// Returns all versions for a map with per-layer hashes indexed by LayerType enum value.
+    /// Format: { 
+    ///     versions: { 
+    ///         encodedBuildVersion: { 
+    ///             l: [hash|null, ...],        // Array of layer hashes (LayerType.Count entries, null if layer absent)
+    ///             m?: [missing[]|null, ...],  // Array of layer cdn_missing entries (entire member absent if all null)
+    ///             p: string[]                 // Array of unique product names this version was seen on (ie wow, wowt, wow_beta)
+    ///         } 
+    ///     }
+    /// }
+    /// </summary>
     [HttpGet("versions/{mapId}")]
-    public async Task<ActionResult<MapVersionsDto>> GetMapVersions(int mapId)
+    public async Task<IActionResult> GetMapVersions(int mapId)
     {
         await using var conn = await dataSource.OpenConnectionAsync();
         await using var cmd = new NpgsqlCommand(@"
-            SELECT bm.build_id, bm.composition_hash, array_agg(p.product ORDER BY p.first_seen) as products
-            FROM build_maps bm
-            JOIN products p ON p.build_id = bm.build_id
-            WHERE bm.map_id = $1 AND bm.composition_hash IS NOT NULL
-            GROUP BY bm.build_id, bm.composition_hash
-            ORDER BY bm.build_id ASC", conn);
+            SELECT bml.build_id, bml.layer_type,
+                   COALESCE(bml.composition_hash, bml.data_hash) as hash,
+                   bml.cdn_missing
+            FROM build_map_layers bml
+            WHERE bml.map_id = $1
+            ORDER BY bml.build_id ASC", conn);
         cmd.Parameters.AddWithValue(mapId);
 
-        await using var reader = await cmd.ExecuteReaderAsync();
-        if (!await reader.ReadAsync())
+        var buildLayers = new Dictionary<BuildVersion, (ContentHash?[] layers, ContentHash[]?[] cdnMissing)>();
+        await using (var reader = await cmd.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                var buildVer = reader.GetFieldValue<BuildVersion>(0);
+                var layerType = reader.GetFieldValue<LayerType>(1);
+                var hash = reader.GetFieldValue<ContentHash>(2);
+                var cdnMissing = reader.IsDBNull(3) ? null : reader.GetFieldValue<ContentHash[]>(3);
+
+                if (!buildLayers.TryGetValue(buildVer, out var entry))
+                {
+                    entry = (new ContentHash?[LayerTypeExtensions.Count], new ContentHash[]?[LayerTypeExtensions.Count]);
+                    buildLayers[buildVer] = entry;
+                }
+                entry.layers[(int)layerType] = hash;
+                entry.cdnMissing[(int)layerType] = cdnMissing;
+            }
+        }
+
+        if (buildLayers.Count == 0)
             return NotFound("no_versions");
 
-        var versions = new Dictionary<BuildVersion, MapVersionEntryDto>();
-        do
+        // products per build
+        var buildIds = buildLayers.Keys.ToArray();
+        var buildProducts = new Dictionary<BuildVersion, string[]>();
+        await using var prodCmd = new NpgsqlCommand(
+            "SELECT build_id, array_agg(product ORDER BY first_seen) FROM products WHERE build_id = ANY($1) GROUP BY build_id", conn);
+        prodCmd.Parameters.AddWithValue(buildIds.Select(b => b.EncodedValue).ToArray());
+        await using var prodReader = await prodCmd.ExecuteReaderAsync();
+        while (await prodReader.ReadAsync())
         {
-            var buildVer = reader.GetFieldValue<BuildVersion>(0);
-            var compHash = reader.GetFieldValue<ContentHash>(1);
-            var products = reader.GetFieldValue<string[]>(2);
-            versions[buildVer] = new MapVersionEntryDto(compHash, products);
-        } while (await reader.ReadAsync());
-        return new MapVersionsDto(versions);
+            var buildVer = prodReader.GetFieldValue<BuildVersion>(0);
+            buildProducts[buildVer] = prodReader.GetFieldValue<string[]>(1);
+        }
+
+        var versions = new Dictionary<BuildVersion, VersionEntryDto>();
+        foreach (var (build, (layers, cdnMissing)) in buildLayers)
+        {
+            var hasCdnMissing = cdnMissing.Any(m => m != null);
+            versions[build] = new VersionEntryDto
+            {
+                Layers = layers.Select(h => h?.ToHex()).ToArray(),
+                Products = buildProducts.GetValueOrDefault(build, []),
+                CdnMissing = hasCdnMissing
+                    ? cdnMissing.Select(m => m?.Select(h => h.ToHex()).ToArray()).ToArray()
+                    : null
+            };
+        }
+
+        Response.Headers.CacheControl = "no-cache"; // TODO: ETag for conditional 304s
+        return Ok(new MapVersionsDto(versions));
     }
 
+    /// <summary>
+    /// Returns all maps that have at least one composition layer (base layer).
+    /// </summary>
     [HttpGet("maps")]
     public async Task<ActionResult<MapListDto>> GetMaps()
     {
         await using var conn = await dataSource.OpenConnectionAsync();
         await using var cmd = new NpgsqlCommand(@"
-            SELECT m.id, m.directory, m.name, m.first_minimap, m.last_minimap, m.name_history, m.parent, COALESCE(c.tiles, 0) as tile_count,
-                (SELECT COUNT(*) FROM build_maps bm2 WHERE bm2.map_id = m.id AND bm2.composition_hash IS NOT NULL) as version_count,
-                (SELECT COUNT(DISTINCT bm3.composition_hash) FROM build_maps bm3 WHERE bm3.map_id = m.id AND bm3.composition_hash IS NOT NULL) as unique_count
+            SELECT m.id, m.directory, m.name, m.name_history, m.parent,
+                MIN(bml.build_id) as first_build,
+                MAX(bml.build_id) as last_build,
+                COALESCE((SELECT bm.wdt_tile_count FROM build_maps bm WHERE bm.map_id = m.id AND bm.build_id = MAX(bml.build_id)), 0) as wdt_tile_count,
+                COUNT(DISTINCT bml.build_id) as version_count,
+                COUNT(DISTINCT bml.composition_hash) as unique_count
             FROM maps m
-            LEFT JOIN build_maps bm ON m.id = bm.map_id AND m.last_minimap = bm.build_id
-            LEFT JOIN compositions c ON bm.composition_hash = c.hash
-            WHERE m.last_minimap IS NOT NULL ORDER BY m.id ASC;", conn);
+            JOIN build_map_layers bml ON bml.map_id = m.id AND bml.composition_hash IS NOT NULL
+            GROUP BY m.id
+            ORDER BY m.id ASC;", conn);
 
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
@@ -62,19 +120,13 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
             var id = reader.GetInt32(0);
             var directory = reader.GetString(1);
             var name = reader.GetString(2);
-            var first = reader.GetFieldValue<BuildVersion>(3);
-            var last = reader.GetFieldValue<BuildVersion>(4);
-            var nameHistory = reader.GetFieldValue<Dictionary<BuildVersion, string>>(5);
-            int? parent = reader.IsDBNull(6) ? null : reader.GetInt32(6);
-            var tileCount = reader.GetInt32(7);
+            var nameHistory = reader.GetFieldValue<Dictionary<BuildVersion, string>>(3);
+            int? parent = reader.IsDBNull(4) ? null : reader.GetInt32(4);
+            var first = reader.GetFieldValue<BuildVersion>(5);
+            var last = reader.GetFieldValue<BuildVersion>(6);
+            var tileCount = reader.GetInt16(7);
             var versionCount = reader.GetInt32(8);
             var uniqueCount = reader.GetInt32(9);
-
-            // for now i'm just going to filter out maps with 0 tiles,
-            // these are usually WMO constructed maps that have 0 ADT tiles, and I anticipate
-            // a way to render these maps in the future. hiding for now.
-            if (tileCount == 0)
-                continue;
 
             maps.Add(new MapListEntryDto(id, directory, name, nameHistory, first, last, parent, tileCount, versionCount, uniqueCount));
         } while (await reader.ReadAsync());
@@ -83,98 +135,58 @@ public class DataController(NpgsqlDataSource dataSource, ITileStore tileStore) :
     }
 
     public readonly record struct MapListDto(List<MapListEntryDto> Maps);
-    public readonly record struct MapListEntryDto(int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory, BuildVersion First, BuildVersion Last, int? Parent, int TileCount, int VersionCount, int UniqueCount);
+    public readonly record struct MapListEntryDto(
+        int MapId, string Directory, string Name, Dictionary<BuildVersion, string> NameHistory, BuildVersion First, BuildVersion Last,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Parent,
+        int WdtTileCount, int VersionCount, int UniqueCount);
 
+    /// <summary>
+    /// Serves a composition's JSONB as raw JSON. Immutable, cache forever.
+    /// </summary>
     [HttpGet("comp/{hash}")]
-    public async Task<ActionResult<MinimapComposition>> GetComposition(string hash)
+    public async Task<IActionResult> GetComposition(string hash)
     {
         if (!ContentHash.TryParse(hash, out var contentHash))
             return BadRequest("invalid_hash");
 
         await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = new NpgsqlCommand("SELECT composition FROM compositions WHERE hash = $1;", conn); // TODO:INDEX
+        await using var cmd = new NpgsqlCommand("SELECT composition FROM compositions WHERE hash = $1;", conn);
         cmd.Parameters.AddWithValue(contentHash);
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
             return NotFound("no_data");
 
-        // todo: use npgsql type converter rather than manual json fiddling
-        // todo: caching
-        //minimapComposition = reader.GetFieldValue<MinimapComposition>(0);
-
         var json = reader.GetString(0);
+        Response.Headers.CacheControl = "public, max-age=31536000";
         return Content(json, "application/json");
     }
 
-    [HttpGet("layers/{mapId}")]
-    public async Task<ActionResult<MapLayersDto>> GetMapLayers(int mapId)
+    /// <summary>
+    /// Serves a data blob's raw brotli bytes. Requires Accept-Encoding: br.
+    /// Immutable, cache forever.
+    /// </summary>
+    [HttpGet("blob/{hash}")]
+    public async Task<IActionResult> GetBlob(string hash)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = new NpgsqlCommand(@"
-            SELECT bml.build_id, bml.layer_type, bml.composition_hash, bml.partial
-            FROM build_map_layers bml
-            WHERE bml.map_id = $1 AND bml.composition_hash IS NOT NULL
-            ORDER BY bml.layer_type, bml.build_id ASC", conn);
-        cmd.Parameters.AddWithValue(mapId); // TODO: Only returning composition only layers for now. If we have data layers that need to be part of this, reconsidr..
+        if (!ContentHash.TryParse(hash, out var contentHash))
+            return BadRequest("invalid_hash");
 
-        await using var reader = await cmd.ExecuteReaderAsync();
-        var layers = new Dictionary<string, Dictionary<BuildVersion, MapLayerEntryDto>>();
-        while (await reader.ReadAsync())
-        {
-            var buildVer = reader.GetFieldValue<BuildVersion>(0);
-            var layerType = reader.GetString(1);
-            var compHash = reader.GetFieldValue<ContentHash>(2);
-            var partial = reader.GetBoolean(3);
-
-            if (!layers.TryGetValue(layerType, out var versions))
-            {
-                versions = new Dictionary<BuildVersion, MapLayerEntryDto>();
-                layers[layerType] = versions;
-            }
-            versions[buildVer] = new MapLayerEntryDto(compHash, partial);
-        }
-
-        if (layers.Count == 0)
-            return new MapLayersDto(new());
-
-        return new MapLayersDto(layers);
-    }
-
-    [HttpGet("chunks/v1/{mapId}/{buildVersion}")]
-    public async Task<IActionResult> GetChunkData(int mapId, string buildVersion)
-    {
-        if (!BuildVersion.TryParse(buildVersion, out var version))
-            return BadRequest("Invalid build version");
+        // Hard require brotli encoding, this is a bit of a gamble but it's the year of our lord 2026 and we already use WEBP & AVIF
+        var acceptEncoding = Request.Headers.AcceptEncoding.ToString();
+        if (!acceptEncoding.Contains("br", StringComparison.OrdinalIgnoreCase))
+            return StatusCode(406, "This endpoint requires Accept-Encoding: br");
 
         await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = new NpgsqlCommand(@"
-            SELECT bml.layer_type, d.data
-            FROM build_map_layers bml
-            JOIN data_blobs d ON d.hash = bml.data_hash
-            WHERE bml.build_id = $1 AND bml.map_id = $2 AND bml.data_hash IS NOT NULL", conn);
-        cmd.Parameters.AddWithValue(version);
-        cmd.Parameters.AddWithValue(mapId);
-
+        await using var cmd = new NpgsqlCommand("SELECT data FROM data_blobs WHERE hash = $1;", conn);
+        cmd.Parameters.AddWithValue(contentHash);
         await using var reader = await cmd.ExecuteReaderAsync();
-        var layers = new Dictionary<string, System.Text.Json.JsonElement>();
-        while (await reader.ReadAsync())
-        {
-            var layerType = reader.GetString(0);
-            var compressedData = (byte[])reader[1];
-
-            using var input = new MemoryStream(compressedData);
-            using var brotli = new System.IO.Compression.BrotliStream(input, System.IO.Compression.CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            brotli.CopyTo(output);
-            layers[layerType] = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(output.ToArray());
-        }
-
-        if (layers.Count == 0)
+        if (!await reader.ReadAsync())
             return NotFound();
 
-        // Only cache successful responses, 404s for not-yet-scanned builds must not be cached
+        var compressedData = (byte[])reader[0];
         Response.Headers.CacheControl = "public, max-age=31536000";
-        return Ok(layers);
+        Response.Headers.ContentEncoding = "br";
+        return File(compressedData, "application/json");
     }
 
     [HttpGet("tile/{hash}")]

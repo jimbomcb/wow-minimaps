@@ -1052,7 +1052,7 @@ internal class ScanMapsService :
         }
 
         // Push all layer compositions (minimap, maptexture, noliquid) and layer entries unified
-        const int COMPOSITION_BATCH_SIZE = 15;
+        const int COMPOSITION_BATCH_SIZE = 8;
         if (!layerCompositions.IsEmpty)
         {
             _logger.LogInformation("Storing {Count} layer compositions", layerCompositions.Count);
