@@ -21,4 +21,3 @@ internal class TACTKey
 }
 
 #pragma warning restore IDE1006, CS8618
-

@@ -65,15 +65,15 @@ public static class SyncTilesCommand
         {
             tiles.Add(new MinimapTile { hash = await reader.GetFieldValueAsync<ContentHash>(0, cancellationToken) });
         }
-        
+
         logger.LogInformation("Found {Count} tiles in database. Fetching existing tiles from R2...", tiles.Count);
         var existingTiles = await r2Store.GetAllHashesAsync(cancellationToken);
         logger.LogInformation("Found {Count} tiles in R2. Starting sync...", existingTiles.Count);
 
-        var parallelOptions = new ParallelOptions 
-        { 
-            MaxDegreeOfParallelism = 32, 
-            CancellationToken = cancellationToken 
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = 32,
+            CancellationToken = cancellationToken
         };
 
         int processed = 0;
@@ -93,7 +93,7 @@ public static class SyncTilesCommand
                 {
                     var elapsed = stopwatch.Elapsed;
                     var rate = current / elapsed.TotalSeconds;
-                    logger.LogInformation("Processed {Processed}/{Total} ({Percent:F1}%) - Uploaded: {Uploaded}, Skipped: {Skipped}, Missing: {Missing}, Errors: {Errors} - {Rate:F1} tiles/sec", 
+                    logger.LogInformation("Processed {Processed}/{Total} ({Percent:F1}%) - Uploaded: {Uploaded}, Skipped: {Skipped}, Missing: {Missing}, Errors: {Errors} - {Rate:F1} tiles/sec",
                         current, tiles.Count, (double)current / tiles.Count * 100, uploaded, skipped, missing, errors, rate);
                 }
 
@@ -120,7 +120,7 @@ public static class SyncTilesCommand
             }
         });
 
-        logger.LogInformation("Sync complete. Processed: {Processed}, Uploaded: {Uploaded}, Skipped: {Skipped}, Missing: {Missing}, Errors: {Errors}", 
+        logger.LogInformation("Sync complete. Processed: {Processed}, Uploaded: {Uploaded}, Skipped: {Skipped}, Missing: {Missing}, Errors: {Errors}",
             processed, uploaded, skipped, missing, errors);
     }
 }

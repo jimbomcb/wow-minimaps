@@ -68,4 +68,3 @@ internal class ProductScan
 }
 
 #pragma warning restore IDE1006, CS8618
-

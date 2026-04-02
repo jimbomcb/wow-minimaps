@@ -18,4 +18,3 @@ internal class BuildMap
 }
 
 #pragma warning restore IDE1006, CS8618
-

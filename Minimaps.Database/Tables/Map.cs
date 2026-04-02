@@ -65,4 +65,3 @@ internal class Map
 }
 
 #pragma warning restore IDE1006, CS8618
-

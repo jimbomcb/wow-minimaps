@@ -15,4 +15,3 @@ public readonly record struct Version(string Region, string BuildConfig, string 
 /// Name!STRING:0|Path!STRING:0|Hosts!STRING:0|Servers!STRING:0|ConfigPath!STRING:0
 /// </summary>
 public readonly record struct ProductCDN(string Name, string Path, string Hosts, string Servers, string ConfigPath);
-
