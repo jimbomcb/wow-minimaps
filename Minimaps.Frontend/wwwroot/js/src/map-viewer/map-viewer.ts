@@ -15,8 +15,10 @@ import { CoordinateTranslator } from './coordinate-translator.js';
 import { ControlPanel } from './control-panel.js';
 import { ImpassLayer } from './layers/impass-layer.js';
 import { AreaHighlightLayer } from './layers/area-highlight-layer.js';
-import type { ChunkDataDto } from './backend-types.js';
+import { LayerType, isCompositionLayer, isDataLayer, isBaseLayer } from './backend-types.js';
+import type { ImpassDataDto, AreaIdDataDto } from './backend-types.js';
 import { MapDataManager } from './map-data-manager.js';
+import type { LayerData, LoadedMapData } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
 import { DebugPanel } from './debug-panel.js';
 import { FlashOverlay } from './flash-overlay.js';
@@ -129,6 +131,7 @@ export class MapViewer {
 
     private flashOverlay: FlashOverlay;
     private currentComposition: MinimapComposition | null = null;
+    private currentMapData: LoadedMapData | null = null;
     private mapLoadGeneration: number = 0;
     private areaHighlightLayer: AreaHighlightLayer | null = null;
 
@@ -184,6 +187,8 @@ export class MapViewer {
             onMapChange: (mapId) => this.handleMapChange(mapId),
             onVersionChange: (version) => this.handleVersionChange(version),
             onLayerChange: () => this.scheduleRender(),
+            onBaseLayerChange: (lt) => this.setActiveBaseLayer(lt),
+            getAvailableBaseLayers: () => this.getAvailableBaseLayers(),
             onZoneHover: (areaId) => this.handleZoneHover(areaId),
             onZoneClick: (areaId) => this.handleZoneClick(areaId),
         });
@@ -244,46 +249,72 @@ export class MapViewer {
             this.controlPanel.setZones(null);
             this.areaHighlightLayer = null;
 
-            // Add a monochrome parent layer under the actual map data
-            if (mapData.parentComposition && mapData.parentMapId !== null) {
-                this.addTileLayerForComposition(mapData.parentMapId, mapData.parentComposition, {
-                    id: `parent-${mapData.parentMapId}`,
-                    zIndex: -1,
+            // Parent map (monochrome background context)
+            if (mapData.parent) {
+                const parentBase = mapData.parent.layers[mapData.parent.activeBaseLayer];
+                if (parentBase?.composition) {
+                    this.addTileLayerForComposition(mapData.parent.mapId, parentBase.composition, {
+                        id: `parent-${mapData.parent.mapId}`,
+                        zIndex: -1,
+                        residentLodLevel: 4,
+                        monochrome: true,
+                        cdnMissing: parentBase.cdnMissing,
+                    });
+                }
+            }
+
+            // Base layers
+            this.currentMapData = mapData;
+            for (const baseType of [LayerType.Minimap, LayerType.MapTexture]) {
+                const baseData = mapData.layers[baseType];
+                if (!baseData?.composition) continue;
+
+                const isActive = baseType === mapData.activeBaseLayer;
+                this.addTileLayerForComposition(mapId, baseData.composition, {
+                    id: `base-${LayerType[baseType]}`,
+                    visible: isActive,
+                    zIndex: 0,
                     residentLodLevel: 4,
-                    monochrome: true,
-                    debugSkipLODs: [],
+                    cdnMissing: baseData.cdnMissing,
+                });
+
+                if (isActive) {
+                    this.currentComposition = baseData.composition;
+
+                    if (oldComposition) {
+                        // todo: think more about how I want to handle diff flashes
+                        const changes = MinimapComposition.diff(oldComposition, baseData.composition);
+                        if (changes.added.size + changes.modified.size + changes.removed.size > 0) {
+                            this.flashOverlay.clear();
+                            this.flashOverlay.triggerFlash(changes);
+                        }
+                    }
+
+                    if (autoZoom && baseData.composition.bounds) {
+                        this.cameraController.fitToBounds(baseData.composition.bounds, 10);
+                    }
+                }
+            }
+
+            // Overlay composition layers (noliquid etc)
+            for (let i = 0; i < mapData.layers.length; i++) {
+                const layerData = mapData.layers[i];
+                if (!layerData?.composition) continue;
+                const layerType = i as LayerType;
+                if (isBaseLayer(layerType) || !isCompositionLayer(layerType)) continue;
+
+                this.addTileLayerForComposition(mapId, layerData.composition, {
+                    id: `${LayerType[layerType]}-${mapId}`, visible: false, zIndex: 1, opacity: 0.85,
+                    residentLodLevel: 4, cdnMissing: layerData.cdnMissing,
                 });
             }
 
-            // Main map layer
-            this.addTileLayerForComposition(mapId, mapData.composition, {
-                id: 'main',
-                zIndex: 0,
-                residentLodLevel: 4,
-                debugSkipLODs: [],
-            });
-
-            // Composition diff flash
-            this.currentComposition = mapData.composition;
-            if (oldComposition) {
-                const changes = MinimapComposition.diff(oldComposition, mapData.composition);
-                const totalChanges = changes.added.size + changes.modified.size + changes.removed.size;
-                if (totalChanges > 0) {
-                    //console.log(`Flash: ${changes.added.size} added, ${changes.modified.size} modified, ${changes.removed.size} removed`);
-                    this.flashOverlay.clear();
-                    this.flashOverlay.triggerFlash(changes);
-                }
-            }
+            this.loadDataLayers(mapId, mapData, thisGeneration);
 
             this.controlPanel.setCurrentVersion(mapData.version);
             this.controlPanel.setCurrentMap(mapId);
             this.controlPanel.updateLayers();
 
-            if (autoZoom && mapData.composition.bounds) {
-                this.cameraController.fitToBounds(mapData.composition.bounds, 10);
-            }
-
-            // fallback warning if we're snapping to a different version
             if (mapData.isFallback && mapData.fallbackVersion) {
                 this.controlPanel.showVersionFallbackWarning(mapData.requestedVersion, mapData.fallbackVersion);
             } else {
@@ -292,10 +323,6 @@ export class MapViewer {
 
             this.scheduleRender();
             console.log(`Map ${mapId} loaded successfully`);
-
-            // Main layer loaded, stream in any additional layers + chunk data
-            this.loadAdditionalLayers(mapId, mapData.version, thisGeneration);
-            this.loadChunkDataLayers(mapId, mapData.version, thisGeneration);
         } catch (error) {
             if (thisGeneration === this.mapLoadGeneration) {
                 console.error(`Failed to load map ${mapId}:`, error);
@@ -304,97 +331,74 @@ export class MapViewer {
         }
     }
 
-    private async loadAdditionalLayers(mapId: number, version: BuildVersion, generation: number): Promise<void> {
+    private async loadDataLayers(mapId: number, mapData: LoadedMapData, generation: number): Promise<void> {
         try {
-            const layerTypes = await this.mapDataManager.loadLayersForMap(mapId);
+            const impassEntry = mapData.layers[LayerType.Impass];
+            const areaIdEntry = mapData.layers[LayerType.AreaId];
+
+            const [impassData, areaIdData] = await Promise.all([
+                impassEntry ? this.mapDataManager.loadBlob<ImpassDataDto>(impassEntry.hash) : null,
+                areaIdEntry ? this.mapDataManager.loadBlob<AreaIdDataDto>(areaIdEntry.hash) : null,
+            ]);
+
             if (generation !== this.mapLoadGeneration) return;
 
-            for (const layerType of layerTypes) {
-                try {
-                    const composition = await this.mapDataManager.getLayerComposition(mapId, version, layerType);
-                    if (generation !== this.mapLoadGeneration) return;
-                    if (!composition) continue;
-
-                    this.addTileLayerForComposition(mapId, composition, {
-                        id: `${layerType}-${mapId}`,
-                        visible: false,
-                        zIndex: 1,
-                        residentLodLevel: 4,
-                        debugSkipLODs: [],
-                    });
-                } catch {
-                    console.warn(`Failed to load layer ${layerType} for map ${mapId}`);
-                }
-            }
-
-            if (layerTypes.length > 0) {
-                this.controlPanel.updateLayers();
-                this.scheduleRender();
-            }
-        } catch (error) {
-            console.warn(`Failed to load additional layers for map ${mapId}:`, error);
-        }
-    }
-
-    private async loadChunkDataLayers(mapId: number, version: BuildVersion, generation: number): Promise<void> {
-        try {
-            const response = await fetch(`/data/chunks/v1/${mapId}/${version}`);
-            if (!response.ok || generation !== this.mapLoadGeneration)
-                return;
-
-            const data = (await response.json()) as ChunkDataDto;
-            if (generation !== this.mapLoadGeneration)
-                return;
-
-            if (data.impass) {
-                const impassLayer = new ImpassLayer({
-                    id: `impass-${mapId}`,
-                    visible: true,
-                    zIndex: 10,
-                    opacity: 0.8,
-                });
-                impassLayer.setData(data.impass);
+            if (impassData) {
+                const impassLayer = new ImpassLayer({ id: `impass-${mapId}`, visible: true, zIndex: 10, opacity: 0.8 });
+                impassLayer.setData(impassData);
                 this.layerManager.addLayer(impassLayer);
             }
 
-            if (data.areaid) {
+            if (areaIdData) {
                 const highlightLayer = new AreaHighlightLayer(`area-highlight-${mapId}`);
-                highlightLayer.setData(data.areaid);
+                highlightLayer.setData(areaIdData);
                 this.areaHighlightLayer = highlightLayer;
                 this.layerManager.addLayer(highlightLayer);
+                this.controlPanel.setZones(areaIdData);
             }
 
-            this.controlPanel.setZones(data.areaid ?? null);
             this.controlPanel.updateLayers();
             this.scheduleRender();
         } catch (error) {
-            // chunk data is optional, don't log 404s
-            if (error instanceof Error && !error.message.includes('404'))
-                console.warn(`Failed to load chunk data for map ${mapId}:`, error);
+            console.warn(`Failed to load data layers for map ${mapId}:`, error);
         }
     }
 
     private addTileLayerForComposition(
         mapId: number,
         composition: MinimapComposition,
-        options: Omit<Partial<TileLayerOptions>, 'composition' | 'tileStreamer'> = {}
+        options: Partial<Omit<TileLayerOptions, 'composition' | 'tileStreamer'>> = {}
     ): TileLayer {
         const layer = new TileLayerImpl({
-            id: options.id || `layer-${mapId}-${Date.now()}`,
             composition,
             tileStreamer: this.tileStreamer,
-            visible: options.visible ?? true,
-            opacity: options.opacity ?? 1.0,
-            zIndex: options.zIndex ?? 0,
-            lodLevel: options.lodLevel ?? 0,
-            residentLodLevel: options.residentLodLevel ?? 5,
-            monochrome: options.monochrome ?? false,
-            ...(options.debugSkipLODs && { debugSkipLODs: options.debugSkipLODs }),
+            id: options.id ?? `layer-${mapId}-${Date.now()}`,
+            ...options,
         });
 
         this.layerManager.addLayer(layer);
         this.scheduleRender();
         return layer;
+    }
+
+    public setActiveBaseLayer(layerType: LayerType): void {
+        if (!isBaseLayer(layerType)) return;
+
+        for (const baseType of [LayerType.Minimap, LayerType.MapTexture]) {
+            const layer = this.layerManager.getLayer(`base-${LayerType[baseType]}`);
+            if (layer) {
+                layer.visible = baseType === layerType;
+            }
+        }
+
+        this.controlPanel.updateLayers();
+        this.scheduleRender();
+    }
+
+    public getAvailableBaseLayers(): LayerType[] {
+        if (!this.currentMapData) return [];
+        return [LayerType.Minimap, LayerType.MapTexture]
+            .filter(lt => this.currentMapData!.layers[lt]?.composition !== null && this.currentMapData!.layers[lt]?.composition !== undefined);
     }
 
     private handleMapChange(mapId: number): void {

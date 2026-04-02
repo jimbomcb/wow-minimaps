@@ -82,8 +82,14 @@ export class BuildVersion {
         return BuildVersion.fromComponents(expansion, major, minor, build)._value;
     }
 
+    /** Parse a dotted version string like "12.0.5.66741" */
     static parse(version: string): BuildVersion {
         return new BuildVersion(version);
+    }
+
+    /** Construct from an encoded int64 string (as returned by the API) like "54043195548172345" */
+    static fromEncodedString(encodedInt64: string): BuildVersion {
+        return new BuildVersion(BigInt(encodedInt64));
     }
 
     static tryParse(version: string): BuildVersion | null {

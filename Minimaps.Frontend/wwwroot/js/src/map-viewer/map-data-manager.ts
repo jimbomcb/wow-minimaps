@@ -1,6 +1,7 @@
 import { MinimapComposition } from './types.js';
 import { BuildVersion } from './build-version.js';
-import type { MapVersionsDto, MapVersionEntryDto, CompositionDto, MapListDto, MapLayersDto, MapLayerEntryDto } from './backend-types.js';
+import { LayerType, LAYER_TYPE_COUNT, isCompositionLayer, isBaseLayer } from './backend-types.js';
+import type { MapVersionsDto, VersionEntryDto, CompositionDto, MapListDto } from './backend-types.js';
 
 export interface MapInfo {
     mapId: number;
@@ -10,50 +11,50 @@ export interface MapInfo {
     first: BuildVersion;
     last: BuildVersion;
     parent: number | null;
-    tileCount: number;
+    wdtTileCount: number;
     versionCount: number;
     uniqueCount: number;
 }
 
 export interface MapVersionInfo {
     version: BuildVersion;
-    compositionHash: string;
+    layers: (string | null)[]; // hashes indexed by LayerType
+    cdnMissing: (string[] | null)[] | undefined;
     products: string[];
+}
+
+export interface LayerData {
+    hash: string;
+    composition: MinimapComposition | null;
+    cdnMissing: Set<string> | null;
 }
 
 export interface LoadedMapData {
     mapId: number;
     version: BuildVersion;
     requestedVersion: BuildVersion | 'latest';
-    composition: MinimapComposition;
-    compositionHash: string;
-    parentMapId: number | null;
-    parentComposition?: MinimapComposition;
-    parentCompositionHash?: string;
+    layers: (LayerData | null)[];
+    activeBaseLayer: LayerType;
+    parent: LoadedMapData | null;
     isFallback: boolean;
-    fallbackVersion: BuildVersion | undefined;
+    fallbackVersion: BuildVersion | null;
 }
 
 export class MapDataManager {
     private mapsCache: Map<number, MapInfo> | null = null;
     private mapsLoadingPromise: Promise<void> | null = null;
 
-    private versionCache = new Map<number, Map<string, MapVersionEntryDto>>(); // mapId -> (encodedVersionString -> version entry)
+    private versionCache = new Map<number, Map<string, VersionEntryDto>>(); // mapId -> (encodedVersionString -> version entry)
     private versionLoadingPromises = new Map<number, Promise<void>>();
 
     private compositionCache = new Map<string, MinimapComposition>(); // comp hash -> composition
     private compositionLoadingPromises = new Map<string, Promise<MinimapComposition>>();
 
-    // Layer data: mapId -> (layerType -> (encodedVersion -> { hash, partial }))
-    private layerCache = new Map<number, Map<string, Map<string, { hash: string; partial: boolean }>>>();
-    private layerLoadingPromises = new Map<number, Promise<void>>();
-
     constructor() {}
 
     async loadMaps(): Promise<MapInfo[]> {
-        if (this.mapsCache) {
+        if (this.mapsCache)
             return Array.from(this.mapsCache.values());
-        }
 
         if (this.mapsLoadingPromise) {
             await this.mapsLoadingPromise;
@@ -63,47 +64,38 @@ export class MapDataManager {
         this.mapsLoadingPromise = this.fetchMaps();
         await this.mapsLoadingPromise;
         this.mapsLoadingPromise = null;
-
         return Array.from(this.mapsCache!.values());
     }
 
     private async fetchMaps(): Promise<void> {
-        try {
-            const response = await fetch('/data/maps');
-            if (!response.ok) {
-                throw new Error(`Failed to load maps: ${response.statusText}`);
+        const response = await fetch('/data/maps');
+        if (!response.ok)
+            throw new Error(`Failed to load maps: ${response.statusText}`);
+
+        const data = (await response.json()) as MapListDto;
+        this.mapsCache = new Map();
+
+        for (const map of data.maps) {
+            const nameHistoryMap = new Map<BuildVersion, string>();
+            for (const [encodedStr, name] of Object.entries(map.nameHistory)) {
+                nameHistoryMap.set(BuildVersion.fromEncodedString(encodedStr), name);
             }
 
-            const data = (await response.json()) as MapListDto;
-            this.mapsCache = new Map();
-
-            for (const map of data.maps) {
-                const nameHistoryMap = new Map<BuildVersion, string>();
-                for (const [encodedStr, name] of Object.entries(map.nameHistory)) {
-                    const version = new BuildVersion(BigInt(encodedStr));
-                    nameHistoryMap.set(version, name);
-                }
-
-                const mapInfo: MapInfo = {
-                    mapId: map.mapId,
-                    directory: map.directory,
-                    name: map.name,
-                    nameHistory: nameHistoryMap,
-                    first: new BuildVersion(BigInt(map.first)),
-                    last: new BuildVersion(BigInt(map.last)),
-                    parent: map.parent,
-                    tileCount: map.tileCount,
-                    versionCount: map.versionCount,
-                    uniqueCount: map.uniqueCount,
-                };
-                this.mapsCache.set(mapInfo.mapId, mapInfo);
-            }
-
-            console.log(`Loaded ${this.mapsCache.size} maps from backend`);
-        } catch (error) {
-            console.error('Failed to load maps:', error);
-            throw error;
+            this.mapsCache.set(map.mapId, {
+                mapId: map.mapId,
+                directory: map.directory,
+                name: map.name,
+                nameHistory: nameHistoryMap,
+                first: BuildVersion.fromEncodedString(map.first),
+                last: BuildVersion.fromEncodedString(map.last),
+                parent: map.parent ?? null,
+                wdtTileCount: map.wdtTileCount,
+                versionCount: map.versionCount,
+                uniqueCount: map.uniqueCount,
+            });
         }
+
+        console.log(`Loaded ${this.mapsCache.size} maps from backend`);
     }
 
     getMap(mapId: number): MapInfo | null {
@@ -111,117 +103,12 @@ export class MapDataManager {
     }
 
     getAllMaps(): MapInfo[] {
-        if (!this.mapsCache) {
-            throw new Error('Maps not loaded yet');
-        }
+        if (!this.mapsCache) throw new Error('Maps not loaded yet');
         return Array.from(this.mapsCache.values());
     }
 
-    /**
-     * Load the map composition for a specific map ID and version.
-     * Also load the parent map composition if one exists.
-     * Return both main and parent compositions.
-     * If requested version doesn't exist find the closest available version.
-     */
-    async loadMapData(mapId: number, version: BuildVersion | 'latest'): Promise<LoadedMapData> {
-        if (!this.mapsCache) {
-            await this.loadMaps();
-        }
-
-        const mapInfo = this.mapsCache!.get(mapId);
-        if (!mapInfo) {
-            throw new Error(`Map ${mapId} not found`);
-        }
-
-        await this.loadVersionsForMap(mapId);
-        const versionMap = this.versionCache.get(mapId)!;
-
-        if (versionMap.size === 0) {
-            throw new Error(`Map ${mapId} has no available versions in the database`);
-        }
-
-        let compositionHash: string;
-        let resolvedVersion: BuildVersion;
-        let isFallback = false;
-        let fallbackVersion: BuildVersion | undefined;
-
-        if (version === 'latest') {
-            const sortedKeys = Array.from(versionMap.keys()).sort((a, b) => {
-                const aBig = BigInt(a);
-                const bBig = BigInt(b);
-                return aBig < bBig ? 1 : aBig > bBig ? -1 : 0; // Descending
-            });
-            const latestKey = sortedKeys[0];
-            if (!latestKey) {
-                throw new Error(`Failed to determine latest version for map ${mapId}`);
-            }
-
-            const latestEntry = versionMap.get(latestKey);
-            if (!latestEntry) {
-                throw new Error(`Composition hash not found for latest version of map ${mapId}`);
-            }
-
-            compositionHash = latestEntry.compositionHash;
-            resolvedVersion = new BuildVersion(BigInt(latestKey));
-        } else {
-            const versionKey = version.encodedValueString;
-            const entry = versionMap.get(versionKey);
-
-            if (!entry) {
-                // Version doesn't exist for this map, find closest
-                console.log(
-                    `Map ${mapId} not found in version ${version.toString()}, searching for closest version...`
-                );
-                const closest = this.findClosestVersion(version, versionMap);
-                if (closest) {
-                    compositionHash = closest.hash;
-                    resolvedVersion = closest.version;
-                    isFallback = true;
-                    fallbackVersion = closest.version;
-                    console.warn(
-                        `Map ${mapId} not available in version ${version.toString()}, using closest: ${fallbackVersion.toString()}`
-                    );
-                } else {
-                    throw new Error(`No suitable version found for map ${mapId} near ${version.toString()}`);
-                }
-            } else {
-                compositionHash = entry.compositionHash;
-                resolvedVersion = version;
-            }
-        }
-
-        const composition = await this.loadComposition(compositionHash);
-
-        const result: LoadedMapData = {
-            mapId,
-            version: resolvedVersion,
-            requestedVersion: version,
-            composition,
-            compositionHash,
-            parentMapId: mapInfo.parent,
-            isFallback,
-            fallbackVersion,
-        };
-
-        // If there's a parent map, load its composition too
-        if (mapInfo.parent !== null) {
-            try {
-                const parentData = await this.loadMapData(mapInfo.parent, version);
-                result.parentComposition = parentData.composition;
-                result.parentCompositionHash = parentData.compositionHash;
-                console.log(`Loaded parent map ${mapInfo.parent} for map ${mapId}`);
-            } catch (error) {
-                console.warn(`Failed to load parent map ${mapInfo.parent} for map ${mapId}:`, error);
-            }
-        }
-
-        return result;
-    }
-
     private async loadVersionsForMap(mapId: number): Promise<void> {
-        if (this.versionCache.has(mapId)) {
-            return;
-        }
+        if (this.versionCache.has(mapId)) return;
 
         if (this.versionLoadingPromises.has(mapId)) {
             await this.versionLoadingPromises.get(mapId);
@@ -230,66 +117,152 @@ export class MapDataManager {
 
         const loadPromise = this.fetchVersionsForMap(mapId);
         this.versionLoadingPromises.set(mapId, loadPromise);
-
-        try {
-            await loadPromise;
-        } finally {
-            this.versionLoadingPromises.delete(mapId);
-        }
+        try { await loadPromise; } finally { this.versionLoadingPromises.delete(mapId); }
     }
 
     private async fetchVersionsForMap(mapId: number): Promise<void> {
-        try {
-            const response = await fetch(`/data/versions/${mapId}`);
-            if (!response.ok) {
-                throw new Error(`Failed to load map versions: ${response.statusText}`);
-            }
+        const response = await fetch(`/data/versions/${mapId}`);
+        if (!response.ok) throw new Error(`Failed to load map versions: ${response.statusText}`);
 
-            const data = (await response.json()) as MapVersionsDto;
-
-            const versionMap = new Map<string, MapVersionEntryDto>();
-            for (const [encodedStr, entry] of Object.entries(data.versions)) {
-                versionMap.set(encodedStr, entry);
-            }
-
-            this.versionCache.set(mapId, versionMap);
-            console.log(`Loaded ${versionMap.size} versions for map ${mapId}`);
-        } catch (error) {
-            console.error(`Failed to load versions for map ${mapId}:`, error);
-            throw error;
+        const data = (await response.json()) as MapVersionsDto;
+        const versionMap = new Map<string, VersionEntryDto>();
+        for (const [encodedStr, entry] of Object.entries(data.versions)) {
+            versionMap.set(encodedStr, entry);
         }
+
+        this.versionCache.set(mapId, versionMap);
+        console.log(`Loaded ${versionMap.size} versions for map ${mapId}`);
     }
 
     async getVersionsForMap(mapId: number): Promise<MapVersionInfo[]> {
         await this.loadVersionsForMap(mapId);
         const entryMap = this.versionCache.get(mapId);
-        if (!entryMap) {
-            return [];
-        }
+        if (!entryMap) return [];
 
         const result: MapVersionInfo[] = [];
         for (const [encodedStr, entry] of entryMap.entries()) {
             result.push({
-                version: new BuildVersion(BigInt(encodedStr)),
-                compositionHash: entry.compositionHash,
-                products: entry.products,
+                version: BuildVersion.fromEncodedString(encodedStr),
+                layers: entry.l,
+                cdnMissing: entry.m,
+                products: entry.p,
             });
         }
         return result;
     }
 
-    private async loadComposition(hash: string): Promise<MinimapComposition> {
-        if (this.compositionCache.has(hash)) {
-            return this.compositionCache.get(hash)!;
+    async loadMapData(mapId: number, version: BuildVersion | 'latest'): Promise<LoadedMapData> {
+        if (!this.mapsCache) await this.loadMaps();
+
+        const mapInfo = this.mapsCache!.get(mapId);
+        if (!mapInfo) throw new Error(`Map ${mapId} not found`);
+
+        await this.loadVersionsForMap(mapId);
+        const versionMap = this.versionCache.get(mapId)!;
+        if (versionMap.size === 0) throw new Error(`Map ${mapId} has no available versions`);
+
+        // resolve latest vs sspecific versions
+        let resolvedVersion: BuildVersion;
+        let versionEntry: VersionEntryDto;
+        let isFallback = false;
+        let fallbackVersion: BuildVersion | null = null;
+
+        if (version === 'latest') {
+            const sorted = Array.from(versionMap.keys()).sort((a, b) => {
+                const aBig = BigInt(a);
+                const bBig = BigInt(b);
+                return aBig < bBig ? 1 : aBig > bBig ? -1 : 0;
+            });
+            const latestKey = sorted[0]!;
+            resolvedVersion = BuildVersion.fromEncodedString(latestKey);
+            versionEntry = versionMap.get(latestKey)!;
+        } else {
+            const entry = versionMap.get(version.encodedValueString);
+            if (entry) {
+                resolvedVersion = version;
+                versionEntry = entry;
+            } else {
+                const closest = this.findClosestVersion(version, versionMap);
+                if (!closest) throw new Error(`No suitable version for map ${mapId} near ${version}`);
+                resolvedVersion = closest.version;
+                versionEntry = closest.entry;
+                isFallback = true;
+                fallbackVersion = closest.version;
+                console.warn(`Map ${mapId} not available in version ${version}, using closest: ${fallbackVersion}`);
+            }
         }
 
-        if (this.compositionLoadingPromises.has(hash)) {
-            return await this.compositionLoadingPromises.get(hash)!;
+        const layers = await this.loadLayerData(versionEntry); // TODO: Only load relevant composition
+        const activeBaseLayer = this.pickBaseLayer(layers);
+
+        const result: LoadedMapData = {
+            mapId,
+            version: resolvedVersion,
+            requestedVersion: version,
+            layers,
+            activeBaseLayer,
+            parent: null,
+            isFallback,
+            fallbackVersion,
+        };
+
+        if (mapInfo.parent !== null) {
+            try {
+                result.parent = await this.loadMapData(mapInfo.parent, version);
+            } catch (error) {
+                console.warn(`Failed to load parent map ${mapInfo.parent}:`, error);
+            }
         }
+
+        return result;
+    }
+
+    private async loadLayerData(entry: VersionEntryDto): Promise<(LayerData | null)[]> {
+        // TODO: Got this working but honestly rethinking it, I don't like that
+        // we're doing an extra request for a layer we might not use, ideally we
+        // ONLY issue the request for the relevant base layer & persist across map nav
+        const layers: (LayerData | null)[] = new Array(LAYER_TYPE_COUNT).fill(null);
+        const loadPromises: Promise<void>[] = [];
+
+        for (let i = 0; i < LAYER_TYPE_COUNT; i++) {
+            const hash = entry.l[i];
+            if (!hash) continue;
+
+            const layerType = i as LayerType;
+            const cdnMissingHashes = entry.m?.[i];
+            const cdnMissing = cdnMissingHashes ? new Set(cdnMissingHashes) : null;
+
+            if (isCompositionLayer(layerType)) {
+                loadPromises.push(
+                    this.loadComposition(hash).then(composition => {
+                        layers[i] = { hash, composition, cdnMissing };
+                    })
+                );
+            } else {
+                // Data layers just store the hash, blob fetched on demand
+                layers[i] = { hash, composition: null, cdnMissing };
+            }
+        }
+
+        await Promise.all(loadPromises);
+        return layers;
+    }
+
+    private pickBaseLayer(layers: (LayerData | null)[]): LayerType {
+        if (layers[LayerType.Minimap]) return LayerType.Minimap;
+        if (layers[LayerType.MapTexture]) return LayerType.MapTexture;
+        return LayerType.Minimap; // shouldn't happen, but default
+    }
+
+    private async loadComposition(hash: string): Promise<MinimapComposition> {
+        if (this.compositionCache.has(hash))
+            return this.compositionCache.get(hash)!;
+
+        if (this.compositionLoadingPromises.has(hash))
+            await this.compositionLoadingPromises.get(hash)!;
 
         const loadPromise = this.fetchComposition(hash);
         this.compositionLoadingPromises.set(hash, loadPromise);
-
         try {
             const composition = await loadPromise;
             this.compositionCache.set(hash, composition);
@@ -300,87 +273,18 @@ export class MapDataManager {
     }
 
     private async fetchComposition(hash: string): Promise<MinimapComposition> {
-        try {
-            const response = await fetch(`/data/comp/${hash}`);
-            if (!response.ok) {
-                throw new Error(`Failed to load composition: ${response.statusText}`);
-            }
-
-            const data = (await response.json()) as CompositionDto;
-            return MinimapComposition.fromData(data);
-        } catch (error) {
-            console.error(`Failed to load composition ${hash}:`, error);
-            throw error;
-        }
+        const response = await fetch(`/data/comp/${hash}`);
+        if (!response.ok)
+            throw new Error(`Failed to load composition: ${response.statusText}`);
+        const data = (await response.json()) as CompositionDto;
+        return MinimapComposition.fromData(data);
     }
 
-    /**
-     * Load available layers for a map.
-     * Returns layer types that have data.
-     */
-    async loadLayersForMap(mapId: number): Promise<string[]> {
-        if (!this.layerCache.has(mapId)) {
-            if (!this.layerLoadingPromises.has(mapId)) {
-                const promise = this.fetchLayersForMap(mapId);
-                this.layerLoadingPromises.set(mapId, promise);
-                try { await promise; } finally { this.layerLoadingPromises.delete(mapId); }
-            } else {
-                await this.layerLoadingPromises.get(mapId);
-            }
-        }
-        return Array.from(this.layerCache.get(mapId)?.keys() ?? []);
-    }
-
-    private async fetchLayersForMap(mapId: number): Promise<void> {
-        try {
-            const response = await fetch(`/data/layers/${mapId}`);
-            if (!response.ok) return;
-
-            const data = (await response.json()) as MapLayersDto;
-            const layerMap = new Map<string, Map<string, { hash: string; partial: boolean }>>();
-            for (const [layerType, versions] of Object.entries(data.layers)) {
-                const versionMap = new Map<string, { hash: string; partial: boolean }>();
-                for (const [encodedVer, entry] of Object.entries(versions)) {
-                    versionMap.set(encodedVer, { hash: entry.compositionHash, partial: entry.partial });
-                }
-                if (versionMap.size > 0)
-                    layerMap.set(layerType, versionMap);
-            }
-            this.layerCache.set(mapId, layerMap);
-        } catch {
-            this.layerCache.set(mapId, new Map());
-        }
-    }
-
-    /**
-     * Get a layer composition for a specific map, version, and layer type.
-     */
-    async getLayerComposition(mapId: number, version: BuildVersion, layerType: string): Promise<MinimapComposition | null> {
-        await this.loadLayersForMap(mapId);
-        const layerMap = this.layerCache.get(mapId);
-        if (!layerMap) return null;
-
-        const versionMap = layerMap.get(layerType);
-        if (!versionMap || versionMap.size === 0) return null;
-
-        const entry = versionMap.get(version.encodedValueString);
-        if (!entry)
-            return null;
-
-        return await this.loadComposition(entry.hash);
-    }
-
-    isLayerPartial(mapId: number, version: BuildVersion, layerType: string): boolean {
-        const layerMap = this.layerCache.get(mapId);
-        if (!layerMap)
-            return false;
-
-        const versionMap = layerMap.get(layerType);
-        if (!versionMap)
-            return false;
-
-        const entry = versionMap.get(version.encodedValueString);
-        return entry?.partial ?? false;
+    async loadBlob<T>(hash: string): Promise<T> {
+        const response = await fetch(`/data/blob/${hash}`);
+        if (!response.ok)
+            throw new Error(`Failed to load blob ${hash}: ${response.statusText}`);
+        return (await response.json()) as T;
     }
 
     clearCache(): void {
@@ -390,36 +294,35 @@ export class MapDataManager {
         this.versionLoadingPromises.clear();
         this.compositionCache.clear();
         this.compositionLoadingPromises.clear();
-        this.layerCache.clear();
-        this.layerLoadingPromises.clear();
     }
 
     private findClosestVersion(
         requestedVersion: BuildVersion,
-        versionMap: Map<string, MapVersionEntryDto>
-    ): { version: BuildVersion; hash: string } | null {
+        versionMap: Map<string, VersionEntryDto>
+    ): { version: BuildVersion; entry: VersionEntryDto } | null {
         if (versionMap.size === 0) return null;
 
         const requestedValue = requestedVersion.encodedValue;
-        const versions = Array.from(versionMap.entries()).map(([encodedStr, entry]) => {
-            const version = new BuildVersion(BigInt(encodedStr));
-            return {
-                version,
-                hash: entry.compositionHash,
-                distance: this.calculateVersionDistance(requestedValue, version.encodedValue),
-            };
-        });
+        let bestVersion: BuildVersion | null = null;
+        let bestEntry: VersionEntryDto | null = null;
+        let bestDistance = Infinity;
 
-        versions.sort((a, b) => a.distance - b.distance);
+        for (const [encodedStr, entry] of versionMap.entries()) {
+            const version = BuildVersion.fromEncodedString(encodedStr);
+            const diff = requestedValue > version.encodedValue
+                ? requestedValue - version.encodedValue
+                : version.encodedValue - requestedValue;
+            // small penalty when it's a newer than requested, so we prefer the older of two equidistant
+            const penalty = version.encodedValue > requestedValue ? 0.1 : 0;
+            const distance = Number(diff) + penalty;
 
-        const closest = versions[0];
-        return closest ? { version: closest.version, hash: closest.hash } : null;
-    }
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestVersion = version;
+                bestEntry = entry;
+            }
+        }
 
-    private calculateVersionDistance(requested: bigint, candidate: bigint): number {
-        const diff = requested > candidate ? requested - candidate : candidate - requested;
-        // small penalty when it's a newer than requested, so we prefer the older of two equidistant
-        const penalty = candidate > requested ? 0.1 : 0;
-        return Number(diff) + penalty;
+        return bestVersion && bestEntry ? { version: bestVersion, entry: bestEntry } : null;
     }
 }

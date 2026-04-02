@@ -3,6 +3,7 @@ import type { LayerManager } from './layer-manager.js';
 import type { TileLayer } from './layers/layers.js';
 import { isTileLayer } from './layers/layers.js';
 import { BuildVersion } from './build-version.js';
+import { LayerType } from './backend-types.js';
 import type { AreaIdDataDto } from './backend-types.js';
 
 interface AreaNode {
@@ -17,7 +18,8 @@ interface AreaNode {
 export interface VersionInfo {
     version: BuildVersion;
     displayName: string;
-    compositionHash: string;
+    
+    layers: (string | null)[]; // Hash of each layer, indexed by LayerType
     products: string[];
 }
 
@@ -40,6 +42,8 @@ export interface ControlPanelOptions {
     onMapChange: (mapId: number) => void;
     onVersionChange: (version: BuildVersion | 'latest') => void;
     onLayerChange: () => void;
+    onBaseLayerChange: (layerType: LayerType) => void;
+    getAvailableBaseLayers: () => LayerType[];
     onZoneHover: (areaId: number | null) => void;
     onZoneClick: (areaId: number) => void;
 }
@@ -52,6 +56,8 @@ export class ControlPanel {
     private onMapChange: (mapId: number) => void;
     private onVersionChange: (version: BuildVersion | 'latest') => void;
     private onLayerChange: () => void;
+    private onBaseLayerChange: (layerType: LayerType) => void;
+    private getAvailableBaseLayers: () => LayerType[];
     private onZoneHover: (areaId: number | null) => void;
     private onZoneClick: (areaId: number) => void;
 
@@ -95,7 +101,7 @@ export class ControlPanel {
     private readonly MAP_THROTTLE_MS = 50;
 
     // Cached version groups (rebuilt when availableVersions changes)
-    private versionGroups: { hash: string; versions: VersionInfo[] }[] = [];
+    private versionGroups: { layers: (string | null)[]; versions: VersionInfo[] }[] = [];
 
 
     constructor(options: ControlPanelOptions) {
@@ -106,6 +112,8 @@ export class ControlPanel {
         this.onMapChange = options.onMapChange;
         this.onVersionChange = options.onVersionChange;
         this.onLayerChange = options.onLayerChange;
+        this.onBaseLayerChange = options.onBaseLayerChange;
+        this.getAvailableBaseLayers = options.getAvailableBaseLayers;
         this.onZoneHover = options.onZoneHover;
         this.onZoneClick = options.onZoneClick;
 
@@ -235,11 +243,12 @@ export class ControlPanel {
 
     private rebuildVersionGroups(): void {
         this.versionGroups = [];
-        let currentGroup: { hash: string; versions: VersionInfo[] } | null = null;
+        let currentGroup: { layers: (string | null)[]; versions: VersionInfo[] } | null = null;
 
         for (const version of this.availableVersions) {
-            if (!currentGroup || currentGroup.hash !== version.compositionHash) {
-                currentGroup = { hash: version.compositionHash, versions: [version] };
+            const sameAsGroup = currentGroup && version.layers.every((h, i) => h === currentGroup!.layers[i]);
+            if (!currentGroup || !sameAsGroup) {
+                currentGroup = { layers: version.layers, versions: [version] };
                 this.versionGroups.push(currentGroup);
             } else {
                 currentGroup.versions.push(version);
@@ -579,7 +588,7 @@ export class ControlPanel {
                 e.preventDefault();
                 const encodedStr = item.getAttribute('data-version')!;
                 try {
-                    const version = new BuildVersion(BigInt(encodedStr));
+                    const version = BuildVersion.fromEncodedString(encodedStr);
                     this.selectVersion(version);
                 } catch (error) {
                     console.error('Failed to parse version:', error);
@@ -687,7 +696,7 @@ export class ControlPanel {
     }
 
     // Tabular layout for nav buttons
-    private getGroupDisplayRangeVerticalHtml(group: { hash: string; versions: VersionInfo[] }): string {
+    private getGroupDisplayRangeVerticalHtml(group: { layers: (string | null)[]; versions: VersionInfo[] }): string {
         if (group.versions.length === 1) {
             return this.formatVersionHtml(group.versions[0]!.displayName);
         }
@@ -697,7 +706,7 @@ export class ControlPanel {
     }
 
     // Inline horizontal layout for dropdowns
-    private getGroupDisplayRangeHtml(group: { hash: string; versions: VersionInfo[] }): string {
+    private getGroupDisplayRangeHtml(group: { layers: (string | null)[]; versions: VersionInfo[] }): string {
         if (group.versions.length === 1) {
             return this.formatVersionHtml(group.versions[0]!.displayName);
         }
@@ -871,7 +880,7 @@ export class ControlPanel {
             this.availableVersions = versions.map((v) => ({
                 version: v.version,
                 displayName: v.version.toString(),
-                compositionHash: v.compositionHash,
+                layers: v.layers,
                 products: v.products,
             }));
 
@@ -906,11 +915,11 @@ export class ControlPanel {
             if (layer.transient)
                 continue;
 
-            if (layer.id === 'main') {
-                if (!isTileLayer(layer))
-                    continue;
-                mapId = this.currentMapId;
-            } else if (layer.id.startsWith('parent-')) {
+            // Base layers are handled by the base layer toggle, not the layer list
+            if (layer.id.startsWith('base-'))
+                continue;
+
+            if (layer.id.startsWith('parent-')) {
                 if (!isTileLayer(layer))
                     continue;
                 mapId = parseInt(layer.id.replace('parent-', ''));
@@ -931,9 +940,8 @@ export class ControlPanel {
                 ? (ControlPanel.LAYER_TYPE_LABELS[layerType] ?? layerType)
                 : (mapInfo?.name ?? `Map ${mapId}`);
 
-            const partial = layerType !== null && resolvedVersion !== null
-                ? this.mapDataManager.isLayerPartial(mapId, resolvedVersion, layerType)
-                : false;
+            // TODO: derive from cdn_missing....
+            const partial = false;
 
             this.currentLayers.push({
                 layerId: layer.id,
@@ -960,6 +968,35 @@ export class ControlPanel {
 
     private renderLayersTree(): void {
         this.layersTree.replaceChildren();
+
+        // Base layer toggle (minimap / maptexture)
+        const availableBaseLayers = this.getAvailableBaseLayers();
+        if (availableBaseLayers.length > 1) {
+            const baseToggle = document.createElement('div');
+            baseToggle.className = 'base-layer-toggle';
+
+            const label = document.createElement('span');
+            label.className = 'base-layer-label';
+            label.textContent = 'Base:';
+            baseToggle.appendChild(label);
+
+            for (const lt of availableBaseLayers) {
+                const btn = document.createElement('button');
+                btn.className = 'base-layer-btn';
+                btn.textContent = lt === LayerType.Minimap ? 'Minimap' : 'MapTexture';
+                // Check if this base layer's tile layer is currently visible
+                const tileLayer = this.layerManager.getLayer(`base-${LayerType[lt]}`);
+                if (tileLayer?.visible) {
+                    btn.classList.add('active');
+                }
+                btn.addEventListener('click', () => {
+                    this.onBaseLayerChange(lt);
+                });
+                baseToggle.appendChild(btn);
+            }
+
+            this.layersTree.appendChild(baseToggle);
+        }
 
         if (this.currentLayers.length === 0) {
             const empty = document.createElement('div');

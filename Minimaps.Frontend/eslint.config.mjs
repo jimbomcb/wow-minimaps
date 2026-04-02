@@ -25,6 +25,6 @@ export default tseslint.config(
         }
     },
     {
-        ignores: ['wwwroot/js/dist/**', 'node_modules/**']
+        ignores: ['wwwroot/js/dist/**', 'wwwroot/js/src/**/vendor/**', 'node_modules/**']
     }
 );

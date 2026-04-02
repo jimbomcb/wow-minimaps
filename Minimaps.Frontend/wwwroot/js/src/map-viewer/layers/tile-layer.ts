@@ -3,11 +3,13 @@ import type { MinimapComposition, CameraPosition } from '../types.js';
 import type { TileRequest } from '../tile-streamer.js';
 import type { RenderQueue, TileRenderCommand } from '../render-queue.js';
 import type { TileStreamer } from '../tile-streamer.js';
+import { computeLodHashes, type LodTileEntry } from '../lod-hash.js';
 
 export interface TileLayerOptions {
     id: string;
     composition: MinimapComposition;
     tileStreamer: TileStreamer;
+    cdnMissing?: ReadonlySet<string> | null;
     visible?: boolean;
     opacity?: number;
     zIndex?: number;
@@ -36,6 +38,8 @@ export class TileLayerImpl implements TileLayer {
     private readonly debugSkipLODs: Set<number>;
     private readonly tileStreamer: TileStreamer;
     private residentHashes: string[] = []; // Track hashes we marked as resident
+    // Precomputed LOD data: level -> hash -> coords[]
+    private readonly lodCache: Map<number, Map<string, string[]>>;
 
     public composition: MinimapComposition;
 
@@ -51,17 +55,47 @@ export class TileLayerImpl implements TileLayer {
         this.monochrome = options.monochrome ?? false;
         this.debugSkipLODs = new Set(options.debugSkipLODs ?? []);
 
+        // Precompute LOD1-6 hashes from LOD0 data
+        this.lodCache = this.buildLodCache(options.cdnMissing ?? null);
         this.markResidentTiles();
     }
 
+    private buildLodCache(cdnMissing: ReadonlySet<string> | null): Map<number, Map<string, string[]>> {
+        const cache = new Map<number, Map<string, string[]>>();
+
+        // LOD0 from composition directly
+        const lod0 = this.composition.getLOD0Data();
+        const lod0Map = new Map<string, string[]>();
+        for (const [hash, coords] of lod0) {
+            lod0Map.set(hash, coords);
+        }
+        cache.set(0, lod0Map);
+
+        // LOD1-6 computed from LOD0 hashes
+        const lodHashes = computeLodHashes(this.composition.coordToHash, cdnMissing);
+        for (const [level, tileMap] of lodHashes) {
+            const levelData = new Map<string, string[]>();
+            for (const [coord, entry] of tileMap) {
+                const existing = levelData.get(entry.hash);
+                if (existing) {
+                    existing.push(coord);
+                } else {
+                    levelData.set(entry.hash, [coord]);
+                }
+            }
+            cache.set(level, levelData);
+        }
+
+        return cache;
+    }
+
     private markResidentTiles(): void {
-        const residentData = this.composition.getLODData(this.residentLodLevel);
+        const residentData = this.lodCache.get(this.residentLodLevel);
         if (residentData) {
             for (const [hash] of residentData) {
                 this.tileStreamer.markResident(hash, this.residentLodLevel);
                 this.residentHashes.push(hash);
             }
-            //console.log(`Marked ${residentData.size} resident for layer ${this.id} LOD${this.residentLodLevel}`);
         }
     }
 
@@ -133,9 +167,7 @@ export class TileLayerImpl implements TileLayer {
         bounds: ViewportBounds,
         camera: CameraPosition
     ): TileRequest[] {
-        if (!this.composition) return [];
-
-        const lodData = this.composition.getLODData(lodLevel);
+        const lodData = this.lodCache.get(lodLevel);
         if (!lodData) return [];
         return this.generateTileRequests(lodData, lodLevel, bounds, camera);
     }

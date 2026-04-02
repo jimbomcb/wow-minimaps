@@ -37,14 +37,23 @@ export class MinimapComposition {
         this._missingTilesSet = new Set<string>();
         this._tileSize = data.tileSize ?? 512;
 
-        if (data.m && Array.isArray(data.m)) {
-            for (const coord of data.m) {
+        if (data.missing && Array.isArray(data.missing)) {
+            for (const coord of data.missing) {
                 this._missingTilesSet.add(coord);
             }
         }
 
-        // Build coord -> hash lookup and calculate bounds
-        this._bounds = this.buildCacheAndBounds();
+        // Build coord -> hash lookup from LOD0 tiles
+        const tilesData = data.tiles;
+        if (tilesData) {
+            for (const [hash, coordinates] of Object.entries(tilesData)) {
+                for (const coord of coordinates) {
+                    this._coordToHash.set(coord, hash);
+                }
+            }
+        }
+
+        this._bounds = this.calculateBounds();
     }
 
     static fromData(data: CompositionDto): MinimapComposition {
@@ -71,34 +80,23 @@ export class MinimapComposition {
         return this._tileSize;
     }
 
-    private buildCacheAndBounds(): CompositionBounds | null {
+    /** Get LOD0 tile data as hash -> coordinates map TODO: Cleanup */
+    getLOD0Data(): ReadonlyMap<string, string[]> {
+        const result = new Map<string, string[]>();
+        for (const [hash, coordinates] of Object.entries(this.data.tiles)) {
+            result.set(hash, [...coordinates]);
+        }
+        return result;
+    }
+
+    private calculateBounds(): CompositionBounds | null {
         let minX = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let minY = Number.POSITIVE_INFINITY;
         let maxY = Number.NEGATIVE_INFINITY;
         let foundAny = false;
 
-        const lod0Data = this.data.lod?.['0'];
-        if (!lod0Data) throw new Error('Composition data missing base tile data');
-
-        // Build coord->hash map and calculate bounds in single pass
-        for (const [hash, coordinates] of Object.entries(lod0Data)) {
-            for (const coord of coordinates) {
-                this._coordToHash.set(coord, hash);
-
-                const [x, y] = coord.split(',').map(Number);
-                if (x !== undefined && y !== undefined && !isNaN(x) && !isNaN(y)) {
-                    minX = Math.min(minX, x);
-                    maxX = Math.max(maxX, x + 1);
-                    minY = Math.min(minY, y);
-                    maxY = Math.max(maxY, y + 1);
-                    foundAny = true;
-                }
-            }
-        }
-
-        // Also include missing tiles in bounds
-        for (const coord of this._missingTilesSet) {
+        const updateBounds = (coord: string) => {
             const [x, y] = coord.split(',').map(Number);
             if (x !== undefined && y !== undefined && !isNaN(x) && !isNaN(y)) {
                 minX = Math.min(minX, x);
@@ -107,6 +105,14 @@ export class MinimapComposition {
                 maxY = Math.max(maxY, y + 1);
                 foundAny = true;
             }
+        };
+
+        for (const coord of this._coordToHash.keys()) {
+            updateBounds(coord);
+        }
+
+        for (const coord of this._missingTilesSet) {
+            updateBounds(coord);
         }
 
         if (!foundAny) return null;
@@ -123,19 +129,6 @@ export class MinimapComposition {
             width,
             height,
         };
-    }
-
-    // todo... just a dirty copy of data for now,
-    // but composition is immutable data and we can do better
-    getLODData(lodLevel: number): ReadonlyMap<string, string[]> | null {
-        const lodData = this.data.lod?.[lodLevel.toString()];
-        if (!lodData) return null;
-
-        const result = new Map<string, string[]>();
-        for (const [hash, coordinates] of Object.entries(lodData)) {
-            result.set(hash, [...coordinates]); // copy
-        }
-        return result;
     }
 
     // Compare two compositions, return changed tile coords grouped by change type

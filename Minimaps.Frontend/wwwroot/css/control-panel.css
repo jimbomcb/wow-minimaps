@@ -419,6 +419,40 @@
     gap: 2px;
 }
 
+.map-controls .base-layer-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+}
+
+.map-controls .base-layer-label {
+    font-size: 11px;
+    color: #8a7b6b;
+    margin-right: 2px;
+}
+
+.map-controls .base-layer-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: #0d0a08;
+    border: 1px solid #3d3228;
+    color: #c4b89a;
+    cursor: pointer;
+}
+
+.map-controls .base-layer-btn:hover {
+    background: #1a1510;
+    border-color: #5c4a36;
+}
+
+.map-controls .base-layer-btn.active {
+    background: #2a2218;
+    border-color: #8a7b4b;
+    color: #e8d8b0;
+}
+
 .map-controls .layer-item {
     display: flex;
     align-items: center;
