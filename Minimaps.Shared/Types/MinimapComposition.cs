@@ -79,11 +79,10 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
     }
 
     /// <summary>
-    /// Follows a specific order that will result in a consistent hash from the same tile hashes at the same coordates
-    /// The hash of a stream of ASCII bytes of:
-    /// - For each LOD, for each tile, in ascending x,y order, write the tile X, tile Y, and hash bytes
-    /// - Write the X,Y of each "missing" tile in ascending x,y order
-    /// The hash bytes are returned as a lowercase hex string.
+    /// Deterministic hash from LOD0 tiles + missing tiles only. LOD1-6 are derivable from LOD0 alone.
+    /// - For each LOD0 tile in ascending x,y order: write tile X, tile Y, and 16-byte hash.
+    /// - Then the X,Y of each missing tile in ascending x,y order.
+    /// Missing tiles are referenced by the WDT but the ADT FDID is not part of the build at all (not just unavailable from the CDN).
     /// </summary>
     private byte[] CalculateHash()
     {
@@ -93,21 +92,12 @@ public class MinimapComposition : IEquatable<MinimapComposition?>
         using var writer = new BinaryWriter(stream);
         Span<byte> hash = stackalloc byte[16];
 
-        for (int lod = 0; lod <= MAX_LOD; lod++)
+        foreach (var entry in _lods[0]!.Tiles.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
         {
-            var lodN = _lods[lod];
-            if (lodN == null)
-                continue;
-
-            writer.Write(lod);
-
-            foreach (var entry in lodN.Tiles.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
-            {
-                writer.Write(entry.Key.X);
-                writer.Write(entry.Key.Y);
-                entry.Value.CopyTo(hash);
-                writer.Write(hash);
-            }
+            writer.Write(entry.Key.X);
+            writer.Write(entry.Key.Y);
+            entry.Value.CopyTo(hash);
+            writer.Write(hash);
         }
 
         foreach (var missingTile in _missingTiles.OrderBy(x => x.X).ThenBy(x => x.Y))

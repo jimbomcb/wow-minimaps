@@ -5,13 +5,11 @@ namespace Minimaps.Shared.Types;
 
 /// <summary>
 /// Formats as {
-///     "m": ["0,0", "0,1"], 
-///     "lod": {
-///         "0": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
-///         "1": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
-///     }
+///     "tiles": { "HASH": [ "x1,y1", "x2,y2" ], "HASH2": [ "x3,y3" ] },
+///     "missing": ["0,0", "0,1"],
+///     "tileSize": 512
 /// }
-/// LOD 0 always exists, LOD1 through to LOD6 (1 tile) are optional
+/// "tiles" is LOD0 only. LOD1-6 are derived from LOD0 tile hashes at runtime.
 /// </summary>
 public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 {
@@ -34,13 +32,14 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
 
             var propertyName = reader.GetString();
 
-            if (propertyName == "m")
+            if (propertyName == "missing")
             {
                 ReadMissingTiles(ref reader, missingTiles);
             }
-            else if (propertyName == "lod")
+            else if (propertyName == "tiles")
             {
-                ReadLODs(ref reader, lods);
+                var tiles = ReadLODTiles(ref reader);
+                lods[0] = new CompositionLOD(tiles);
             }
             else if (propertyName == "tileSize")
             {
@@ -89,32 +88,6 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
                 throw new JsonException($"Invalid coordinate values in '{coordString}'");
 
             missingTiles.Add(new TileCoord(x, y));
-        }
-    }
-
-    private static void ReadLODs(ref Utf8JsonReader reader, Dictionary<int, CompositionLOD> lods)
-    {
-        reader.Read();
-        if (reader.TokenType != JsonTokenType.StartObject)
-            throw new JsonException("Expected StartObject token for LODs");
-
-        while (reader.Read())
-        {
-            if (reader.TokenType == JsonTokenType.EndObject)
-                break;
-
-            if (reader.TokenType != JsonTokenType.PropertyName)
-                throw new JsonException("Expected PropertyName token for LOD level");
-
-            var lodLevelString = reader.GetString();
-            if (string.IsNullOrEmpty(lodLevelString))
-                throw new JsonException("LOD level string cannot be null or empty");
-
-            if (!int.TryParse(lodLevelString, out var lodLevel))
-                throw new JsonException($"Invalid LOD level '{lodLevelString}'");
-
-            var tiles = ReadLODTiles(ref reader);
-            lods[lodLevel] = new CompositionLOD(tiles);
         }
     }
 
@@ -175,14 +148,35 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
     {
         writer.WriteStartObject();
 
+        // LOD0 tiles (hash -> [coords]) - LOD1-6 are derived at runtime
+        var lod0 = value.GetLOD(0);
+        if (lod0 != null)
+        {
+            writer.WritePropertyName("tiles");
+            writer.WriteStartObject();
+
+            var hashGroups = lod0.Tiles.GroupBy(x => x.Value).OrderBy(x => x.Key);
+            foreach (var group in hashGroups)
+            {
+                writer.WritePropertyName(group.Key.ToString());
+                writer.WriteStartArray();
+                foreach (var entry in group.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
+                {
+                    writer.WriteStringValue($"{entry.Key.X},{entry.Key.Y}");
+                }
+                writer.WriteEndArray();
+            }
+
+            writer.WriteEndObject();
+        }
+
         if (value.MissingTiles.Count > 0)
         {
-            writer.WritePropertyName("m");
+            writer.WritePropertyName("missing");
             writer.WriteStartArray();
             foreach (var missing in value.MissingTiles.OrderBy(x => x.X).ThenBy(x => x.Y))
             {
-                var missingCoordString = $"{missing.X},{missing.Y}";
-                writer.WriteStringValue(missingCoordString);
+                writer.WriteStringValue($"{missing.X},{missing.Y}");
             }
             writer.WriteEndArray();
         }
@@ -191,39 +185,10 @@ public class MinimapCompositionConverter : JsonConverter<MinimapComposition>
         {
             writer.WriteNumber("tileSize", value.TileSize);
         }
-        else if (value.GetLOD(0)!.Tiles.Count > 0)
+        else if (lod0?.Tiles.Count > 0)
         {
             throw new InvalidOperationException($"MinimapComposition.TileSize must be set before serialization (got {value.TileSize})");
         }
-
-        writer.WritePropertyName("lod");
-        writer.WriteStartObject();
-
-        for (int lod = 0; lod <= MinimapComposition.MAX_LOD; lod++)
-        {
-            var data = value.GetLOD(lod);
-            if (data == null) continue;
-
-            writer.WritePropertyName(lod.ToString());
-            writer.WriteStartObject();
-
-            var hashGroups = data.Tiles.GroupBy(x => x.Value).OrderBy(x => x.Key);
-            foreach (var group in hashGroups)
-            {
-                writer.WritePropertyName(group.Key.ToString());
-                writer.WriteStartArray();
-                foreach (var entry in group.OrderBy(x => x.Key.X).ThenBy(x => x.Key.Y))
-                {
-                    var coordString = $"{entry.Key.X},{entry.Key.Y}";
-                    writer.WriteStringValue(coordString);
-                }
-                writer.WriteEndArray();
-            }
-
-            writer.WriteEndObject();
-        }
-
-        writer.WriteEndObject();
         writer.WriteEndObject();
     }
 }

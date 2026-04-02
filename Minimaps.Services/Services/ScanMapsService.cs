@@ -149,6 +149,13 @@ internal class ScanMapsService :
 
         if (!_serviceConfig.LODLevels.Contains(0))
             throw new Exception("Must always generate the base LOD0");
+
+        // added this as we're moving ahead with the expectation every composition has LOD0-6
+        for (int i = 0; i <= MinimapComposition.MAX_LOD; i++)
+        {
+            if (!_serviceConfig.LODLevels.Contains(i))
+                throw new Exception($"LOD{i} must be enabled - all LOD levels 0-{MinimapComposition.MAX_LOD} are required");
+        }
     }
 
     protected override async Task TickAsync(CancellationToken cancellationToken)
