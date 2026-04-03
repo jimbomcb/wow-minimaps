@@ -26,4 +26,23 @@
 	<ItemGroup>
 		<Using Include="Xunit" />
 	</ItemGroup>
+  
+	<ItemGroup>
+		<None Include="..\Minimaps.Services\native\win-x64\avif.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>avif.dll</Link>
+		</None>
+		<None Include="..\Minimaps.Services\native\win-x64\aom.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>aom.dll</Link>
+		</None>
+		<None Include="..\Minimaps.Services\native\win-x64\libyuv.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>libyuv.dll</Link>
+		</None>
+		<None Include="..\Minimaps.Services\native\win-x64\jpeg62.dll">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Link>jpeg62.dll</Link>
+		</None>
+	</ItemGroup>
 </Project>

@@ -17,4 +17,4 @@ Inspired by [Marlamin](https://github.com/Marlamin)'s [WoWTools.Minimaps](https:
 - Minimaps.Services: Service worker monitoring for builds, scanning and publishing new/modified minimap data.
 
 ### Dependencies
-- https://github.com/strukturag/libheif 1.21.2: `vcpkg install libheif[aom]:x64-windows` Used for AVIF encoding, WebP Lossy (even at Q100) was resulting in noticable checkerboard patterns on solid colour maptextures.
+- https://github.com/AOMediaCodec/libavif 1.4.1: `vcpkg install libavif[aom]:x64-windows` Used for AVIF encoding via direct P/Invoke. WebP Lossy (even at Q100) was resulting in noticeable checkerboard patterns on solid colour maptextures.

@@ -18,7 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="LibHeifSharp" Version="3.2.0" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
@@ -42,19 +41,23 @@
     </None>
   </ItemGroup>
 
-  <!-- libheif + libaom + libde265 built via vcpkg -->
+  <!-- libavif + aom + libyuv + jpeg62 built via vcpkg (vcpkg install libavif[aom]:x64-windows) -->
   <ItemGroup>
-    <None Include="native\win-x64\libheif.dll">
+    <None Include="native\win-x64\avif.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>libheif.dll</Link>
+      <Link>avif.dll</Link>
     </None>
     <None Include="native\win-x64\aom.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Link>aom.dll</Link>
     </None>
-    <None Include="native\win-x64\libde265.dll">
+    <None Include="native\win-x64\libyuv.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>libde265.dll</Link>
+      <Link>libyuv.dll</Link>
+    </None>
+    <None Include="native\win-x64\jpeg62.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>jpeg62.dll</Link>
     </None>
   </ItemGroup>
 

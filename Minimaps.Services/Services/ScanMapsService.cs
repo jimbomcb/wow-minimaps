@@ -2,7 +2,6 @@ using Blizztrack.Framework.TACT;
 using Blizztrack.Framework.TACT.Implementation;
 using DBCD;
 using DBCD.Providers;
-using LibHeifSharp;
 using Minimaps.Services.Blizztrack;
 using Minimaps.Shared;
 using Minimaps.Shared.TileStores;
@@ -402,13 +401,14 @@ internal class ScanMapsService :
     private readonly record struct LODTileInfo(int Level, List<ContentHash?> ComponentHashes);
 
     /// <summary>
-    /// Build a MinimapComposition (LOD0 + LOD pyramid) from a set of LOD0 tiles.
-    /// LOD0 tiles must already be registered in mapLOD0Tiles before calling this.
-    /// LOD component hashes are registered in lodTileComponents as a side effect.
+    /// Build a MinimapComposition (LOD0 + LOD pyramid) from a set of LOD0 tiles. 
+    /// The composition contains ALL resolved tiles )including cdn-missing ones). 
+    /// LOD1-6 hashes are computed using LodHashCalculator which handles cdn_missing sentinel swaps
     /// </summary>
     private MinimapComposition? BuildComposition(
         IEnumerable<(TileCoord Pos, ContentHash Hash, uint FileId)> lod0Tiles,
         HashSet<TileCoord> missingTiles,
+        IReadOnlySet<ContentHash> cdnMissing,
         ConcurrentDictionary<ContentHash, LODTileInfo> lodTileComponents)
     {
         var lod0 = new Dictionary<TileCoord, ContentHash>();
@@ -418,53 +418,23 @@ internal class ScanMapsService :
         if (lod0.Count == 0 && missingTiles.Count == 0)
             return null;
 
-        var lodBuilder = new Dictionary<int, CompositionLOD> { { 0, new(lod0) } };
-        Span<byte> hashBytes = stackalloc byte[16];
+        var lodLevels = LodHashCalculator.ComputeLodHashes(lod0, cdnMissing);
 
-        for (int level = 1; level <= MinimapComposition.MAX_LOD; level++)
+        foreach (var ((level, coord), lodHash) in lodLevels)
         {
-            if (!_serviceConfig.LODLevels.Contains(level))
-                continue;
-
             int factor = 1 << level;
-            var builder = new Dictionary<TileCoord, ContentHash>();
-            for (int lodX = 0; lodX < 64; lodX += factor)
-            {
-                for (int lodY = 0; lodY < 64; lodY += factor)
-                {
-                    var hashList = new List<ContentHash?>(factor * factor);
-                    for (int ty = 0; ty < factor; ty++)
-                        for (int tx = 0; tx < factor; tx++)
-                            hashList.Add(lod0.TryGetValue(new(lodX + tx, lodY + ty), out var sh) ? sh : null);
+            var hashList = new List<ContentHash?>(factor * factor);
+            for (int ty = 0; ty < factor; ty++)
+                for (int tx = 0; tx < factor; tx++)
+                    hashList.Add(lod0.TryGetValue(new(coord.X + tx, coord.Y + ty), out var sh) ? sh : null);
 
-                    if (!hashList.Any(x => x.HasValue))
-                        continue;
-
-                    using var md5 = MD5.Create();
-                    foreach (var h in hashList)
-                    {
-                        if (h.HasValue)
-                            h.Value.CopyTo(hashBytes);
-                        else
-                            hashBytes.Clear();
-                        md5.TransformBlock(hashBytes.ToArray(), 0, 16, null, 0);
-                    }
-                    md5.TransformFinalBlock([], 0, 0);
-
-                    var combinedHash = new ContentHash(md5.Hash!);
-                    builder.Add(new(lodX, lodY), combinedHash);
-
-                    if (!lodTileComponents.TryAdd(combinedHash, new LODTileInfo(level, hashList)))
-                        Debug.Assert(lodTileComponents[combinedHash].ComponentHashes.SequenceEqual(hashList));
-                }
-            }
-
-            if (builder.Count > 0)
-                lodBuilder.Add(level, new(builder));
+            if (!lodTileComponents.TryAdd(lodHash, new LODTileInfo(level, hashList)))
+                Debug.Assert(lodTileComponents[lodHash].ComponentHashes.SequenceEqual(hashList));
         }
 
-        return new MinimapComposition(lodBuilder, missingTiles);
+        return new MinimapComposition(lod0, missingTiles);
     }
+
 
     private async Task<ProcessResult> ProcessBuild(NpgsqlConnection conn, BuildVersion version, BuildProductDto product, CancellationToken cancellation)
     {
@@ -780,8 +750,8 @@ internal class ScanMapsService :
         var cdnMissingTiles = new ConcurrentDictionary<ContentHash, byte>();
         var processingErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var lod0Delta = tileDelta.Intersect(mapLOD0Tiles.Keys);
-        _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
 
+        _logger.LogInformation("Processing {Count} LOD0 tiles", lod0Delta.Count());
         await Parallel.ForEachAsync(lod0Delta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
             async (tileHash, token) =>
@@ -838,7 +808,6 @@ internal class ScanMapsService :
                             tile_size = (short)width,
                         }, token);
 
-                        _logger.LogTrace("Uploaded LOD0 tile {TileHash} FDID {TileFDID} ({Width}x{Height})", tileHash, tileFDID, width, height);
                     }
                 }
                 catch (OperationCanceledException) { throw; }
@@ -852,8 +821,10 @@ internal class ScanMapsService :
         if (processingErrors.Count > 0)
             throw new AggregateException($"{processingErrors.Count} LOD0 tile(s) failed processing", processingErrors.Values);
 
-        // Build layer compositions from available tiles. CDN-missing tiles are excluded from the composition
-        // but tracked as cdn_missing on the layer entry.
+        // Build layer compositions from ALL resolved tiles (including cdn-missing).
+        // The composition is the deterministic set of tile data, cdn_missing tiles have known hashes and are in the composition,
+        // but their image data isn't in the tile store.
+        // The cdn_missing passed during LOD generation tells the frontend which hashes to swap with the sentinel to get the correct partial LOD hash.
         var layerCompositions = new ConcurrentDictionary<(int MapId, LayerType LayerType), MinimapComposition>();
         var cdnMissingHashSet = cdnMissingTiles.Keys.ToHashSet();
         foreach (var entry in layerCandidates)
@@ -861,23 +832,20 @@ internal class ScanMapsService :
             var candidates = entry.Value.Resolved;
             var missing = entry.Value.Missing;
 
-            var availableTiles = cdnMissingHashSet.Count > 0
-                ? [.. candidates.Where(t => !cdnMissingHashSet.Contains(t.Hash))]
-                : candidates;
-
-            if (availableTiles.Count == 0)
+            if (candidates.Count == 0 && missing.Count == 0)
                 continue;
 
-            var comp = BuildComposition(availableTiles, missing, mapLODTileComponents);
+            var comp = BuildComposition(candidates, missing, cdnMissingHashSet, mapLODTileComponents);
             if (comp == null)
                 continue;
 
             layerCompositions.TryAdd(entry.Key, comp);
 
-            if (availableTiles.Count < candidates.Count)
+            var cdnMissingCount = candidates.Count(t => cdnMissingHashSet.Contains(t.Hash));
+            if (cdnMissingCount > 0)
             {
-                _logger.LogInformation("Layer {LayerType} map {MapId}: {Removed} tiles cdn-missing, {Available} available",
-                    entry.Key.LayerType, entry.Key.MapId, candidates.Count - availableTiles.Count, availableTiles.Count);
+                _logger.LogInformation("Layer {LayerType} map {MapId}: {CdnMissing}/{Total} tiles cdn-missing",
+                    entry.Key.LayerType, entry.Key.MapId, cdnMissingCount, candidates.Count);
             }
         }
 
@@ -905,6 +873,7 @@ internal class ScanMapsService :
         // Phase 2 producer: All the LOD0 tiles are in the tile store, store LOD1+
         var lodErrors = new ConcurrentDictionary<ContentHash, Exception>();
         var lodDelta = tileDelta.Intersect(mapLODTileComponents.Keys);
+
         _logger.LogInformation("Processing {Count} LOD1+ tiles", lodDelta.Count());
         await Parallel.ForEachAsync(lodDelta,
             new ParallelOptions { MaxDegreeOfParallelism = _serviceConfig.SingleThread ? 1 : Environment.ProcessorCount, CancellationToken = cancellation },
@@ -923,10 +892,12 @@ internal class ScanMapsService :
 
                 try
                 {
-                    // find the high water mark size and use that as the target resize canvas
+                    // find the high water mark size, skipping cdn-missing tiles (no image data)
                     int tileSize = 64;
                     foreach (var tile in componentHashes.Where(x => x.HasValue))
                     {
+                        if (cdnMissingHashSet.Contains(tile!.Value))
+                            continue;
                         if (!tileHashSize.TryGetValue(tile!.Value, out int hashTileSize))
                             throw new Exception("LOD tile contained hash that wasn't in size map? All LOD0 should exist");
                         tileSize = Math.Max(hashTileSize, tileSize);
@@ -937,8 +908,8 @@ internal class ScanMapsService :
                     for (int i = 0; i < componentHashes.Count; i++)
                     {
                         var componentHash = componentHashes[i];
-                        if (componentHash == null)
-                            continue;
+                        if (componentHash == null || cdnMissingHashSet.Contains(componentHash.Value))
+                            continue; // no tile at position, or cdn-missing (renders as transparent hole)
 
                         await using var sourceStream = await _tileStore.GetAsync(componentHash.Value);
                         if (sourceStream == null)
@@ -1515,52 +1486,27 @@ internal class ScanMapsService :
                 return (ms, "image/webp");
 
             case ImageFormat.AVIF:
-                var w = image.Width;
-                var h = image.Height;
-                var pixelData = new byte[w * h * 4];
-                image.CopyPixelDataTo(pixelData);
-
-                // swap BGRA -> RGBA in place
-                for (int px = 0; px < pixelData.Length; px += 4)
-                    (pixelData[px], pixelData[px + 2]) = (pixelData[px + 2], pixelData[px]);
-
-                // LibHeifSharp doesn't support writing to a stream directly,
-                // so we write to a temp file and read it back.
-                // TODO: Think about how we'll be best handling this, good enough for now
-                using (var ctx = new HeifContext())
-                using (var encoder = ctx.GetEncoder(HeifCompressionFormat.Av1))
-                {
-                    encoder.SetLossyQuality(config.AvifQuality);
-                    encoder.SetParameter("speed", config.AvifEffort);
-
-                    using var heifImage = new HeifImage(w, h, HeifColorspace.Rgb, HeifChroma.InterleavedRgba32);
-                    heifImage.AddPlane(HeifChannel.Interleaved, w, h, 32);
-                    var plane = heifImage.GetPlane(HeifChannel.Interleaved);
-
-                    for (int y = 0; y < h; y++)
-                        Marshal.Copy(pixelData, y * w * 4, plane.Scan0 + y * plane.Stride, w * 4);
-
-                    ctx.EncodeImage(heifImage, encoder);
-
-                    var tmpPath = Path.GetTempFileName();
-                    try
-                    {
-                        ctx.WriteToFile(tmpPath);
-                        using var fs = File.OpenRead(tmpPath);
-                        fs.CopyTo(ms);
-                        ms.Position = 0;
-                    }
-                    finally
-                    {
-                        File.Delete(tmpPath);
-                    }
-                }
-
+                EncodeAvif(image, ms, config);
+                ms.Position = 0;
                 return (ms, "image/avif");
 
             default:
                 throw new ArgumentException($"Unknown image format: {config.Format}");
         }
+    }
+
+    private static void EncodeAvif(Image<Bgra32> image, MemoryStream ms, CompressionConfig config)
+    {
+        var w = image.Width;
+        var h = image.Height;
+        var pixelData = new byte[w * h * 4];
+        image.CopyPixelDataTo(pixelData);
+
+        // swap BGRA -> RGBA in place
+        for (int px = 0; px < pixelData.Length; px += 4)
+            (pixelData[px], pixelData[px + 2]) = (pixelData[px + 2], pixelData[px]);
+
+        AvifEncoder.Encode(pixelData, w, h, config.AvifQuality, config.AvifEffort, ms);
     }
 
     private class BuildProcessException(BuildVersion version, BuildProductDto product, Exception inner) :
