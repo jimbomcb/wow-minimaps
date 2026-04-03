@@ -965,17 +965,27 @@ internal class ScanMapsService :
         var newlyDownloadedHashes = lod0Delta.Except(cdnMissingTiles.Keys).ToArray();
         if (newlyDownloadedHashes.Length > 0)
         {
+            // Any newly encountered hashes get scanned through the map tile cdn_missing list.
+            // If any other older layers referenced tiles that are now being inserted, remove the new hashes
+            // from the cdn_missing and trigger a rebuild.
             await using var sweepCmd = new NpgsqlCommand(@"
-                UPDATE build_map_layers
-                SET cdn_missing = (
-                    SELECT NULLIF(array_agg(h), '{}') FROM unnest(cdn_missing) AS h
-                    WHERE h != ALL($1)
+                WITH updated AS (
+                    UPDATE build_map_layers
+                    SET cdn_missing = (
+                        SELECT NULLIF(array_agg(h), '{}') FROM unnest(cdn_missing) AS h
+                        WHERE h != ALL($1)
+                    )
+                    WHERE cdn_missing IS NOT NULL AND cdn_missing && $1
+                    RETURNING build_id
                 )
-                WHERE cdn_missing IS NOT NULL AND cdn_missing && $1", conn);
+                UPDATE product_scans SET state = 'pending'
+                WHERE product_id IN (SELECT DISTINCT build_id FROM updated)
+                AND product_id != $2", conn);
             sweepCmd.Parameters.AddWithValue(newlyDownloadedHashes);
+            sweepCmd.Parameters.AddWithValue(version.EncodedValue);
             var swept = await sweepCmd.ExecuteNonQueryAsync(cancellation);
             if (swept > 0)
-                _logger.LogInformation("cdn_missing sweep: {Count} layer entries updated from newly downloaded tiles", swept);
+                _logger.LogInformation("cdn_missing sweep: {Count} builds reset to pending for LOD regeneration", swept);
         }
 
         // Tile size finalization for all layer compositions, remove empty ones
@@ -993,9 +1003,17 @@ internal class ScanMapsService :
             var sizeCounts = new Dictionary<int, int>();
             foreach (var tileHash in lod0.Tiles.Values)
             {
+                if (cdnMissingTiles.ContainsKey(tileHash))
+                    continue;
                 if (!tileHashSize.TryGetValue(tileHash, out int tileSize))
-                    throw new Exception("Tile hash missing size info during composition finalization");
+                    throw new Exception($"Tile hash {tileHash} missing size info during composition finalization (map {entry.Key.MapId} layer {entry.Key.LayerType})");
                 sizeCounts[tileSize] = sizeCounts.GetValueOrDefault(tileSize) + 1;
+            }
+
+            if (sizeCounts.Count == 0)
+            {
+                comp.TileSize = 512; // all tiles cdn_missing, assume default
+                continue;
             }
 
             if (sizeCounts.Count > 1)
