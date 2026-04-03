@@ -149,7 +149,7 @@ export class MapDataManager {
         return result;
     }
 
-    async loadMapData(mapId: number, version: BuildVersion | 'latest'): Promise<LoadedMapData> {
+    async loadMapData(mapId: number, version: BuildVersion | 'latest', preferredBaseLayer?: LayerType): Promise<LoadedMapData> {
         if (!this.mapsCache) await this.loadMaps();
 
         const mapInfo = this.mapsCache!.get(mapId);
@@ -191,7 +191,7 @@ export class MapDataManager {
         }
 
         const layers = await this.loadLayerData(versionEntry); // TODO: Only load relevant composition
-        const activeBaseLayer = this.pickBaseLayer(layers);
+        const activeBaseLayer = this.pickBaseLayer(layers, preferredBaseLayer);
 
         const result: LoadedMapData = {
             mapId,
@@ -206,7 +206,7 @@ export class MapDataManager {
 
         if (mapInfo.parent !== null) {
             try {
-                result.parent = await this.loadMapData(mapInfo.parent, version);
+                result.parent = await this.loadMapData(mapInfo.parent, version, preferredBaseLayer);
             } catch (error) {
                 console.warn(`Failed to load parent map ${mapInfo.parent}:`, error);
             }
@@ -246,10 +246,13 @@ export class MapDataManager {
         return layers;
     }
 
-    private pickBaseLayer(layers: (LayerData | null)[]): LayerType {
-        if (layers[LayerType.Minimap]) return LayerType.Minimap;
-        if (layers[LayerType.MapTexture]) return LayerType.MapTexture;
-        return LayerType.Minimap; // shouldn't happen, but default
+    private pickBaseLayer(layers: (LayerData | null)[], preferred?: LayerType): LayerType {
+        // Honour preference if the layer is available
+        if (preferred !== undefined && layers[preferred]?.composition) return preferred;
+        // Fallback order
+        if (layers[LayerType.Minimap]?.composition) return LayerType.Minimap;
+        if (layers[LayerType.MapTexture]?.composition) return LayerType.MapTexture;
+        return LayerType.Minimap;
     }
 
     private async loadComposition(hash: string): Promise<MinimapComposition> {

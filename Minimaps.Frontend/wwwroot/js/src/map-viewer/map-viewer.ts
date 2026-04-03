@@ -22,6 +22,7 @@ import type { LayerData, LoadedMapData } from './map-data-manager.js';
 import { MinimapComposition } from './types.js';
 import { DebugPanel } from './debug-panel.js';
 import { FlashOverlay } from './flash-overlay.js';
+import { ViewerSettings } from './viewer-settings.js';
 
 export async function MapViewerInit() {
     const canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -129,6 +130,7 @@ export class MapViewer {
     private requestedVersion: BuildVersion | 'latest'; // The version originally requested (for URL display)
     private tileBaseUrl: string;
 
+    private settings: ViewerSettings;
     private flashOverlay: FlashOverlay;
     private currentComposition: MinimapComposition | null = null;
     private currentMapData: LoadedMapData | null = null;
@@ -141,6 +143,7 @@ export class MapViewer {
         this.currentVersion = options.version;
         this.requestedVersion = options.version;
         this.tileBaseUrl = options.tileBaseUrl;
+        this.settings = ViewerSettings.fromURL();
 
         // Track if we have initial position from URL
         const hasInitialPosition =
@@ -231,7 +234,7 @@ export class MapViewer {
 
             const oldComposition = showFlash ? this.currentComposition : null;
 
-            const mapData = await this.mapDataManager.loadMapData(mapId, version);
+            const mapData = await this.mapDataManager.loadMapData(mapId, version, this.settings.preferredBaseLayer);
 
             if (thisGeneration !== this.mapLoadGeneration) {
                 console.log(`Map load gen ${thisGeneration} superseded by gen ${this.mapLoadGeneration}, discarding`);
@@ -388,6 +391,10 @@ export class MapViewer {
     public setActiveBaseLayer(layerType: LayerType): void {
         if (!isBaseLayer(layerType)) return;
 
+        // Persist explicit choice
+        this.settings.preferredBaseLayer = layerType;
+        this.updateURL();
+
         for (const baseType of [LayerType.Minimap, LayerType.MapTexture]) {
             const layer = this.layerManager.getLayer(`base-${LayerType[baseType]}`);
             if (layer) {
@@ -491,6 +498,7 @@ export class MapViewer {
         const url = new URL(window.location.href);
         url.pathname = newPath;
         url.search = '';
+        this.settings.applyToURL(url);
         window.history.replaceState({}, '', url.toString());
     }
 
