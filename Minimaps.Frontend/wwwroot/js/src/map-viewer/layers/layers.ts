@@ -7,6 +7,7 @@ export interface RenderContext {
     canvasSize: { width: number; height: number };
     deltaTime: number;
     lodBias: number;
+    gl: WebGL2RenderingContext;
 }
 
 // Base map layer, most layers will be layers of map tiles but we'll also

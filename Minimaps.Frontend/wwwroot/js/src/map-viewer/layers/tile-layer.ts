@@ -26,6 +26,47 @@ interface ViewportBounds {
     maxY: number;
 }
 
+let _placeholderTextures: { buildMissing: WebGLTexture; cdnMissing: WebGLTexture } | null = null;
+
+function getPlaceholderTextures(gl: WebGL2RenderingContext): { buildMissing: WebGLTexture; cdnMissing: WebGLTexture } {
+    if (_placeholderTextures) return _placeholderTextures;
+
+    const size = 16;
+    function createPattern(fillFn: (x: number, y: number) => [number, number, number, number]): WebGLTexture {
+        const pixels = new Uint8Array(size * size * 4);
+        for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+                const [r, g, b, a] = fillFn(x, y);
+                const i = (y * size + x) * 4;
+                pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b; pixels[i + 3] = a;
+            }
+        }
+        const tex = gl.createTexture()!;
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        return tex;
+    }
+
+    _placeholderTextures = {
+        // crosshatch out tiles that are build missing: Referenced by the WDT, but the tile was not part of the build/is encrypted.
+        buildMissing: createPattern((x, y) => {
+            const onDiag = (x + y) % 4 === 0 || (x - y + 8) % 4 === 0;
+            return onDiag ? [50, 50, 50, 200] : [25, 25, 25, 140];
+        }),
+        // stripe out tiles that are cdn missing: The file WAS part of the build, but it is old and no longer exists on the CDN.
+        // Blizzard purge old build data from the CDN occasionally. 
+        cdnMissing: createPattern((x, y) => {
+            const stripe = (x + y) % 4 < 2;
+            return stripe ? [200, 140, 30, 180] : [80, 60, 15, 100];
+        }),
+    };
+    return _placeholderTextures;
+}
+
 export class TileLayerImpl implements TileLayer {
     public readonly type = 'tile' as const;
     public readonly id: string;
@@ -40,6 +81,9 @@ export class TileLayerImpl implements TileLayer {
     private residentHashes: string[] = []; // Track hashes we marked as resident
     // Precomputed LOD data: level -> hash -> coords[]
     private readonly lodCache: Map<number, Map<string, string[]>>;
+    // Missing tile coords (LOD0) for placeholder rendering
+    private readonly buildMissingCoords: ReadonlySet<string>;
+    private readonly cdnMissingCoords: ReadonlySet<string>;
 
     public composition: MinimapComposition;
 
@@ -55,6 +99,21 @@ export class TileLayerImpl implements TileLayer {
         this.monochrome = options.monochrome ?? false;
         this.debugSkipLODs = new Set(options.debugSkipLODs ?? []);
 
+        // Build-missing: coords from composition's missing list
+        this.buildMissingCoords = options.composition.missingTiles;
+
+        // CDN-missing: find coords whose hash is in the cdnMissing set
+        const cdnMissingSet = options.cdnMissing;
+        const cdnCoords = new Set<string>();
+        if (cdnMissingSet && cdnMissingSet.size > 0) {
+            for (const [coord, hash] of options.composition.coordToHash) {
+                if (cdnMissingSet.has(hash)) {
+                    cdnCoords.add(coord);
+                }
+            }
+        }
+        this.cdnMissingCoords = cdnCoords;
+
         // Precompute LOD1-6 hashes from LOD0 data
         this.lodCache = this.buildLodCache(options.cdnMissing ?? null);
         this.markResidentTiles();
@@ -63,10 +122,11 @@ export class TileLayerImpl implements TileLayer {
     private buildLodCache(cdnMissing: ReadonlySet<string> | null): Map<number, Map<string, string[]>> {
         const cache = new Map<number, Map<string, string[]>>();
 
-        // LOD0 from composition directly
+        // LOD0 from composition directly (skip cdn_missing tiles)
         const lod0 = this.composition.getLOD0Data();
         const lod0Map = new Map<string, string[]>();
         for (const [hash, coords] of lod0) {
+            if (cdnMissing?.has(hash)) continue;
             lod0Map.set(hash, coords);
         }
         cache.set(0, lod0Map);
@@ -141,6 +201,12 @@ export class TileLayerImpl implements TileLayer {
             this.tileStreamer.processFrameRequirements(allTileRequests);
         }
 
+        if (this.buildMissingCoords.size > 0 || this.cdnMissingCoords.size > 0) {
+            const placeholders = getPlaceholderTextures(context.gl);
+            this.queueMissingPlaceholders(renderQueue, bounds, this.buildMissingCoords, placeholders.buildMissing);
+            this.queueMissingPlaceholders(renderQueue, bounds, this.cdnMissingCoords, placeholders.cdnMissing);
+        }
+
         // Now render ALL loaded tiles in the correct order (high LOD to low LOD)
         // This ensures larger tiles are drawn first, then progressively smaller ones on top
         for (const tileRequest of allTileRequests) {
@@ -158,6 +224,30 @@ export class TileLayerImpl implements TileLayer {
                     monochrome: this.monochrome,
                 };
                 renderQueue.push(command);
+            }
+        }
+    }
+
+    private queueMissingPlaceholders(
+        renderQueue: RenderQueue,
+        bounds: ViewportBounds,
+        coords: ReadonlySet<string>,
+        texture: WebGLTexture
+    ): void {
+        for (const coord of coords) {
+            const [x, y] = coord.split(',').map(Number) as [number, number];
+            if (x !== undefined && y !== undefined && this.isTileInBounds(x, y, 0, bounds)) {
+                renderQueue.push({
+                    type: 'tile',
+                    layerId: this.id,
+                    zIndex: this.zIndex,
+                    opacity: this.opacity,
+                    texture,
+                    worldX: x,
+                    worldY: y,
+                    lodLevel: 0,
+                    monochrome: false,
+                });
             }
         }
     }

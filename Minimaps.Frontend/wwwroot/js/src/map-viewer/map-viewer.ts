@@ -535,6 +535,7 @@ export class MapViewer {
             canvasSize,
             deltaTime,
             lodBias: this.renderer.lodBias, // todo: move, user config?
+            gl: this.canvas.getContext('webgl2')!,
         };
 
         this.renderQueue.clear();
