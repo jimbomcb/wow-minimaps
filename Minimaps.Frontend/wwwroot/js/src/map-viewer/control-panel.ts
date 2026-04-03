@@ -5,6 +5,7 @@ import { isTileLayer } from './layers/layers.js';
 import { BuildVersion } from './build-version.js';
 import { LayerType } from './backend-types.js';
 import type { AreaIdDataDto } from './backend-types.js';
+import { KnownBuilds } from './known-builds.js';
 
 interface AreaNode {
     id: number;
@@ -970,25 +971,48 @@ export class ControlPanel {
     private renderLayersTree(): void {
         this.layersTree.replaceChildren();
 
-        // Base layer toggle (minimap / maptexture)
+        // Base layer toggle
         const availableBaseLayers = this.getAvailableBaseLayers();
-        if (availableBaseLayers.length > 1) {
-            const baseToggle = document.createElement('div');
-            baseToggle.className = 'base-layer-toggle';
+        const baseToggle = document.createElement('div');
+        baseToggle.className = 'base-layer-toggle';
 
-            const label = document.createElement('span');
-            label.className = 'base-layer-label';
-            label.textContent = 'Base:';
-            baseToggle.appendChild(label);
+        const label = document.createElement('span');
+        label.className = 'base-layer-label';
+        label.textContent = 'Base:';
+        baseToggle.appendChild(label);
 
-            for (const lt of availableBaseLayers) {
-                const btn = document.createElement('button');
-                btn.className = 'base-layer-btn';
-                const name = lt === LayerType.Minimap ? 'Minimap' : 'MapTexture';
-                const incomplete = this.isLayerCdnIncomplete(lt);
-                btn.innerHTML = incomplete
-                    ? `${name} <span class="layer-partial" title="This partial layer is missing tiles, this is usually historical builds for which only partial data is available.">!</span>`
-                    : name;
+        const btnGroup = document.createElement('div');
+        btnGroup.className = 'base-layer-group';
+
+        // TODO: Decide on icons
+        const icons: Record<number, string> = {
+            [LayerType.Minimap]: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="1"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="12" y1="3" x2="12" y2="21"/></svg>',
+            [LayerType.MapTexture]: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="1"/><polyline points="3,17 8,11 13,15 17,10 21,14"/></svg>',
+        };
+
+        for (const lt of [LayerType.Minimap, LayerType.MapTexture]) {
+            const btn = document.createElement('button');
+            btn.className = 'base-layer-btn';
+            const name = lt === LayerType.Minimap ? 'Minimap' : 'MapTexture';
+            const available = availableBaseLayers.includes(lt);
+            const incomplete = available && this.isLayerCdnIncomplete(lt);
+
+            btn.innerHTML = `${icons[lt]} ${name}`;
+            if (incomplete) {
+                const badge = document.createElement('span');
+                badge.className = 'layer-partial';
+                badge.title = 'Some tiles could not be retrieved from CDN and may appear in future scans. This usually only applies to historical data where CDN coverage is spotty.';
+                badge.textContent = '!';
+                btn.appendChild(badge);
+            }
+
+            if (!available) {
+                btn.classList.add('unavailable');
+                btn.title = `${name} layer not present in this build`;
+                // I assume legion is the threshold for maptextures given their focus on LODing for that release
+                if (lt === LayerType.MapTexture && this.currentVersion !== 'latest' && this.currentVersion.isLessThan(KnownBuilds.MapTextureIntroduced))
+                    btn.title += `\nMapTextures are normally only present on large maps modified from Legion onwards (7.0)`;
+            } else {
                 const tileLayer = this.layerManager.getLayer(`base-${LayerType[lt]}`);
                 if (tileLayer?.visible) {
                     btn.classList.add('active');
@@ -996,11 +1020,13 @@ export class ControlPanel {
                 btn.addEventListener('click', () => {
                     this.onBaseLayerChange(lt);
                 });
-                baseToggle.appendChild(btn);
             }
 
-            this.layersTree.appendChild(baseToggle);
+            btnGroup.appendChild(btn);
         }
+
+        baseToggle.appendChild(btnGroup);
+        this.layersTree.appendChild(baseToggle);
 
         if (this.currentLayers.length === 0) {
             const empty = document.createElement('div');

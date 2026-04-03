@@ -674,3 +674,73 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* Base layer toggle */
+.base-layer-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.base-layer-label {
+    font-size: 12px;
+    color: #8a7a66;
+    flex-shrink: 0;
+}
+
+.base-layer-group {
+    display: flex;
+    flex: 1;
+}
+
+.base-layer-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    color: #e8d4b8;
+    background: #2a2018;
+    border: 1px solid #5c4a36;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.base-layer-btn:first-child {
+    border-radius: 3px 0 0 3px;
+}
+
+.base-layer-btn:last-child {
+    border-radius: 0 3px 3px 0;
+    border-left: none;
+}
+
+.base-layer-btn:hover:not(.unavailable) {
+    background: #3d3228;
+}
+
+.base-layer-btn.active {
+    background: #5c4a36;
+    color: #fff;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.base-layer-btn.unavailable {
+    color: #5c4a36;
+    cursor: default;
+    background: #1a1410;
+}
+
+.base-layer-btn svg {
+    flex-shrink: 0;
+}
+
+.base-layer-btn .layer-partial {
+    color: #d4a020;
+    font-weight: bold;
+    margin-left: 2px;
+}
