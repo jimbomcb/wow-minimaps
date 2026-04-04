@@ -294,7 +294,7 @@ export class Renderer {
             precision highp float;
 
             in vec2 v_texCoord;
-            uniform highp usampler2D u_texture; // 5 bit bitmmask
+            uniform highp usampler2D u_texture; // R8UI: 5 bit bitmask per chunk
             uniform float u_opacity;
             uniform float u_chunkPixelSize;
 
@@ -305,9 +305,7 @@ export class Renderer {
                 vec2 chunkUV = fract(v_texCoord * 16.0);
 
                 uint data = texelFetch(u_texture, ivec2(chunkCoord), 0).r;
-                if ((data & 1u) == 0u) { // not an impass chunk pixel
-                    discard;
-                }
+                if ((data & 1u) == 0u) discard; // not an impass pixel
 
                 float borderWidth = 2.0 / max(u_chunkPixelSize, 1.0);
 
@@ -320,8 +318,9 @@ export class Renderer {
                 // base hazard stripes
                 float stripe = sin((chunkUV.x + chunkUV.y) * 3.14159 * 6.0);
                 float stripeMask = step(0.3, stripe) * 0.55;
+                float stripeFade = smoothstep(10.0, 20.0, u_chunkPixelSize);
                 vec3 stickyColor = vec3(0.9, 0.3, 0.2);
-                fragColor = vec4(stickyColor, stripeMask * u_opacity);
+                fragColor = vec4(stickyColor, stripeMask * u_opacity * 0.3 * stripeFade);
 
                 // edge border (all sticky, non-sticky borders drawn next)
                 if (minDist < borderWidth) {
@@ -384,9 +383,7 @@ export class Renderer {
                 vec2 texelCoord = (chunkCoord + 0.5) / 16.0;
                 float mask = texture(u_texture, texelCoord).r;
 
-                if (mask < 0.5) {
-                    discard;
-                }
+                if (mask < 0.5) discard;
 
                 fragColor = vec4(u_color, 0.35 * u_opacity);
             }
