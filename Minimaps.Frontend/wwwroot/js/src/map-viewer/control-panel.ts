@@ -1147,10 +1147,12 @@ export class ControlPanel {
 
         // Determine which area IDs actually have chunks on this map
         const areasWithChunks = new Set<number>();
+        let hasUnassigned = false;
         if (areaData.tiles) {
             for (const areaIds of Object.values(areaData.tiles)) {
                 for (const id of areaIds) {
-                    if (id !== 0) areasWithChunks.add(id);
+                    if (id === 0) { hasUnassigned = true; }
+                    else { areasWithChunks.add(id); }
                 }
             }
         }
@@ -1208,6 +1210,17 @@ export class ControlPanel {
             }
         }
 
+        // Inject "Unassigned" as a synthetic node in the current map's continent group
+        if (hasUnassigned) {
+            const unassignedNode: AreaNode = { id: 0, name: 'Unassigned', internalName: 'AreaId 0', continentId: this.currentMapId, hasChunks: true, children: [] };
+            const group = continentGroups.get(this.currentMapId);
+            if (group) {
+                group.unshift(unassignedNode);
+            } else {
+                continentGroups.set(this.currentMapId, [unassignedNode]);
+            }
+        }
+
         if (this.zonesTreeMode) {
             this.renderZonesGrouped(continentGroups, (groupRoots) => this.renderZonesTree(groupRoots));
         } else {
@@ -1243,7 +1256,9 @@ export class ControlPanel {
             row.classList.add('zone-ref-only');
             row.title = `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}\nThis AreaID is not used directly, but it is the parent of an AreaID that is.`
         } else {
-            row.title = `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`;
+            row.title = node.id === 0
+                ? 'No assigned AreaID. Shows as "Unknown" in-game. Dying here teleports you to the default map graveyard.'
+                : `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`;
             row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
             row.addEventListener('mouseleave', () => this.onZoneHover(null));
             row.addEventListener('click', (e) => {
