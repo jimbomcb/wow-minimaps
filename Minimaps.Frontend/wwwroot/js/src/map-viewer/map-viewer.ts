@@ -466,12 +466,6 @@ export class MapViewer {
 
         this.areaHighlightLayer.highlightArea(areaId);
         this.scheduleRender();
-
-        // Brief flash then clear
-        setTimeout(() => {
-            this.areaHighlightLayer?.clearHighlight();
-            this.scheduleRender();
-        }, 1500);
     }
 
     private updateURL(): void {
