@@ -1257,7 +1257,7 @@ export class ControlPanel {
             row.title = `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}\nThis AreaID is not used directly, but it is the parent of an AreaID that is.`
         } else {
             row.title = node.id === 0
-                ? 'No assigned AreaID. Shows as "Unknown" in-game. Dying here teleports you to the default map graveyard.'
+                ? 'No assigned AreaID. Shows as "Unknown" in-game. Dying here teleports you to the default faction graveyard (Crossroads/Sentinel Hill).'
                 : `${node.name}, Internal Name: ${node.internalName}, AreaID: ${node.id}`;
             row.addEventListener('mouseenter', () => this.onZoneHover(node.id));
             row.addEventListener('mouseleave', () => this.onZoneHover(null));
