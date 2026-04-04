@@ -294,7 +294,7 @@ export class Renderer {
             precision highp float;
 
             in vec2 v_texCoord;
-            uniform sampler2D u_texture; // 16x16 R8 texture, 255 = impassable
+            uniform highp usampler2D u_texture; // 5 bit bitmmask
             uniform float u_opacity;
             uniform float u_chunkPixelSize;
 
@@ -304,30 +304,36 @@ export class Renderer {
                 vec2 chunkCoord = floor(v_texCoord * 16.0);
                 vec2 chunkUV = fract(v_texCoord * 16.0);
 
-                vec2 texelCoord = (chunkCoord + 0.5) / 16.0;
-                float impass = texture(u_texture, texelCoord).r;
-
-                if (impass < 0.5) {
+                uint data = texelFetch(u_texture, ivec2(chunkCoord), 0).r;
+                if ((data & 1u) == 0u) { // not an impass chunk pixel
                     discard;
                 }
 
-                // border in chunk-UV space
                 float borderWidth = 2.0 / max(u_chunkPixelSize, 1.0);
-                float bx = min(chunkUV.x, 1.0 - chunkUV.x);
-                float by = min(chunkUV.y, 1.0 - chunkUV.y);
-                bool isBorder = min(bx, by) < borderWidth;
 
-                // hazard stripes fill
+                float distRight = 1.0 - chunkUV.x;
+                float distBottom = 1.0 - chunkUV.y;
+                float distLeft = chunkUV.x;
+                float distTop = chunkUV.y;
+                float minDist = min(min(distLeft, distRight), min(distTop, distBottom));
+
+                // base hazard stripes
                 float stripe = sin((chunkUV.x + chunkUV.y) * 3.14159 * 6.0);
                 float stripeMask = step(0.3, stripe) * 0.55;
+                vec3 stickyColor = vec3(0.9, 0.3, 0.2);
+                fragColor = vec4(stickyColor, stripeMask * u_opacity);
 
-                vec3 color = vec3(0.9, 0.3, 0.2);
-
-                if (isBorder) {
-                    fragColor = vec4(color, 0.85 * u_opacity);
-                } else {
-                    fragColor = vec4(color, stripeMask * u_opacity);
+                // edge border (all sticky, non-sticky borders drawn next)
+                if (minDist < borderWidth) {
+                    fragColor = vec4(stickyColor, 0.85 * u_opacity);
                 }
+
+                // yellow edges bordering non-impass (normal collision wall, not going to trap you...)
+                int shared = int(data >> 1u); // Shift away impass bit & leave edge bitmask
+                if ((shared & 1) == 0 && distRight  < borderWidth) { fragColor = vec4(1.0, 0.85, 0.0, 0.9 * u_opacity); }
+                if ((shared & 2) == 0 && distBottom < borderWidth) { fragColor = vec4(1.0, 0.85, 0.0, 0.9 * u_opacity); }
+                if ((shared & 4) == 0 && distLeft   < borderWidth) { fragColor = vec4(1.0, 0.85, 0.0, 0.9 * u_opacity); }
+                if ((shared & 8) == 0 && distTop    < borderWidth) { fragColor = vec4(1.0, 0.85, 0.0, 0.9 * u_opacity); }
             }
         `
         );
